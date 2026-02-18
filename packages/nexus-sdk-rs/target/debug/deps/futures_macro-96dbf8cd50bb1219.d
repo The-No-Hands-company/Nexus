@@ -1,9 +1,0 @@
-/run/media/zajferx/Data/dev/The-No-hands-Company/projects/Active/discordkiller/packages/nexus-sdk-rs/target/debug/deps/futures_macro-96dbf8cd50bb1219.d: /home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-macro-0.3.32/src/lib.rs /home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-macro-0.3.32/src/executor.rs /home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-macro-0.3.32/src/join.rs /home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-macro-0.3.32/src/select.rs /home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-macro-0.3.32/src/stream_select.rs
-
-/run/media/zajferx/Data/dev/The-No-hands-Company/projects/Active/discordkiller/packages/nexus-sdk-rs/target/debug/deps/libfutures_macro-96dbf8cd50bb1219.so: /home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-macro-0.3.32/src/lib.rs /home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-macro-0.3.32/src/executor.rs /home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-macro-0.3.32/src/join.rs /home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-macro-0.3.32/src/select.rs /home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-macro-0.3.32/src/stream_select.rs
-
-/home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-macro-0.3.32/src/lib.rs:
-/home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-macro-0.3.32/src/executor.rs:
-/home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-macro-0.3.32/src/join.rs:
-/home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-macro-0.3.32/src/select.rs:
-/home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/futures-macro-0.3.32/src/stream_select.rs:
