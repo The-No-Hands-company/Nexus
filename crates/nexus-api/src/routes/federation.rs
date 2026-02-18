@@ -68,17 +68,9 @@ pub fn federation_router() -> Router<Arc<AppState>> {
 ///
 /// Returns this server's public signing key document. Remote servers fetch
 /// this once and cache it to verify future request signatures.
-async fn server_key_document(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
-    // TODO: load active key from DB and build the signed document.
-    // For now return a stub so cargo check passes.
-    let server_name =
-        std::env::var("NEXUS_SERVER_NAME").unwrap_or_else(|_| "localhost".to_owned());
-    let response = json!({
-        "server_name": server_name,
-        "verify_keys": {},
-        "valid_until_ts": chrono::Utc::now().timestamp_millis() + 86_400_000,
-    });
-    (StatusCode::OK, Json(response))
+async fn server_key_document(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let doc = state.federation_key.to_key_document(&state.server_name);
+    (StatusCode::OK, Json(doc))
 }
 
 // ─── Well-known ───────────────────────────────────────────────────────────────

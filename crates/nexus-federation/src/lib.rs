@@ -35,11 +35,13 @@
 pub mod client;
 pub mod discovery;
 pub mod error;
+pub mod key_manager;
 pub mod keys;
 pub mod matrix_bridge;
 pub mod signatures;
 pub mod types;
 
 pub use error::FederationError;
+pub use key_manager::KeyManager;
 pub use keys::ServerKeyPair;
 pub use types::{FederationEvent, FederationTransaction, ServerInfo};

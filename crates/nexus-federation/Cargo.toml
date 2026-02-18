@@ -9,6 +9,9 @@ description = "Federation layer for Nexus — Matrix-compatible server-to-server
 nexus-common = { workspace = true }
 nexus-db     = { workspace = true }
 
+# Database (for key manager)
+sqlx = { workspace = true }
+
 # Async runtime
 tokio    = { workspace = true }
 

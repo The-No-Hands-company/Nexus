@@ -29,6 +29,8 @@ pub fn init() -> Result<&'static AppConfig, config::ConfigError> {
         .set_default("server.port", 8080)?
         .set_default("server.gateway_port", 8081)?
         .set_default("server.voice_port", 8082)?
+        .set_default("server.federation_port", 8448)?
+        .set_default("server.name", "localhost")?
         .set_default("database.max_connections", 20)?
         .set_default("database.min_connections", 5)?
         .set_default("auth.access_token_ttl_secs", 900)? // 15 min
@@ -68,10 +70,15 @@ pub struct AppConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct ServerConfig {
+    /// Public server name used for federation (e.g. "nexus.example.com").
+    /// Maps to the `NEXUS__SERVER__NAME` env var or `server.name` in config.toml.
+    pub name: String,
     pub host: String,
     pub port: u16,
     pub gateway_port: u16,
     pub voice_port: u16,
+    /// Port used for server-to-server federation (default 8448).
+    pub federation_port: u16,
 }
 
 #[derive(Debug, Deserialize, Clone)]
