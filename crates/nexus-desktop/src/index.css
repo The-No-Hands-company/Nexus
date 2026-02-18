@@ -2,11 +2,34 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Default theme (Nexus Dark) ─────────────────────────────────────────────── */
+:root {
+  --color-bg-900: #0d0f13;
+  --color-bg-800: #161a22;
+  --color-bg-700: #1e2330;
+  --color-bg-600: #262d3d;
+  --color-bg-500: #2f3850;
+  --color-accent-500: #7c6af7;
+  --color-accent-600: #6b59e8;
+  --color-accent-400: #9d8fff;
+  --color-surface-900: #111318;
+  --color-surface-800: #191d26;
+  --color-surface-700: #222736;
+  --color-muted: #8892a4;
+  --color-online: #3ba55c;
+  --color-idle: #faa81a;
+  --color-dnd: #ed4245;
+  --color-offline: #747f8d;
+  --color-fg: #e2e8f0;
+  --scrollbar-thumb: #2f3850;
+  --scrollbar-thumb-hover: #3d4a63;
+}
+
 @layer base {
   html, body, #root {
     @apply h-full w-full overflow-hidden;
-    background-color: #0d0f13;
-    color: #e2e8f0;
+    background-color: var(--color-bg-900);
+    color: var(--color-fg);
     font-family: "Inter", system-ui, sans-serif;
   }
 
@@ -19,10 +42,10 @@
   }
   ::-webkit-scrollbar-thumb {
     @apply rounded-full;
-    background: #2f3850;
+    background: var(--scrollbar-thumb);
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: #3d4a63;
+    background: var(--scrollbar-thumb-hover);
   }
 
   /* Disable text selection on UI chrome */

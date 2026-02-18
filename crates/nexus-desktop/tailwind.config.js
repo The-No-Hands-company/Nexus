@@ -7,29 +7,30 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Discord-inspired dark palette, but distinctly "Nexus"
+        // All colors are driven by CSS custom properties so themes can override them at runtime.
         bg: {
-          900: "#0d0f13",
-          800: "#161a22",
-          700: "#1e2330",
-          600: "#262d3d",
-          500: "#2f3850",
+          900: "var(--color-bg-900)",
+          800: "var(--color-bg-800)",
+          700: "var(--color-bg-700)",
+          600: "var(--color-bg-600)",
+          500: "var(--color-bg-500)",
         },
         accent: {
-          500: "#7c6af7",
-          600: "#6b59e8",
-          400: "#9d8fff",
+          500: "var(--color-accent-500)",
+          600: "var(--color-accent-600)",
+          400: "var(--color-accent-400)",
         },
         surface: {
-          900: "#111318",
-          800: "#191d26",
-          700: "#222736",
+          900: "var(--color-surface-900)",
+          800: "var(--color-surface-800)",
+          700: "var(--color-surface-700)",
         },
-        muted: "#8892a4",
-        online: "#3ba55c",
-        idle: "#faa81a",
-        dnd: "#ed4245",
-        offline: "#747f8d",
+        muted: "var(--color-muted)",
+        online: "var(--color-online)",
+        idle: "var(--color-idle)",
+        dnd: "var(--color-dnd)",
+        offline: "var(--color-offline)",
+        fg: "var(--color-fg)",
       },
       fontFamily: {
         sans: ["Inter", "system-ui", "sans-serif"],

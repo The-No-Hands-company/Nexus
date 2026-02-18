@@ -1,5 +1,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
+import type { PluginManifest } from "./plugins/types";
+import { DEFAULT_THEME_ID } from "./themes/themes";
 
 export interface Session {
   userId: string;
@@ -94,6 +96,17 @@ interface StoreState {
   sidebarCollapsed: boolean;
   setSidebarCollapsed: (v: boolean) => void;
 
+  // Theme
+  activeThemeId: string;
+  setActiveTheme: (id: string) => void;
+
+  // Plugins
+  plugins: PluginManifest[];
+  enabledPlugins: string[];
+  installPlugin: (manifest: PluginManifest) => void;
+  uninstallPlugin: (id: string) => void;
+  togglePlugin: (id: string) => void;
+
   // Actions
   logout: () => Promise<void>;
   loadServers: () => Promise<void>;
@@ -152,6 +165,47 @@ export const useStore = create<StoreState>((set, get) => ({
   setUpdateAvailable: (info) => set({ updateAvailable: info }),
   sidebarCollapsed: false,
   setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
+
+  // ─── Theme ────────────────────────────────────────────────────────────
+  activeThemeId: localStorage.getItem("nexus:theme") ?? DEFAULT_THEME_ID,
+  setActiveTheme: (id) => {
+    localStorage.setItem("nexus:theme", id);
+    set({ activeThemeId: id });
+  },
+
+  // ─── Plugins ──────────────────────────────────────────────────────────
+  plugins: (() => {
+    try {
+      return JSON.parse(localStorage.getItem("nexus:plugins") ?? "[]") as PluginManifest[];
+    } catch { return []; }
+  })(),
+  enabledPlugins: (() => {
+    try {
+      return JSON.parse(localStorage.getItem("nexus:enabled-plugins") ?? "[]") as string[];
+    } catch { return []; }
+  })(),
+  installPlugin: (manifest) =>
+    set((s) => {
+      const plugins = [...s.plugins.filter((p) => p.id !== manifest.id), manifest];
+      localStorage.setItem("nexus:plugins", JSON.stringify(plugins));
+      return { plugins };
+    }),
+  uninstallPlugin: (id) =>
+    set((s) => {
+      const plugins = s.plugins.filter((p) => p.id !== id);
+      const enabledPlugins = s.enabledPlugins.filter((i) => i !== id);
+      localStorage.setItem("nexus:plugins", JSON.stringify(plugins));
+      localStorage.setItem("nexus:enabled-plugins", JSON.stringify(enabledPlugins));
+      return { plugins, enabledPlugins };
+    }),
+  togglePlugin: (id) =>
+    set((s) => {
+      const enabledPlugins = s.enabledPlugins.includes(id)
+        ? s.enabledPlugins.filter((i) => i !== id)
+        : [...s.enabledPlugins, id];
+      localStorage.setItem("nexus:enabled-plugins", JSON.stringify(enabledPlugins));
+      return { enabledPlugins };
+    }),
 
   // ─── Actions ──────────────────────────────────────────────────────────
   logout: async () => {

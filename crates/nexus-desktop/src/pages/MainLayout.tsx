@@ -7,6 +7,7 @@ import ServerList from "../components/ServerList";
 import ChannelList from "../components/ChannelList";
 import ChatView from "../components/ChatView";
 import VoiceChannel from "../components/VoiceChannel";
+import SettingsPage from "./Settings";
 
 export default function MainLayout() {
   const { loadServers, activeServerId, loadChannels } = useStore();
@@ -40,6 +41,7 @@ export default function MainLayout() {
           <Route path="/" element={<div className="flex-1 flex items-center justify-center text-muted text-sm">Select a channel</div>} />
           <Route path="/channel/:channelId" element={<ChatView />} />
           <Route path="/voice/:channelId" element={<VoiceChannel />} />
+          <Route path="/settings" element={<SettingsPage />} />
         </Routes>
       </div>
     </div>

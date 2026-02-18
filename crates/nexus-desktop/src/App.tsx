@@ -6,6 +6,8 @@ import LoginPage from "./pages/Login";
 import MainLayout from "./pages/MainLayout";
 import OverlayPage from "./pages/Overlay";
 import UpdateBanner from "./components/UpdateBanner";
+import ThemeProvider from "./themes/ThemeProvider";
+import PluginLoader from "./plugins/PluginLoader";
 
 export default function App() {
   const { session, setUpdateAvailable } = useStore();
@@ -25,24 +27,33 @@ export default function App() {
 
   // Overlay window gets its own minimal route
   if (window.location.pathname.startsWith("/overlay")) {
-    return <OverlayPage />;
+    return (
+      <ThemeProvider>
+        <OverlayPage />
+      </ThemeProvider>
+    );
   }
 
   return (
-    <div className="flex flex-col h-full">
-      <UpdateBanner />
-      <div className="flex-1 overflow-hidden">
-        <Routes>
-          <Route
-            path="/login"
-            element={session ? <Navigate to="/" replace /> : <LoginPage />}
-          />
-          <Route
-            path="/*"
-            element={session ? <MainLayout /> : <Navigate to="/login" replace />}
-          />
-        </Routes>
+    <ThemeProvider>
+      {/* Background iframe sandboxes for enabled plugins */}
+      <PluginLoader />
+
+      <div className="flex flex-col h-full">
+        <UpdateBanner />
+        <div className="flex-1 overflow-hidden">
+          <Routes>
+            <Route
+              path="/login"
+              element={session ? <Navigate to="/" replace /> : <LoginPage />}
+            />
+            <Route
+              path="/*"
+              element={session ? <MainLayout /> : <Navigate to="/login" replace />}
+            />
+          </Routes>
+        </div>
       </div>
-    </div>
+    </ThemeProvider>
   );
 }
