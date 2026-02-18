@@ -83,7 +83,6 @@
       "endpoints": [
         "https://releases.nexus.chat/{{target}}/{{arch}}/{{current_version}}"
       ]
-    },
-    "store": {}
+    }
   }
 }
