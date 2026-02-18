@@ -1,0 +1,13 @@
+/run/media/zajferx/Data/dev/The-No-hands-Company/projects/Active/discordkiller/packages/nexus-sdk-rs/target/debug/deps/thiserror-50a52e8a379aa0cd.d: /home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/lib.rs /home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/aserror.rs /home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/display.rs /home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/provide.rs /home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/var.rs /home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/private.rs /run/media/zajferx/Data/dev/The-No-hands-Company/projects/Active/discordkiller/packages/nexus-sdk-rs/target/debug/build/thiserror-ac225267f9ff7815/out/private.rs
+
+/run/media/zajferx/Data/dev/The-No-hands-Company/projects/Active/discordkiller/packages/nexus-sdk-rs/target/debug/deps/libthiserror-50a52e8a379aa0cd.rmeta: /home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/lib.rs /home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/aserror.rs /home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/display.rs /home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/provide.rs /home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/var.rs /home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/private.rs /run/media/zajferx/Data/dev/The-No-hands-Company/projects/Active/discordkiller/packages/nexus-sdk-rs/target/debug/build/thiserror-ac225267f9ff7815/out/private.rs
+
+/home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/lib.rs:
+/home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/aserror.rs:
+/home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/display.rs:
+/home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/provide.rs:
+/home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/var.rs:
+/home/zajferx/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.18/src/private.rs:
+/run/media/zajferx/Data/dev/The-No-hands-Company/projects/Active/discordkiller/packages/nexus-sdk-rs/target/debug/build/thiserror-ac225267f9ff7815/out/private.rs:
+
+# env-dep:OUT_DIR=/run/media/zajferx/Data/dev/The-No-hands-Company/projects/Active/discordkiller/packages/nexus-sdk-rs/target/debug/build/thiserror-ac225267f9ff7815/out

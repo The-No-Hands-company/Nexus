@@ -1,0 +1,33 @@
+[workspace]
+
+[package]
+name = "nexus-sdk"
+version = "0.7.0"
+edition = "2021"
+description = "Rust client library for building bots on the Nexus platform"
+license = "MIT"
+repository = "https://github.com/The-No-hands-Company/nexus"
+keywords = ["nexus", "bot", "sdk", "websocket"]
+categories = ["network-programming", "api-bindings"]
+readme = "README.md"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.43", features = ["full"] }
+# HTTP client
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# WebSocket
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-native-roots"] }
+futures-util = "0.3"
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# Utilities
+thiserror = "2.0"
+tracing = "0.1"
+tokio-util = { version = "0.7", features = ["codec"] }
+async-trait = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1.43", features = ["full", "test-util"] }
+tracing-subscriber = "0.3"
