@@ -1,0 +1,43 @@
+# Dependencies
+/target/
+node_modules/
+
+# Environment (contains secrets)
+.env
+.env.local
+.env.production
+
+# IDE
+.idea/
+.vscode/settings.json
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Logs
+*.log
+
+# Docker data (if using local volumes)
+docker-data/
+
+# Coverage reports
+coverage/
+*.lcov
+
+# Tauri
+client/src-tauri/target/
+client/dist/
+
+# Mobile
+*.apk
+*.ipa

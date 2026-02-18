@@ -1,0 +1,102 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/nexus-common",
+    "crates/nexus-db",
+    "crates/nexus-api",
+    "crates/nexus-gateway",
+    "crates/nexus-voice",
+    "crates/nexus-server",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["The No-Hands Company"]
+license = "AGPL-3.0-or-later"
+repository = "https://github.com/The-No-hands-Company/nexus"
+description = "Privacy-first, community-owned communication platform"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.43", features = ["full"] }
+
+# Web framework
+axum = { version = "0.8", features = ["ws", "multipart", "macros"] }
+axum-extra = { version = "0.10", features = ["typed-header", "cookie"] }
+tower = { version = "0.5", features = ["full"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "compression-gzip", "limit", "timeout"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json"] }
+scylla = "0.15"
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+
+# Auth & Crypto
+argon2 = "0.5"
+jsonwebtoken = "9.3"
+rand = "0.9"
+uuid = { version = "1.11", features = ["v4", "v7", "serde"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Logging & Tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Config
+dotenvy = "0.15"
+config = "0.14"
+
+# Validation
+validator = { version = "0.19", features = ["derive"] }
+
+# WebSocket
+tokio-tungstenite = "0.26"
+futures-util = "0.3"
+
+# S3/Object storage
+aws-sdk-s3 = "1.65"
+aws-config = "1.5"
+
+# Search
+meilisearch-sdk = "0.27"
+
+# Snowflake IDs
+snowflaked = "1.0"
+
+# Password hashing
+password-hash = "0.5"
+
+# IP/Geo
+ipnetwork = "0.20"
+
+# Bitflags for permissions
+bitflags = "2.6"
+
+# Shared internal crates
+nexus-common = { path = "crates/nexus-common" }
+nexus-db = { path = "crates/nexus-db" }
+nexus-api = { path = "crates/nexus-api" }
+nexus-gateway = { path = "crates/nexus-gateway" }
+nexus-voice = { path = "crates/nexus-voice" }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[profile.dev]
+opt-level = 0
+debug = true

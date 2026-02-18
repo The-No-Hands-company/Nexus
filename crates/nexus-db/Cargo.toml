@@ -1,0 +1,20 @@
+[package]
+name = "nexus-db"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Database layer for Nexus — PostgreSQL, ScyllaDB, Redis"
+
+[dependencies]
+nexus-common = { workspace = true }
+sqlx = { workspace = true }
+scylla = { workspace = true }
+redis = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }

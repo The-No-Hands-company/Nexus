@@ -1,0 +1,103 @@
+# Nexus Development Stack
+# Spin up all dependencies with: docker compose up -d
+
+services:
+  # ============================================
+  # PostgreSQL — Relational data (users, servers, channels, roles)
+  # ============================================
+  postgres:
+    image: postgres:17-alpine
+    container_name: nexus-postgres
+    environment:
+      POSTGRES_DB: nexus
+      POSTGRES_USER: nexus
+      POSTGRES_PASSWORD: nexus_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexus"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ============================================
+  # Redis — Sessions, presence, rate limiting, pub/sub
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    container_name: nexus-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ============================================
+  # ScyllaDB — Messages (write-heavy, time-series)
+  # ============================================
+  scylla:
+    image: scylladb/scylla:6.2
+    container_name: nexus-scylla
+    ports:
+      - "9042:9042"
+    volumes:
+      - scylla_data:/var/lib/scylla
+    command: --smp 2 --memory 1G --overprovisioned 1
+    healthcheck:
+      test: ["CMD-SHELL", "nodetool status | grep -q UN"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  # ============================================
+  # MinIO — S3-compatible object storage (avatars, attachments)
+  # ============================================
+  minio:
+    image: minio/minio:latest
+    container_name: nexus-minio
+    environment:
+      MINIO_ROOT_USER: nexus
+      MINIO_ROOT_PASSWORD: nexus_dev_password
+    ports:
+      - "9000:9000"
+      - "9001:9001"  # MinIO Console
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ============================================
+  # MeiliSearch — Full-text search (messages, servers)
+  # ============================================
+  meilisearch:
+    image: getmeili/meilisearch:v1.12
+    container_name: nexus-meilisearch
+    environment:
+      MEILI_MASTER_KEY: nexus_dev_search_key
+      MEILI_ENV: development
+    ports:
+      - "7700:7700"
+    volumes:
+      - meilisearch_data:/meili_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:
+  scylla_data:
+  minio_data:
+  meilisearch_data:
