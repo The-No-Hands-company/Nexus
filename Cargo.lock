@@ -2675,6 +2675,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
+ "base64 0.22.1",
  "bitflags 2.11.0",
  "chrono",
  "config",
@@ -2684,6 +2685,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "sha2",
  "snowflaked",
  "sqlx",
  "thiserror 2.0.18",

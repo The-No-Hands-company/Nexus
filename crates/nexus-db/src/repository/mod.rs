@@ -3,6 +3,7 @@
 pub mod attachments;
 pub mod channels;
 pub mod emoji;
+pub mod keystore;
 pub mod members;
 pub mod messages;
 pub mod reactions;

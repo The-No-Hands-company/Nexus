@@ -78,6 +78,10 @@ snowflaked = "1.0"
 # Password hashing
 password-hash = "0.5"
 
+# Hashing utilities
+sha2 = "0.10"
+base64 = "0.22"
+
 # IP/Geo
 ipnetwork = "0.20"
 

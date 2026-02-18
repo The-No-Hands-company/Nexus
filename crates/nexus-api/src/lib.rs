@@ -47,7 +47,11 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::threads::router())
         .merge(routes::emoji::router())
         .merge(routes::search::router())
-        .merge(routes::presence::router());
+        .merge(routes::presence::router())
+        // v0.5 Encryption
+        .merge(routes::keys::router())
+        .merge(routes::e2ee::router())
+        .merge(routes::verification::router());
 
     Router::new()
         .nest("/api/v1", api_routes)
