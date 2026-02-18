@@ -28,6 +28,7 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
+use sqlx::Row as _;
 use tracing::{debug, info, warn};
 use std::sync::Arc;
 
@@ -101,6 +102,7 @@ async fn receive_transaction(
     Path(txn_id): Path<String>,
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
+    // ── 1. Authenticate ───────────────────────────────────────────────────────
     let origin = match extract_federation_origin(&headers) {
         Ok(o) => o,
         Err(e) => {
@@ -111,26 +113,218 @@ async fn receive_transaction(
 
     debug!("Received federation transaction {} from {}", txn_id, origin);
 
-    let pdu_count = body
+    // ── 2. Idempotency: skip already-processed transactions ───────────────────
+    match sqlx::query(
+        "SELECT 1 FROM federation_txn_log \
+         WHERE txn_id = $1 AND origin_server = $2 \
+         LIMIT 1",
+    )
+    .bind(&txn_id)
+    .bind(&origin)
+    .fetch_optional(&state.db.pg)
+    .await
+    {
+        Ok(Some(_)) => {
+            debug!("Txn {} from {} already processed — replying idempotently", txn_id, origin);
+            return (StatusCode::OK, Json(json!({}))).into_response();
+        }
+        Ok(None) => {}
+        Err(e) => warn!("Failed to query txn_log for idempotency: {}", e),
+    }
+
+    // ── 3. Upsert origin server in federated_servers ──────────────────────────
+    if let Err(e) = sqlx::query(
+        "INSERT INTO federated_servers (server_name, last_seen_at) \
+         VALUES ($1, NOW()) \
+         ON CONFLICT (server_name) DO UPDATE SET last_seen_at = NOW()",
+    )
+    .bind(&origin)
+    .execute(&state.db.pg)
+    .await
+    {
+        warn!("Failed to upsert federated server {}: {}", origin, e);
+    }
+
+    // ── 4. Load verify keys for the origin server ─────────────────────────────
+    let verify_keys = load_server_verify_keys(&state.db.pg, &origin).await;
+
+    // ── 5. Process each PDU ───────────────────────────────────────────────────
+    let pdus = body
         .get("pdus")
         .and_then(Value::as_array)
-        .map(Vec::len)
-        .unwrap_or(0);
+        .cloned()
+        .unwrap_or_default();
     let edu_count = body
         .get("edus")
         .and_then(Value::as_array)
-        .map(Vec::len)
+        .map(|a| a.len() as i32)
         .unwrap_or(0);
+    let pdu_count = pdus.len() as i32;
+    let mut accepted = 0i32;
+
+    for pdu in &pdus {
+        match process_pdu(&state.db.pg, &origin, &txn_id, &verify_keys, pdu).await {
+            Ok(true) => accepted += 1,
+            Ok(false) => debug!("PDU from {} was a duplicate (already stored)", origin),
+            Err(e) => warn!("Rejected PDU from {}: {}", origin, e),
+        }
+    }
 
     info!(
-        "Federation txn {} from {}: {} PDUs, {} EDUs",
-        txn_id, origin, pdu_count, edu_count
+        "Federation txn {} from {}: {}/{} PDUs accepted, {} EDUs",
+        txn_id, origin, accepted, pdu_count, edu_count
     );
 
-    // TODO: verify each PDU's signature and persist to federated_events.
-    // For now, acknowledge receipt.
+    // ── 6. Log the transaction (idempotent guard for future retries) ──────────
+    if let Err(e) = sqlx::query(
+        "INSERT INTO federation_txn_log \
+         (txn_id, origin_server, pdu_count, edu_count) \
+         VALUES ($1, $2, $3, $4) \
+         ON CONFLICT (txn_id, origin_server) DO NOTHING",
+    )
+    .bind(&txn_id)
+    .bind(&origin)
+    .bind(pdu_count)
+    .bind(edu_count)
+    .execute(&state.db.pg)
+    .await
+    {
+        warn!("Failed to write federation txn log: {}", e);
+    }
 
     (StatusCode::OK, Json(json!({}))).into_response()
+}
+
+// ─── PDU helpers ─────────────────────────────────────────────────────────────
+
+/// Process a single incoming PDU:
+///
+/// 1. Verify the Ed25519 signature if verify keys are available.
+/// 2. Persist to `federated_events` (idempotent: ON CONFLICT event_id DO NOTHING).
+///
+/// Returns `Ok(true)` if newly persisted, `Ok(false)` if duplicate, `Err` if rejected.
+async fn process_pdu(
+    pool: &sqlx::PgPool,
+    origin: &str,
+    txn_id: &str,
+    verify_keys: &serde_json::Map<String, Value>,
+    pdu: &Value,
+) -> Result<bool, anyhow::Error> {
+    let event_id = pdu
+        .get("event_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("PDU missing event_id"))?;
+    let room_id = pdu
+        .get("room_id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("PDU missing room_id"))?;
+    let event_type = pdu.get("type").and_then(Value::as_str).unwrap_or("nexus.unknown");
+    let sender = pdu.get("sender").and_then(Value::as_str).unwrap_or(origin);
+    let origin_server_ts = pdu.get("origin_server_ts").and_then(Value::as_i64).unwrap_or(0);
+    let content = pdu
+        .get("content")
+        .cloned()
+        .unwrap_or_else(|| Value::Object(Default::default()));
+    let signatures = pdu
+        .get("signatures")
+        .cloned()
+        .unwrap_or_else(|| Value::Object(Default::default()));
+
+    // Verify signature when we have the origin's public key(s).
+    if !verify_keys.is_empty() {
+        verify_pdu_signature(pdu, origin, verify_keys)?;
+    } else {
+        debug!(
+            "No cached verify keys for {} — persisting PDU {} without sig check",
+            origin, event_id
+        );
+    }
+
+    // Persist (ON CONFLICT handles duplicate event IDs gracefully).
+    let result = sqlx::query(
+        "INSERT INTO federated_events \
+         (event_id, room_id, event_type, sender, origin_server, \
+          origin_server_ts, content, signatures, txn_id) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
+         ON CONFLICT (event_id) DO NOTHING",
+    )
+    .bind(event_id)
+    .bind(room_id)
+    .bind(event_type)
+    .bind(sender)
+    .bind(origin)
+    .bind(origin_server_ts)
+    .bind(&content)
+    .bind(&signatures)
+    .bind(txn_id)
+    .execute(pool)
+    .await?;
+
+    // rows_affected == 0 means the event was already stored (conflict).
+    Ok(result.rows_affected() > 0)
+}
+
+/// Verify the Ed25519 signature on a PDU against the origin server's verify keys.
+fn verify_pdu_signature(
+    pdu: &Value,
+    origin: &str,
+    verify_keys: &serde_json::Map<String, Value>,
+) -> Result<(), anyhow::Error> {
+    let sig_for_origin = pdu
+        .get("signatures")
+        .and_then(|s| s.get(origin))
+        .and_then(Value::as_object)
+        .ok_or_else(|| anyhow::anyhow!("PDU has no signature for origin {}", origin))?;
+
+    // Pick the first ed25519 key/sig pair.
+    let (key_id, sig_b64) = sig_for_origin
+        .iter()
+        .find(|(k, _)| k.starts_with("ed25519:"))
+        .map(|(k, v)| (k.as_str(), v.as_str().unwrap_or("")))
+        .ok_or_else(|| anyhow::anyhow!("No ed25519 signature in PDU from {}", origin))?;
+
+    let pubkey_b64 = verify_keys
+        .get(key_id)
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("Unknown key {} for {}", key_id, origin))?;
+
+    // Canonical JSON of PDU without `signatures` / `unsigned` fields.
+    let mut pdu_for_signing = pdu.clone();
+    if let Value::Object(ref mut m) = pdu_for_signing {
+        m.remove("signatures");
+        m.remove("unsigned");
+    }
+    let canonical = nexus_federation::signatures::canonical_json(&pdu_for_signing)
+        .map_err(|e| anyhow::anyhow!("canonical_json error: {}", e))?;
+
+    nexus_federation::keys::verify_signature(pubkey_b64, sig_b64, canonical.as_bytes())
+        .map_err(|_| anyhow::anyhow!("Signature check failed for {} (key {})", origin, key_id))?;
+
+    Ok(())
+}
+
+/// Load the cached verify keys (`key_id → base64_pubkey`) for a remote server
+/// from the `federated_servers` table.
+async fn load_server_verify_keys(
+    pool: &sqlx::PgPool,
+    server_name: &str,
+) -> serde_json::Map<String, Value> {
+    let row = sqlx::query(
+        "SELECT verify_keys FROM federated_servers WHERE server_name = $1",
+    )
+    .bind(server_name)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+
+    if let Some(row) = row {
+        let val: Value = row.try_get("verify_keys").unwrap_or_default();
+        if let Value::Object(m) = val {
+            return m;
+        }
+    }
+    Default::default()
 }
 
 // ─── Event fetching ───────────────────────────────────────────────────────────
