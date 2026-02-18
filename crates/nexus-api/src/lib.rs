@@ -10,6 +10,7 @@ pub mod routes;
 use axum::Router;
 use nexus_common::gateway_event::GatewayEvent;
 use nexus_db::Database;
+use nexus_voice::state::VoiceStateManager;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
@@ -21,6 +22,9 @@ pub struct AppState {
     /// API mutations (message create, channel update, etc.) use this
     /// to notify all connected clients in real-time.
     pub gateway_tx: broadcast::Sender<GatewayEvent>,
+    /// Voice state manager — shared with the voice server for REST-based
+    /// voice operations (state queries, moderation actions).
+    pub voice_state: VoiceStateManager,
 }
 
 /// Build the complete API router with all routes and middleware.
@@ -32,6 +36,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::channels::router())
         .merge(routes::messages::router())
         .merge(routes::dms::router())
+        .merge(routes::voice::router())
         .merge(routes::health::router());
 
     Router::new()

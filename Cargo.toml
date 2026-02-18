@@ -84,6 +84,12 @@ ipnetwork = "0.20"
 # Bitflags for permissions
 bitflags = "2.6"
 
+# WebRTC (Voice/Video SFU)
+str0m = "0.16"
+socket2 = "0.6"
+nnnoiseless = "0.5"
+systemstat = "0.2"
+
 # Shared internal crates
 nexus-common = { path = "crates/nexus-common" }
 nexus-db = { path = "crates/nexus-db" }

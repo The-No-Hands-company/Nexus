@@ -3,7 +3,7 @@
 //! Main binary that orchestrates all Nexus services:
 //! - REST API (HTTP)
 //! - WebSocket Gateway (real-time events)
-//! - Voice Server (WebRTC signaling)
+//! - Voice Server (WebRTC SFU + signaling)
 //!
 //! All services can run in a single process (simple deployment)
 //! or be split into separate processes (horizontal scaling).
@@ -12,6 +12,7 @@ use nexus_api::{build_router, AppState};
 use nexus_common::gateway_event::GatewayEvent;
 use nexus_db::Database;
 use nexus_gateway::GatewayState;
+use nexus_voice::VoiceServer;
 use std::net::SocketAddr;
 use tokio::sync::broadcast;
 
@@ -46,10 +47,17 @@ async fn main() -> anyhow::Result<()> {
     // through this channel, which the gateway then forwards to connected clients.
     let (gateway_tx, _) = broadcast::channel::<GatewayEvent>(10_000);
 
+    // === Voice Server ===
+    // WebRTC SFU for voice/video, with its own WebSocket for signaling.
+    let local_ip: std::net::IpAddr = config.server.host.parse()?;
+    let voice_server = VoiceServer::new(db.clone(), gateway_tx.clone(), local_ip);
+    let voice_state = voice_server.state.voice_state.clone();
+
     // === REST API Server ===
     let api_state = AppState {
         db: db.clone(),
         gateway_tx: gateway_tx.clone(),
+        voice_state: voice_state.clone(),
     };
     let api_router = build_router(api_state);
     let api_addr = SocketAddr::new(
@@ -65,8 +73,16 @@ async fn main() -> anyhow::Result<()> {
         config.server.gateway_port,
     );
 
+    // === Voice Signaling WebSocket ===
+    let voice_router = voice_server.build_router();
+    let voice_addr = SocketAddr::new(
+        config.server.host.parse()?,
+        config.server.voice_port,
+    );
+
     tracing::info!("📡 REST API listening on http://{api_addr}");
     tracing::info!("🔌 Gateway listening on ws://{gateway_addr}");
+    tracing::info!("🎙️  Voice server listening on ws://{voice_addr}");
 
     // Run all servers concurrently
     tokio::try_join!(
@@ -80,6 +96,12 @@ async fn main() -> anyhow::Result<()> {
         async {
             let listener = tokio::net::TcpListener::bind(gateway_addr).await?;
             axum::serve(listener, gateway_router).await?;
+            Ok::<_, anyhow::Error>(())
+        },
+        // Voice Signaling
+        async {
+            let listener = tokio::net::TcpListener::bind(voice_addr).await?;
+            axum::serve(listener, voice_router).await?;
             Ok::<_, anyhow::Error>(())
         },
     )?;

@@ -8,6 +8,7 @@ description = "REST API layer for Nexus"
 [dependencies]
 nexus-common = { workspace = true }
 nexus-db = { workspace = true }
+nexus-voice = { workspace = true }
 axum = { workspace = true }
 axum-extra = { workspace = true }
 tower = { workspace = true }

@@ -344,8 +344,46 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
                                 });
                             }
                         }
+                        GatewayMessage::VoiceStateUpdate {
+                            server_id: vs_server_id,
+                            channel_id: vs_channel_id,
+                            self_mute,
+                            self_deaf,
+                        } => {
+                            if let Some(uid) = user_id {
+                                // Relay voice state update through the broadcast channel.
+                                // The actual voice connection is managed by nexus-voice;
+                                // the gateway just broadcasts state changes to other clients.
+                                let server_uuid = vs_server_id
+                                    .as_ref()
+                                    .and_then(|s| s.parse::<uuid::Uuid>().ok());
+                                let channel_uuid = vs_channel_id
+                                    .as_ref()
+                                    .and_then(|c| c.parse::<uuid::Uuid>().ok());
+
+                                let _ = state.broadcast.send(GatewayEvent {
+                                    event_type: "VOICE_STATE_UPDATE".into(),
+                                    data: serde_json::json!({
+                                        "user_id": uid,
+                                        "server_id": vs_server_id,
+                                        "channel_id": vs_channel_id,
+                                        "self_mute": self_mute,
+                                        "self_deaf": self_deaf,
+                                    }),
+                                    server_id: server_uuid,
+                                    channel_id: channel_uuid,
+                                    user_id: Some(uid),
+                                });
+
+                                tracing::debug!(
+                                    user = %uid,
+                                    channel = ?vs_channel_id,
+                                    "Voice state update relayed"
+                                );
+                            }
+                        }
                         _ => {
-                            // Handle other opcodes as they're implemented
+                            // Unknown opcode — ignore
                         }
                     }
                 }

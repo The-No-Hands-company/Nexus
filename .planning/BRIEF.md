@@ -3,9 +3,11 @@
 ## Codename: `discordkiller` → Product Name: **Nexus**
 
 ## Vision
+
 A privacy-first, community-owned communication platform that carries all of Discord's strengths (servers, channels, voice/video, bots, rich UX) and none of its weaknesses (surveillance, mandatory ID, data harvesting, enshittification). Built for the 2026 exodus.
 
 ## Why Now
+
 - Discord's March 2026 "teen-by-default" age assurance rollout requiring government ID / facial estimation
 - 2025 data breach exposed ~70K users' IDs and selfies — trust is destroyed
 - Pre-IPO monetization pressure (Goldman Sachs / JP Morgan filing)
@@ -13,6 +15,7 @@ A privacy-first, community-owned communication platform that carries all of Disc
 - No single alternative has "won" — the window is wide open
 
 ## Core Principles
+
 1. **Privacy by Default** — Zero ID requirements, E2EE for DMs/voice, minimal data collection, no telemetry without explicit opt-in
 2. **User Sovereignty** — Self-hostable, federated, your data is YOUR data, export everything anytime
 3. **Discord-Grade UX** — Not "almost as good" — actually good. Servers, channels, roles, bots, rich embeds, screen share, low-latency voice
@@ -21,6 +24,7 @@ A privacy-first, community-owned communication platform that carries all of Disc
 6. **Sustainable Monetization** — Optional cosmetics, hosting services, no ads, no data selling, ever
 
 ## What Users Want (That Discord Never Delivered)
+
 - True E2E encryption for DMs and optional for channels
 - Self-hosting without enterprise pricing
 - Offline message queue (send when reconnected)
@@ -38,6 +42,7 @@ A privacy-first, community-owned communication platform that carries all of Disc
 - Vanity without payment (custom profiles, themes)
 
 ## Tech Stack Decision
+
 | Layer | Technology | Why |
 |-------|-----------|-----|
 | Backend API | **Rust (Axum)** | Memory-safe, blazing fast, zero-cost abstractions, perfect for real-time |
@@ -55,6 +60,7 @@ A privacy-first, community-owned communication platform that carries all of Disc
 | Bot API | **REST + WebSocket + SDK (TS/Python/Rust)** | Discord-compatible API shape for easy bot migration |
 
 ## Architecture Overview
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                        CLIENTS                                   │
@@ -92,6 +98,7 @@ A privacy-first, community-owned communication platform that carries all of Disc
 ```
 
 ## Milestones
+
 - **v0.1 — Foundation** (Current): Project scaffold, DB schema, core API, auth, basic WebSocket
 - **v0.2 — Chat MVP**: Text channels, DMs, message CRUD, real-time delivery
 - **v0.3 — Voice**: WebRTC voice channels, basic mixing, mute/deafen

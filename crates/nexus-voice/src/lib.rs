@@ -11,77 +11,94 @@
 //! Features that Discord users have been begging for:
 //! - 1080p60 screen share for EVERYONE (no Nitro gate)
 //! - Per-user volume control (client-side, since SFU)
-//! - Noise suppression (RNNoise)
+//! - Noise suppression (RNNoise/nnnoiseless)
 //! - Recording with visible consent indicator
 //! - Spatial audio (positional, great for gaming)
 //! - Low latency (<50ms target)
+//!
+//! ## Module Layout
+//!
+//! - [`sfu`] — WebRTC SFU engine (str0m-based, handles media forwarding)
+//! - [`state`] — Voice state manager (who's in which channel, mute/deaf)
+//! - [`handler`] — WebSocket signaling handler (SDP/ICE exchange)
+//! - [`room`] — Voice room abstraction (participant tracking)
+//! - [`signaling`] — Signaling message types
 
+pub mod handler;
 pub mod room;
+pub mod sfu;
 pub mod signaling;
+pub mod state;
 
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::RwLock;
-use uuid::Uuid;
+use handler::VoiceServerState;
+use nexus_common::gateway_event::GatewayEvent;
+use sfu::SfuManager;
+use state::VoiceStateManager;
+use std::net::IpAddr;
+use tokio::sync::broadcast;
 
-/// Voice server state.
+/// Voice server — the top-level coordinator for all voice functionality.
+///
+/// Integrates:
+/// - SFU engine (WebRTC media relay)
+/// - Voice state manager (presence tracking)
+/// - Signaling WebSocket handler
 #[derive(Clone)]
 pub struct VoiceServer {
-    /// Active voice rooms (channel_id → Room)
-    rooms: Arc<RwLock<HashMap<Uuid, room::VoiceRoom>>>,
+    pub state: VoiceServerState,
 }
 
 impl VoiceServer {
-    pub fn new() -> Self {
-        Self {
-            rooms: Arc::new(RwLock::new(HashMap::new())),
-        }
+    /// Create a new voice server.
+    ///
+    /// # Arguments
+    /// - `db` — Database connection for checking permissions
+    /// - `gateway_tx` — Broadcast sender to push voice events to the main gateway
+    /// - `local_ip` — Local IP address for binding UDP sockets (SFU)
+    pub fn new(
+        db: nexus_db::Database,
+        gateway_tx: broadcast::Sender<GatewayEvent>,
+        local_ip: IpAddr,
+    ) -> Self {
+        let sfu = SfuManager::new(local_ip);
+        let voice_state = VoiceStateManager::new();
+
+        let state = VoiceServerState {
+            sfu,
+            voice_state,
+            gateway_tx,
+            db,
+        };
+
+        Self { state }
     }
 
-    /// Get or create a voice room for a channel.
-    pub async fn get_or_create_room(&self, channel_id: Uuid) -> room::VoiceRoom {
-        let mut rooms = self.rooms.write().await;
-        rooms
-            .entry(channel_id)
-            .or_insert_with(|| room::VoiceRoom::new(channel_id))
-            .clone()
+    /// Build the Axum router for the voice signaling WebSocket.
+    pub fn build_router(&self) -> axum::Router {
+        handler::build_router(self.state.clone())
     }
 
-    /// Remove an empty room.
-    pub async fn cleanup_room(&self, channel_id: Uuid) {
-        let mut rooms = self.rooms.write().await;
-        if let Some(room) = rooms.get(&channel_id) {
-            if room.is_empty().await {
-                rooms.remove(&channel_id);
-            }
-        }
-    }
-
-    /// Get stats about active voice rooms.
+    /// Get voice statistics.
     pub async fn stats(&self) -> VoiceStats {
-        let rooms = self.rooms.read().await;
-        let total_rooms = rooms.len();
-        let mut total_participants = 0;
-
-        for room in rooms.values() {
-            total_participants += room.participant_count().await;
-        }
+        let state_stats = self.state.voice_state.stats().await;
+        let sfu_rooms = self.state.sfu.active_room_count().await;
 
         VoiceStats {
-            active_rooms: total_rooms,
-            total_participants,
+            active_channels: state_stats.active_channels,
+            total_connections: state_stats.total_connections,
+            sfu_rooms,
+            streaming_count: state_stats.streaming_count,
+            video_count: state_stats.video_count,
         }
     }
 }
 
-impl Default for VoiceServer {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 #[derive(Debug, serde::Serialize)]
 pub struct VoiceStats {
-    pub active_rooms: usize,
-    pub total_participants: usize,
+    pub active_channels: usize,
+    pub total_connections: usize,
+    pub sfu_rooms: usize,
+    pub streaming_count: usize,
+    pub video_count: usize,
 }
