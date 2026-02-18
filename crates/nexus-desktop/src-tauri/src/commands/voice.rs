@@ -1,0 +1,21 @@
+//! Voice state commands.
+
+use tauri::State;
+use uuid::Uuid;
+use crate::state::AppState;
+use super::api_client;
+
+#[tauri::command]
+pub async fn get_voice_state(
+    state: State<'_, AppState>,
+    server_id: Uuid,
+) -> Result<serde_json::Value, String> {
+    let session = state.session_snapshot();
+    let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
+    let resp = client
+        .get(format!("{base}/api/v1/servers/{server_id}/voice-state"))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    resp.json().await.map_err(|e| e.to_string())
+}

@@ -7,6 +7,7 @@ members = [
     "crates/nexus-gateway",
     "crates/nexus-voice",
     "crates/nexus-server",
+    "crates/nexus-desktop/src-tauri",
 ]
 
 [workspace.package]
@@ -93,6 +94,19 @@ str0m = "0.16"
 socket2 = "0.6"
 nnnoiseless = "0.5"
 systemstat = "0.2"
+
+# HTTP client (desktop / tauri commands)
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# Tauri desktop
+tauri = { version = "2", features = ["tray-icon", "rustls-tls"] }
+tauri-build = { version = "2", features = [] }
+tauri-plugin-notification = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-store = "2"
+tauri-plugin-http = "2"
+tauri-plugin-os = "2"
 
 # Shared internal crates
 nexus-common = { path = "crates/nexus-common" }

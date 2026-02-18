@@ -1,0 +1,41 @@
+[package]
+name = "nexus-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Nexus desktop client — Tauri 2 application shell"
+
+# Tauri requires a lib target for the plugin system's invoke_handler macro
+[lib]
+name = "nexus_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "nexus-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[dependencies]
+nexus-common = { workspace = true }
+tauri                    = { workspace = true }
+tauri-plugin-notification = { workspace = true }
+tauri-plugin-global-shortcut = { workspace = true }
+tauri-plugin-updater     = { workspace = true }
+tauri-plugin-store       = { workspace = true }
+tauri-plugin-os          = { workspace = true }
+reqwest                  = { workspace = true }
+serde                    = { workspace = true }
+serde_json               = { workspace = true }
+tokio                    = { workspace = true }
+uuid                     = { workspace = true }
+chrono                   = { workspace = true }
+tracing                  = { workspace = true }
+tracing-subscriber       = { workspace = true }
+thiserror                = { workspace = true }
+anyhow                   = { workspace = true }
+
+[features]
+# Required by Tauri — do not remove
+custom-protocol = ["tauri/custom-protocol"]
