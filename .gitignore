@@ -37,6 +37,11 @@ coverage/
 # Tauri
 client/src-tauri/target/
 client/dist/
+crates/*/target/
+
+# Rust build artifacts
+packages/*/target/
+target/
 
 # Mobile
 *.apk
