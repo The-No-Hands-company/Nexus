@@ -22,4 +22,5 @@ dotenvy = { workspace = true }
 axum = { workspace = true }
 sqlx = { workspace = true }
 redis = { workspace = true }
+jsonwebtoken = { workspace = true }
 regex = "1.11"

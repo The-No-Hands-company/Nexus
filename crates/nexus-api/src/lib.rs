@@ -8,13 +8,19 @@ pub mod middleware;
 pub mod routes;
 
 use axum::Router;
+use nexus_common::gateway_event::GatewayEvent;
 use nexus_db::Database;
 use std::sync::Arc;
+use tokio::sync::broadcast;
 
 /// Shared application state available to all route handlers.
 #[derive(Clone)]
 pub struct AppState {
     pub db: Database,
+    /// Broadcast sender to push events to the WebSocket gateway.
+    /// API mutations (message create, channel update, etc.) use this
+    /// to notify all connected clients in real-time.
+    pub gateway_tx: broadcast::Sender<GatewayEvent>,
 }
 
 /// Build the complete API router with all routes and middleware.
@@ -24,6 +30,8 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::users::router())
         .merge(routes::servers::router())
         .merge(routes::channels::router())
+        .merge(routes::messages::router())
+        .merge(routes::dms::router())
         .merge(routes::health::router());
 
     Router::new()

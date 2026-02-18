@@ -3,8 +3,10 @@
 //! Shared types, configuration, error handling, and utilities used across all Nexus crates.
 //! This is the foundation layer — no business logic, just primitives and contracts.
 
+pub mod auth;
 pub mod config;
 pub mod error;
+pub mod gateway_event;
 pub mod models;
 pub mod permissions;
 pub mod snowflake;

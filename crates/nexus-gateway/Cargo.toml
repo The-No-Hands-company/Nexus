@@ -8,7 +8,6 @@ description = "WebSocket real-time gateway for Nexus"
 [dependencies]
 nexus-common = { workspace = true }
 nexus-db = { workspace = true }
-nexus-api = { workspace = true }
 axum = { workspace = true }
 tokio = { workspace = true }
 tokio-tungstenite = { workspace = true }
@@ -17,6 +16,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
+sqlx = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }

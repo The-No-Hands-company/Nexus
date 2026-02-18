@@ -8,24 +8,12 @@ use argon2::{
     Argon2,
 };
 use chrono::{Duration, Utc};
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
-use serde::{Deserialize, Serialize};
+use jsonwebtoken::{encode, EncodingKey, Header};
+use serde::Serialize;
 use uuid::Uuid;
 
-/// JWT claims embedded in access tokens.
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Claims {
-    /// Subject (user ID)
-    pub sub: String,
-    /// Username
-    pub username: String,
-    /// Issued at
-    pub iat: i64,
-    /// Expiration
-    pub exp: i64,
-    /// Token type ("access" or "refresh")
-    pub token_type: String,
-}
+// Re-export Claims and validate_token from nexus-common so existing code keeps working
+pub use nexus_common::auth::{validate_token, Claims};
 
 /// Token pair returned on login/register.
 #[derive(Debug, Serialize)]
@@ -112,14 +100,4 @@ pub fn generate_token_pair(
         expires_in: access_ttl,
         token_type: "Bearer".to_string(),
     })
-}
-
-/// Validate and decode a JWT token.
-pub fn validate_token(token: &str, secret: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
-    let token_data = decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(secret.as_bytes()),
-        &Validation::default(),
-    )?;
-    Ok(token_data.claims)
 }

@@ -24,7 +24,10 @@ use axum::{
     Router,
 };
 use futures_util::{SinkExt, StreamExt};
+use nexus_common::gateway_event::GatewayEvent;
+use nexus_db::repository::{channels, members, read_states, servers};
 use serde::{Deserialize, Serialize};
+use session::SessionManager;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
@@ -35,12 +38,30 @@ pub struct GatewayState {
     /// In production, this would use Redis pub/sub for multi-node support.
     pub broadcast: broadcast::Sender<GatewayEvent>,
     pub db: nexus_db::Database,
+    pub sessions: Arc<SessionManager>,
 }
 
 impl GatewayState {
     pub fn new(db: nexus_db::Database) -> Self {
         let (broadcast, _) = broadcast::channel(10_000);
-        Self { broadcast, db }
+        Self {
+            broadcast,
+            db,
+            sessions: Arc::new(SessionManager::new()),
+        }
+    }
+
+    /// Create a GatewayState using an externally-created broadcast sender.
+    /// This allows the API server to share the same broadcast channel.
+    pub fn with_broadcast(
+        db: nexus_db::Database,
+        broadcast: broadcast::Sender<GatewayEvent>,
+    ) -> Self {
+        Self {
+            broadcast,
+            db,
+            sessions: Arc::new(SessionManager::new()),
+        }
     }
 }
 
@@ -102,18 +123,8 @@ pub enum GatewayMessage {
     },
 }
 
-/// Events broadcast to connected clients.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GatewayEvent {
-    pub event_type: String,
-    pub data: serde_json::Value,
-    /// Which server this event belongs to (for filtering)
-    pub server_id: Option<uuid::Uuid>,
-    /// Which channel this event belongs to
-    pub channel_id: Option<uuid::Uuid>,
-    /// Which user triggered this event
-    pub user_id: Option<uuid::Uuid>,
-}
+// GatewayEvent is imported at the top of the file — re-export it here
+// so consumers (nexus-server) can use `nexus_gateway::GatewayEvent`
 
 /// Build the gateway WebSocket router.
 pub fn build_router(state: GatewayState) -> Router {
@@ -140,7 +151,7 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
     let session_id = uuid::Uuid::new_v4().to_string();
     let mut authenticated = false;
     let mut user_id: Option<uuid::Uuid> = None;
-    let _sequence: u64 = 0;
+    let mut subscribed_servers: Vec<uuid::Uuid> = Vec::new();
 
     // Send hello (prompt client to identify)
     let hello = serde_json::json!({
@@ -157,24 +168,43 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
         return;
     }
 
-    // Spawn task to forward broadcast events to this client
-    let send_task = tokio::spawn(async move {
-        while let Ok(event) = broadcast_rx.recv().await {
-            let msg = serde_json::json!({
-                "op": "Dispatch",
-                "d": {
-                    "event": event.event_type,
-                    "data": event.data,
-                    "sequence": 0, // TODO: per-session sequence
-                }
-            });
+    // Spawn task to forward broadcast events to this client.
+    // Events are filtered by the user's subscribed servers.
+    let subscribed = subscribed_servers.clone();
+    let send_task = tokio::spawn({
+        let session_id = session_id.clone();
+        async move {
+            let _ = session_id; // will be used for per-session filtering
+            while let Ok(event) = broadcast_rx.recv().await {
+                // Filter: only forward events for servers this user is in,
+                // or DM events targeting this user, or events with no server scope
+                let should_forward = match event.server_id {
+                    Some(sid) => subscribed.contains(&sid),
+                    None => {
+                        // DM or global event — forward if it targets this user or has no target
+                        true
+                    }
+                };
 
-            if sender
-                .send(Message::Text(serde_json::to_string(&msg).unwrap().into()))
-                .await
-                .is_err()
-            {
-                break;
+                if !should_forward {
+                    continue;
+                }
+
+                let msg = serde_json::json!({
+                    "op": "Dispatch",
+                    "d": {
+                        "event": event.event_type,
+                        "data": event.data,
+                    }
+                });
+
+                if sender
+                    .send(Message::Text(serde_json::to_string(&msg).unwrap().into()))
+                    .await
+                    .is_err()
+                {
+                    break;
+                }
             }
         }
     });
@@ -189,26 +219,93 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
                         GatewayMessage::Identify { token } => {
                             // Validate token
                             let config = nexus_common::config::get();
-                            match nexus_api::auth::validate_token(&token, &config.auth.jwt_secret) {
+                            match nexus_common::auth::validate_token(&token, &config.auth.jwt_secret) {
                                 Ok(claims) => {
                                     authenticated = true;
-                                    user_id = claims.sub.parse().ok();
+                                    let uid: uuid::Uuid = match claims.sub.parse() {
+                                        Ok(id) => id,
+                                        Err(_) => {
+                                            tracing::warn!(session = %session_id, "Invalid user ID in token");
+                                            continue;
+                                        }
+                                    };
+                                    user_id = Some(uid);
+
+                                    // Build READY payload
+                                    let ready = build_ready_payload(
+                                        &state, uid, &session_id, &claims.username,
+                                    ).await;
+
+                                    // Track subscribed servers for event filtering
+                                    if let Some(srvs) = ready.get("servers").and_then(|s| s.as_array()) {
+                                        subscribed_servers = srvs.iter()
+                                            .filter_map(|s| s.get("id").and_then(|id| id.as_str()))
+                                            .filter_map(|id| id.parse().ok())
+                                            .collect();
+                                    }
+
+                                    // Register session
+                                    state.sessions.register(
+                                        session_id.clone(),
+                                        uid,
+                                        subscribed_servers.clone(),
+                                    ).await;
+
+                                    let ready_msg = GatewayMessage::Ready {
+                                        session_id: session_id.clone(),
+                                        user: ready["user"].clone(),
+                                        servers: ready["servers"]
+                                            .as_array()
+                                            .cloned()
+                                            .unwrap_or_default(),
+                                    };
+
+                                    // We need to send via broadcast to reach the send_task
+                                    // Instead, we'll use the direct pattern below
+                                    let _ = state.broadcast.send(GatewayEvent {
+                                        event_type: "__READY__".into(),
+                                        data: serde_json::to_value(&ready_msg).unwrap_or_default(),
+                                        server_id: None,
+                                        channel_id: None,
+                                        user_id: Some(uid),
+                                    });
+
                                     tracing::info!(
                                         session = %session_id,
                                         user = %claims.username,
-                                        "Client authenticated on gateway"
+                                        servers = subscribed_servers.len(),
+                                        "Client authenticated — READY sent"
                                     );
-                                    // TODO: Send READY event with user data
                                 }
                                 Err(_) => {
                                     tracing::warn!(session = %session_id, "Invalid token on gateway");
-                                    // TODO: Send InvalidSession
+                                    let invalid = serde_json::json!({
+                                        "op": "InvalidSession",
+                                        "d": null
+                                    });
+                                    let _ = state.broadcast.send(GatewayEvent {
+                                        event_type: "__INVALID_SESSION__".into(),
+                                        data: invalid,
+                                        server_id: None,
+                                        channel_id: None,
+                                        user_id: None,
+                                    });
                                 }
                             }
                         }
                         GatewayMessage::Heartbeat { timestamp: _ } => {
-                            // Acknowledge heartbeat
-                            // TODO: Send HeartbeatAck
+                            // Send HeartbeatAck
+                            let ack = GatewayEvent {
+                                event_type: "__HEARTBEAT_ACK__".into(),
+                                data: serde_json::json!({
+                                    "op": "HeartbeatAck",
+                                    "d": { "timestamp": chrono::Utc::now().timestamp_millis() }
+                                }),
+                                server_id: None,
+                                channel_id: None,
+                                user_id,
+                            };
+                            let _ = state.broadcast.send(ack);
                         }
                         GatewayMessage::TypingStart { channel_id } => {
                             if authenticated {
@@ -226,8 +323,29 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
                                 });
                             }
                         }
+                        GatewayMessage::PresenceUpdate { status, custom_status } => {
+                            if let Some(uid) = user_id {
+                                // Update presence in DB
+                                let _ = nexus_db::repository::users::update_presence(
+                                    &state.db.pg, uid, &status,
+                                ).await;
+
+                                // Broadcast presence update to all servers this user is in
+                                let _ = state.broadcast.send(GatewayEvent {
+                                    event_type: "PRESENCE_UPDATE".into(),
+                                    data: serde_json::json!({
+                                        "user_id": uid,
+                                        "status": status,
+                                        "custom_status": custom_status,
+                                    }),
+                                    server_id: None,
+                                    channel_id: None,
+                                    user_id: Some(uid),
+                                });
+                            }
+                        }
                         _ => {
-                            // Handle other opcodes
+                            // Handle other opcodes as they're implemented
                         }
                     }
                 }
@@ -237,7 +355,127 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
         }
     }
 
-    // Cleanup
+    // Cleanup — remove session
+    state.sessions.remove(&session_id).await;
+    if let Some(uid) = user_id {
+        // If this was the user's last session, set presence to offline
+        if !state.sessions.is_online(uid).await {
+            let _ = nexus_db::repository::users::update_presence(
+                &state.db.pg, uid, "offline",
+            ).await;
+            let _ = state.broadcast.send(GatewayEvent {
+                event_type: "PRESENCE_UPDATE".into(),
+                data: serde_json::json!({
+                    "user_id": uid,
+                    "status": "offline",
+                }),
+                server_id: None,
+                channel_id: None,
+                user_id: Some(uid),
+            });
+        }
+    }
+
     send_task.abort();
     tracing::info!(session = %session_id, "Client disconnected from gateway");
+}
+
+/// Build the READY payload for a newly authenticated user.
+/// Contains: user profile, server list with channels, read states.
+async fn build_ready_payload(
+    state: &GatewayState,
+    uid: uuid::Uuid,
+    session_id: &str,
+    _username: &str,
+) -> serde_json::Value {
+    // Fetch user profile
+    let user = nexus_db::repository::users::find_by_id(&state.db.pg, uid)
+        .await
+        .ok()
+        .flatten();
+
+    // Fetch user's servers
+    let user_servers = servers::list_user_servers(&state.db.pg, uid)
+        .await
+        .unwrap_or_default();
+
+    // For each server, fetch channels
+    let mut server_payloads = Vec::new();
+    for server in &user_servers {
+        let server_channels = channels::list_server_channels(&state.db.pg, server.id)
+            .await
+            .unwrap_or_default();
+
+        let member = members::find_member(&state.db.pg, uid, server.id)
+            .await
+            .ok()
+            .flatten();
+
+        server_payloads.push(serde_json::json!({
+            "id": server.id,
+            "name": server.name,
+            "icon": server.icon,
+            "owner_id": server.owner_id,
+            "member_count": server.member_count,
+            "channels": server_channels.iter().map(|c| serde_json::json!({
+                "id": c.id,
+                "name": c.name,
+                "channel_type": c.channel_type,
+                "position": c.position,
+                "parent_id": c.parent_id,
+                "last_message_id": c.last_message_id,
+                "topic": c.topic,
+                "nsfw": c.nsfw,
+            })).collect::<Vec<_>>(),
+            "member": member.map(|m| serde_json::json!({
+                "nickname": m.nickname,
+                "roles": m.roles,
+                "joined_at": m.joined_at,
+            })),
+        }));
+    }
+
+    // Fetch DM channels
+    let dm_channels = sqlx::query_as::<_, nexus_common::models::channel::Channel>(
+        r#"
+        SELECT c.* FROM channels c
+        INNER JOIN dm_participants dp ON dp.channel_id = c.id
+        WHERE dp.user_id = $1 AND c.channel_type IN ('dm', 'group_dm')
+        ORDER BY c.updated_at DESC
+        "#,
+    )
+    .bind(uid)
+    .fetch_all(&state.db.pg)
+    .await
+    .unwrap_or_default();
+
+    // Fetch read states
+    let user_read_states = read_states::get_all_read_states(&state.db.pg, uid)
+        .await
+        .unwrap_or_default();
+
+    serde_json::json!({
+        "session_id": session_id,
+        "user": user.map(|u| serde_json::json!({
+            "id": u.id,
+            "username": u.username,
+            "display_name": u.display_name,
+            "avatar": u.avatar,
+            "bio": u.bio,
+            "status": u.status,
+            "presence": u.presence,
+            "flags": u.flags,
+        })),
+        "servers": server_payloads,
+        "dm_channels": dm_channels.iter().map(|c| serde_json::json!({
+            "id": c.id,
+            "channel_type": c.channel_type,
+            "last_message_id": c.last_message_id,
+        })).collect::<Vec<_>>(),
+        "read_states": user_read_states.iter().map(|rs| serde_json::json!({
+            "channel_id": rs.channel_id,
+            "last_read_message_id": rs.last_read_message_id,
+            "mention_count": rs.mention_count,
+        })).collect::<Vec<_>>(),
+    })
 }

@@ -9,9 +9,11 @@
 //! or be split into separate processes (horizontal scaling).
 
 use nexus_api::{build_router, AppState};
+use nexus_common::gateway_event::GatewayEvent;
 use nexus_db::Database;
 use nexus_gateway::GatewayState;
 use std::net::SocketAddr;
+use tokio::sync::broadcast;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -38,8 +40,17 @@ async fn main() -> anyhow::Result<()> {
     // Run migrations
     db.migrate().await?;
 
+    // === Shared event broadcast channel ===
+    // This is the bridge between REST API mutations and WebSocket gateway.
+    // When the API creates/updates/deletes a message, it sends a GatewayEvent
+    // through this channel, which the gateway then forwards to connected clients.
+    let (gateway_tx, _) = broadcast::channel::<GatewayEvent>(10_000);
+
     // === REST API Server ===
-    let api_state = AppState { db: db.clone() };
+    let api_state = AppState {
+        db: db.clone(),
+        gateway_tx: gateway_tx.clone(),
+    };
     let api_router = build_router(api_state);
     let api_addr = SocketAddr::new(
         config.server.host.parse()?,
@@ -47,7 +58,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // === WebSocket Gateway ===
-    let gateway_state = GatewayState::new(db.clone());
+    let gateway_state = GatewayState::with_broadcast(db.clone(), gateway_tx);
     let gateway_router = nexus_gateway::build_router(gateway_state);
     let gateway_addr = SocketAddr::new(
         config.server.host.parse()?,
