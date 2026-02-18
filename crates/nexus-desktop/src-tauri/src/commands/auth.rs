@@ -1,7 +1,7 @@
 //! Auth commands — login, logout, token refresh, current user.
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, State};
+use tauri::State;
 use uuid::Uuid;
 
 use crate::state::AppState;

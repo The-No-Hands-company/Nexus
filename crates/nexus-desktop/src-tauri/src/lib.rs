@@ -18,7 +18,6 @@ pub mod state;
 pub mod tray;
 pub mod updater;
 
-use tauri::Manager;
 use tracing_subscriber::{fmt, EnvFilter};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

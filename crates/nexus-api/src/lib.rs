@@ -51,7 +51,12 @@ pub fn build_router(state: AppState) -> Router {
         // v0.5 Encryption
         .merge(routes::keys::router())
         .merge(routes::e2ee::router())
-        .merge(routes::verification::router());
+        .merge(routes::verification::router())
+        // v0.7 Extensibility
+        .merge(routes::bots::router())
+        .merge(routes::webhooks::router())
+        .merge(routes::slash_commands::router())
+        .merge(routes::extensibility::router());
 
     Router::new()
         .nest("/api/v1", api_routes)

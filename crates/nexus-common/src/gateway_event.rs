@@ -7,6 +7,29 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Well-known event type constants (v0.7 extensibility additions).
+pub mod event_types {
+    // Existing
+    pub const MESSAGE_CREATE: &str = "MESSAGE_CREATE";
+    pub const MESSAGE_UPDATE: &str = "MESSAGE_UPDATE";
+    pub const MESSAGE_DELETE: &str = "MESSAGE_DELETE";
+    pub const TYPING_START: &str = "TYPING_START";
+    pub const PRESENCE_UPDATE: &str = "PRESENCE_UPDATE";
+    pub const VOICE_STATE_UPDATE: &str = "VOICE_STATE_UPDATE";
+    pub const CHANNEL_CREATE: &str = "CHANNEL_CREATE";
+    pub const CHANNEL_UPDATE: &str = "CHANNEL_UPDATE";
+    pub const CHANNEL_DELETE: &str = "CHANNEL_DELETE";
+    pub const SERVER_MEMBER_ADD: &str = "SERVER_MEMBER_ADD";
+    pub const SERVER_MEMBER_REMOVE: &str = "SERVER_MEMBER_REMOVE";
+    pub const SERVER_MEMBER_UPDATE: &str = "SERVER_MEMBER_UPDATE";
+    // v0.7 — Extensibility
+    pub const INTERACTION_CREATE: &str = "INTERACTION_CREATE";
+    pub const WEBHOOK_EXECUTE: &str = "WEBHOOK_EXECUTE";
+    pub const APPLICATION_COMMAND_CREATE: &str = "APPLICATION_COMMAND_CREATE";
+    pub const APPLICATION_COMMAND_UPDATE: &str = "APPLICATION_COMMAND_UPDATE";
+    pub const APPLICATION_COMMAND_DELETE: &str = "APPLICATION_COMMAND_DELETE";
+}
+
 /// Events broadcast through the gateway to connected clients.
 ///
 /// The API creates these when data mutates (REST endpoints), and the gateway

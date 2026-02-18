@@ -41,7 +41,7 @@ pub fn setup_tray<R: Runtime>(app: &mut App<R>) -> tauri::Result<()> {
     TrayIconBuilder::with_id("main-tray")
         .tooltip("Nexus")
         .menu(&menu)
-        .menu_on_left_click(false)
+        .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| {
             let handle = app.clone();
             match event.id.as_ref() {

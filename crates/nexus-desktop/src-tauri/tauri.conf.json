@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
-    "beforeDevCommand": "pnpm dev",
-    "beforeBuildCommand": "pnpm build"
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
   },
   "app": {
     "withGlobalTauri": true,
@@ -84,8 +84,6 @@
         "https://releases.nexus.chat/{{target}}/{{arch}}/{{current_version}}"
       ]
     },
-    "store": {
-      "path": ".nexus-store.json"
-    }
+    "store": {}
   }
 }

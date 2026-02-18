@@ -26,6 +26,8 @@ validator = { workspace = true }
 jsonwebtoken = { workspace = true }
 argon2 = { workspace = true }
 password-hash = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
 rand = { workspace = true }
 meilisearch-sdk = { workspace = true }
 aws-sdk-s3 = { workspace = true }
