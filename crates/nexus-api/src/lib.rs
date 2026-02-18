@@ -9,7 +9,7 @@ pub mod routes;
 
 use axum::Router;
 use nexus_common::gateway_event::GatewayEvent;
-use nexus_db::Database;
+use nexus_db::{search::SearchClient, storage::StorageClient, Database};
 use nexus_voice::state::VoiceStateManager;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -25,6 +25,10 @@ pub struct AppState {
     /// Voice state manager — shared with the voice server for REST-based
     /// voice operations (state queries, moderation actions).
     pub voice_state: VoiceStateManager,
+    /// MinIO / S3-compatible object storage client for file uploads.
+    pub storage: StorageClient,
+    /// MeiliSearch client for full-text message search.
+    pub search: SearchClient,
 }
 
 /// Build the complete API router with all routes and middleware.
@@ -37,7 +41,13 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::messages::router())
         .merge(routes::dms::router())
         .merge(routes::voice::router())
-        .merge(routes::health::router());
+        .merge(routes::health::router())
+        // v0.4 Rich Features
+        .merge(routes::uploads::router())
+        .merge(routes::threads::router())
+        .merge(routes::emoji::router())
+        .merge(routes::search::router())
+        .merge(routes::presence::router());
 
     Router::new()
         .nest("/api/v1", api_routes)
@@ -51,3 +61,4 @@ pub fn build_router(state: AppState) -> Router {
         .layer(tower_http::compression::CompressionLayer::new())
         .with_state(Arc::new(state))
 }
+

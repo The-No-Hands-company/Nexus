@@ -6,6 +6,7 @@
 pub mod channel;
 pub mod member;
 pub mod message;
+pub mod rich;
 pub mod role;
 pub mod server;
 pub mod user;
@@ -14,6 +15,7 @@ pub mod user;
 pub use channel::*;
 pub use member::*;
 pub use message::*;
+pub use rich::*;
 pub use role::*;
 pub use server::*;
 pub use user::*;

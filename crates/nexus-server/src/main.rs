@@ -10,7 +10,11 @@
 
 use nexus_api::{build_router, AppState};
 use nexus_common::gateway_event::GatewayEvent;
-use nexus_db::Database;
+use nexus_db::{
+    search::SearchClient,
+    storage::{StorageClient, StorageConfig as DbStorageConfig},
+    Database,
+};
 use nexus_gateway::GatewayState;
 use nexus_voice::VoiceServer;
 use std::net::SocketAddr;
@@ -53,11 +57,30 @@ async fn main() -> anyhow::Result<()> {
     let voice_server = VoiceServer::new(db.clone(), gateway_tx.clone(), local_ip);
     let voice_state = voice_server.state.voice_state.clone();
 
+    // === Object Storage (MinIO / S3) ===
+    let storage = StorageClient::new(&DbStorageConfig {
+        endpoint: config.storage.endpoint.clone(),
+        access_key: config.storage.access_key.clone(),
+        secret_key: config.storage.secret_key.clone(),
+        bucket: config.storage.bucket.clone(),
+        region: config.storage.region.clone(),
+        public_url: None,
+    })?;
+    storage.ensure_bucket().await?;
+    tracing::info!("📦 Object storage ready (bucket: {})", config.storage.bucket);
+
+    // === MeiliSearch ===
+    let search = SearchClient::new(&config.search.url, &config.search.api_key);
+    search.bootstrap_indexes().await?;
+    tracing::info!("🔍 MeiliSearch ready at {}", config.search.url);
+
     // === REST API Server ===
     let api_state = AppState {
         db: db.clone(),
         gateway_tx: gateway_tx.clone(),
         voice_state: voice_state.clone(),
+        storage,
+        search,
     };
     let api_router = build_router(api_state);
     let api_addr = SocketAddr::new(

@@ -8,6 +8,8 @@
 pub mod postgres;
 pub mod redis_pool;
 pub mod repository;
+pub mod search;
+pub mod storage;
 
 use anyhow::Result;
 use sqlx::PgPool;
