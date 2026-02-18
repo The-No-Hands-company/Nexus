@@ -1,0 +1,43 @@
+[package]
+name = "nexus-federation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Federation layer for Nexus — Matrix-compatible server-to-server protocol"
+
+[dependencies]
+nexus-common = { workspace = true }
+nexus-db     = { workspace = true }
+
+# Async runtime
+tokio    = { workspace = true }
+
+# HTTP client for S2S requests
+reqwest = { workspace = true }
+
+# Serialisation
+serde      = { workspace = true }
+serde_json = { workspace = true }
+chrono     = { workspace = true }
+uuid       = { workspace = true }
+base64     = { workspace = true }
+hex        = { workspace = true }
+sha2       = { workspace = true }
+
+# Ed25519 signing keys
+ed25519-dalek = { workspace = true }
+rand_core = { workspace = true }
+
+# URL parsing
+url = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow    = { workspace = true }
+tracing   = { workspace = true }
+
+# HMAC for request signing
+hmac = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros"] }

@@ -8,7 +8,8 @@
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Rust](https://img.shields.io/badge/Rust-1.84+-orange.svg)](https://www.rust-lang.org)
-[![Status](https://img.shields.io/badge/Status-v0.1%20Foundation-purple.svg)]()
+[![Status](https://img.shields.io/badge/Status-v0.8%20Federation-purple.svg)]()
+[![v0.7](https://img.shields.io/badge/v0.7%20Extensibility-Complete-brightgreen.svg)]()
 
 *Built in response to Discord's mandatory age verification, data breaches, and pre-IPO enshittification.*
 
@@ -249,8 +250,30 @@ nexus/
 │   │       ├── room.rs           # Voice room management
 │   │       └── signaling.rs      # WebRTC signaling
 │   │
+│   ├── nexus-federation/         # v0.8 Federation (Matrix-compatible S2S)
+│   │   └── src/
+│   │       ├── types.rs          # Federated event shapes
+│   │       ├── keys.rs           # Ed25519 signing keys
+│   │       ├── signatures.rs     # Request signing & verification
+│   │       ├── client.rs         # S2S HTTP client
+│   │       ├── discovery.rs      # .well-known resolver
+│   │       └── matrix_bridge.rs  # Matrix AS bridge protocol
+│   │
+│   ├── nexus-desktop/            # v0.6 Desktop client (Tauri 2 + React)
+│   │   ├── src/                  # React/TypeScript frontend
+│   │   │   ├── themes/           # Built-in theme engine (4 themes)
+│   │   │   ├── plugins/          # Client plugin system (sandboxed iframes)
+│   │   │   ├── pages/            # App pages (channels, settings, etc.)
+│   │   │   └── components/       # Reusable UI components
+│   │   └── src-tauri/            # Rust Tauri backend
+│   │
 │   └── nexus-server/             # Main binary (orchestrates everything)
 │       └── src/main.rs
+│
+├── packages/
+│   ├── nexus-sdk/                # v0.7 TypeScript Bot SDK (@nexus/sdk)
+│   ├── nexus-sdk-py/             # v0.7 Python Bot SDK (nexus-sdk)
+│   └── nexus-sdk-rs/             # v0.7 Rust Bot SDK (nexus-sdk)
 │
 └── .planning/                    # Development planning docs
     ├── BRIEF.md                  # Project vision & architecture
@@ -261,14 +284,14 @@ nexus/
 
 | Version | Status | Focus |
 |---------|--------|-------|
-| **v0.1** | 🟡 In Progress | Foundation — scaffold, DB, auth, basic API & gateway |
-| **v0.2** | ⚪ Planned | Chat MVP — messages, DMs, real-time, typing, reactions |
-| **v0.3** | ⚪ Planned | Voice — WebRTC SFU, mute/deafen, screen share |
-| **v0.4** | ⚪ Planned | Rich Features — files, embeds, threads, search, emoji |
-| **v0.5** | ⚪ Planned | E2E Encryption — Signal protocol for DMs + opt-in channels |
-| **v0.6** | ⚪ Planned | Desktop Client — Tauri 2 app with full feature parity |
-| **v0.7** | ⚪ Planned | Bots & Plugins — Bot API, SDKs, client plugin system |
-| **v0.8** | ⚪ Planned | Federation — Matrix-compatible server-to-server protocol |
+| **v0.1** | ✅ Complete | Foundation — scaffold, DB, auth, basic API & gateway |
+| **v0.2** | ✅ Complete | Chat MVP — messages, DMs, real-time, typing, reactions |
+| **v0.3** | ✅ Complete | Voice — WebRTC SFU, mute/deafen, screen share |
+| **v0.4** | ✅ Complete | Rich Features — files, embeds, threads, search, emoji |
+| **v0.5** | ✅ Complete | E2E Encryption — Signal protocol for DMs + opt-in channels |
+| **v0.6** | ✅ Complete | Desktop Client — Tauri 2 app with full feature parity |
+| **v0.7** | ✅ Complete | Extensibility — Bot API, TypeScript/Python/Rust SDKs, plugin system, custom themes |
+| **v0.8** | 🟡 In Progress | Federation — Matrix-compatible server-to-server protocol |
 | **v0.9** | ⚪ Planned | Mobile — React Native iOS + Android |
 | **v1.0** | ⚪ Planned | Public Launch — managed hosting + self-host docs |
 

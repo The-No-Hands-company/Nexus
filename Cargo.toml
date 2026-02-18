@@ -6,6 +6,7 @@ members = [
     "crates/nexus-api",
     "crates/nexus-gateway",
     "crates/nexus-voice",
+    "crates/nexus-federation",
     "crates/nexus-server",
     "crates/nexus-desktop/src-tauri",
 ]
@@ -83,6 +84,14 @@ password-hash = "0.5"
 sha2 = "0.10"
 base64 = "0.22"
 hex = "0.4"
+hmac = "0.12"
+
+# Ed25519 signing (federation)
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+
+# URL parsing
+url = "2.5"
 
 # IP/Geo
 ipnetwork = "0.20"
@@ -115,6 +124,7 @@ nexus-db = { path = "crates/nexus-db" }
 nexus-api = { path = "crates/nexus-api" }
 nexus-gateway = { path = "crates/nexus-gateway" }
 nexus-voice = { path = "crates/nexus-voice" }
+nexus-federation = { path = "crates/nexus-federation" }
 
 [profile.release]
 lto = true

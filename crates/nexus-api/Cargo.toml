@@ -9,6 +9,7 @@ description = "REST API layer for Nexus"
 nexus-common = { workspace = true }
 nexus-db = { workspace = true }
 nexus-voice = { workspace = true }
+nexus-federation = { workspace = true }
 axum = { workspace = true }
 axum-extra = { workspace = true }
 tower = { workspace = true }

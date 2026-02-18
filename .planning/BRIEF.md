@@ -99,13 +99,13 @@ A privacy-first, community-owned communication platform that carries all of Disc
 
 ## Milestones
 
-- **v0.1 — Foundation** (Current): Project scaffold, DB schema, core API, auth, basic WebSocket
-- **v0.2 — Chat MVP**: Text channels, DMs, message CRUD, real-time delivery
-- **v0.3 — Voice**: WebRTC voice channels, basic mixing, mute/deafen
-- **v0.4 — Rich Features**: File upload, embeds, reactions, threads, search
-- **v0.5 — E2EE**: Signal protocol integration for DMs, opt-in for channels
-- **v0.6 — Desktop Client**: Tauri app with full feature parity
-- **v0.7 — Bots & Plugins**: Bot API, plugin system, SDK
-- **v0.8 — Federation**: Matrix-compatible federation protocol
+- **v0.1 — Foundation** ✅: Project scaffold, DB schema, core API, auth, basic WebSocket
+- **v0.2 — Chat MVP** ✅: Text channels, DMs, message CRUD, real-time delivery
+- **v0.3 — Voice** ✅: WebRTC voice channels, basic mixing, mute/deafen
+- **v0.4 — Rich Features** ✅: File upload, embeds, reactions, threads, search
+- **v0.5 — E2EE** ✅: Signal protocol integration for DMs, opt-in for channels
+- **v0.6 — Desktop Client** ✅: Tauri 2 app with full feature parity
+- **v0.7 — Extensibility** ✅: Bot API, TypeScript/Python/Rust SDKs, sandboxed plugin system, custom theme engine
+- **v0.8 — Federation** 🟡 (Current): Matrix-compatible federation protocol, S2S communication, federated identity, Matrix/Discord bridge
 - **v0.9 — Mobile**: React Native client
 - **v1.0 — Public Launch**: Self-hosted + managed hosting options

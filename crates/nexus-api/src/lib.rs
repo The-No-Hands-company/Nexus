@@ -56,10 +56,14 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::bots::router())
         .merge(routes::webhooks::router())
         .merge(routes::slash_commands::router())
-        .merge(routes::extensibility::router());
+        .merge(routes::extensibility::router())
+        // v0.8 Federation — client-facing directory endpoints
+        .merge(routes::directory::router());
 
     Router::new()
         .nest("/api/v1", api_routes)
+        // v0.8 Federation — server-to-server endpoints (live outside /api/v1)
+        .merge(routes::federation::federation_router())
         .layer(
             tower_http::cors::CorsLayer::new()
                 .allow_origin(tower_http::cors::Any)

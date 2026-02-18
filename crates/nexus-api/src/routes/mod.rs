@@ -3,10 +3,12 @@
 pub mod auth;
 pub mod bots;
 pub mod channels;
+pub mod directory;
 pub mod dms;
 pub mod e2ee;
 pub mod emoji;
 pub mod extensibility;
+pub mod federation;
 pub mod health;
 pub mod keys;
 pub mod messages;
