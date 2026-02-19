@@ -26,6 +26,7 @@ use axum::{
     routing::{get, put},
     Json, Router,
 };
+use nexus_db::repository::users;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::Row as _;
@@ -59,6 +60,8 @@ pub fn federation_router() -> Router<Arc<AppState>> {
             put(send_join),
         )
         .route("/_nexus/federation/v1/backfill/:room_id", get(backfill))
+        // v0.8/08-03: User profile endpoint (MXID resolution)
+        .route("/_nexus/federation/v1/user/:user_id", get(user_profile))
         // Matrix Application Service bridge (inbound)
         .route("/_matrix/app/v1/transactions/:txn_id", put(matrix_as_transaction))
 }
@@ -163,7 +166,7 @@ async fn receive_transaction(
     let mut accepted = 0i32;
 
     for pdu in &pdus {
-        match process_pdu(&state.db.pg, &origin, &txn_id, &verify_keys, pdu).await {
+        match process_pdu(&state.db.pg, &origin, &txn_id, &verify_keys, &state.server_name, pdu).await {
             Ok(true) => accepted += 1,
             Ok(false) => debug!("PDU from {} was a duplicate (already stored)", origin),
             Err(e) => warn!("Rejected PDU from {}: {}", origin, e),
@@ -201,6 +204,7 @@ async fn receive_transaction(
 ///
 /// 1. Verify the Ed25519 signature if verify keys are available.
 /// 2. Persist to `federated_events` (idempotent: ON CONFLICT event_id DO NOTHING).
+/// 3. Upsert the sender into `federated_users` if they're from a remote server.
 ///
 /// Returns `Ok(true)` if newly persisted, `Ok(false)` if duplicate, `Err` if rejected.
 async fn process_pdu(
@@ -208,6 +212,7 @@ async fn process_pdu(
     origin: &str,
     txn_id: &str,
     verify_keys: &serde_json::Map<String, Value>,
+    local_server_name: &str,
     pdu: &Value,
 ) -> Result<bool, anyhow::Error> {
     let event_id = pdu
@@ -261,7 +266,16 @@ async fn process_pdu(
     .await?;
 
     // rows_affected == 0 means the event was already stored (conflict).
-    Ok(result.rows_affected() > 0)
+    let new_event = result.rows_affected() > 0;
+
+    // Upsert the sender's profile into federated_users (skip for local users).
+    if new_event {
+        if let Err(e) = upsert_federated_user(pool, local_server_name, sender, pdu).await {
+            debug!("Could not upsert federated user {}: {}", sender, e);
+        }
+    }
+
+    Ok(new_event)
 }
 
 /// Verify the Ed25519 signature on a PDU against the origin server's verify keys.
@@ -331,15 +345,46 @@ async fn load_server_verify_keys(
 
 /// `GET /_nexus/federation/v1/event/{eventId}`
 async fn get_event(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(event_id): Path<String>,
 ) -> impl IntoResponse {
     if let Err(e) = extract_federation_origin(&headers) {
         return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response();
     }
-    // TODO: look up event from federated_events table.
-    (StatusCode::NOT_FOUND, Json(json!({ "error": "Event not found" }))).into_response()
+
+    let row = sqlx::query(
+        "SELECT event_id, room_id, event_type, sender, origin_server, \
+                origin_server_ts, content, signatures \
+         FROM federated_events \
+         WHERE event_id = $1 AND is_redacted = FALSE",
+    )
+    .bind(&event_id)
+    .fetch_optional(&state.db.pg)
+    .await;
+
+    match row {
+        Ok(Some(r)) => {
+            let pdu = json!({
+                "event_id":        r.try_get::<String, _>("event_id").unwrap_or_default(),
+                "room_id":         r.try_get::<String, _>("room_id").unwrap_or_default(),
+                "type":            r.try_get::<String, _>("event_type").unwrap_or_default(),
+                "sender":          r.try_get::<String, _>("sender").unwrap_or_default(),
+                "origin":          r.try_get::<String, _>("origin_server").unwrap_or_default(),
+                "origin_server_ts":r.try_get::<i64, _>("origin_server_ts").unwrap_or(0),
+                "content":         r.try_get::<Value, _>("content").unwrap_or_default(),
+                "signatures":      r.try_get::<Value, _>("signatures").unwrap_or_default(),
+            });
+            (StatusCode::OK, Json(json!({ "pdu": pdu }))).into_response()
+        }
+        Ok(None) => {
+            (StatusCode::NOT_FOUND, Json(json!({ "error": "Event not found" }))).into_response()
+        }
+        Err(e) => {
+            warn!("Error fetching event {}: {}", event_id, e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "DB error" }))).into_response()
+        }
+    }
 }
 
 // ─── Room state ───────────────────────────────────────────────────────────────
@@ -370,7 +415,7 @@ async fn get_room_state(
 /// Returns a join event template that the requesting server should sign
 /// and return via `send_join`.
 async fn make_join(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path((room_id, user_id)): Path<(String, String)>,
 ) -> impl IntoResponse {
@@ -378,8 +423,7 @@ async fn make_join(
         return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response();
     }
 
-    let server_name =
-        std::env::var("NEXUS_SERVER_NAME").unwrap_or_else(|_| "localhost".to_owned());
+    let server_name = &state.server_name;
 
     let template = json!({
         "room_version": "nexus.v1",
@@ -475,6 +519,174 @@ async fn matrix_as_transaction(
     // TODO: pass to MatrixBridge::handle_transaction and dispatch Nexus events.
 
     (StatusCode::OK, Json(json!({}))).into_response()
+}
+
+// ─── v0.8/08-03: Federated Identity ─────────────────────────────────────────
+
+/// `GET /_nexus/federation/v1/user/{userId}`
+///
+/// Serves the public profile of a local user (identified by their MXID or
+/// bare username) so remote servers can resolve display names and avatars.
+///
+/// URL-encoded MXID: `%40alice%3Anexus.example.com` → `@alice:nexus.example.com`
+/// Or bare localpart: `alice`
+async fn user_profile(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(user_id): Path<String>,
+) -> impl IntoResponse {
+    if let Err(e) = extract_federation_origin(&headers) {
+        return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response();
+    }
+
+    // Accept both `@alice:server.tld` (URL-decoded) and plain `alice`.
+    let localpart = if user_id.starts_with('@') {
+        match parse_mxid(&user_id) {
+            Some((lp, server)) => {
+                // Only serve profiles for users on this server.
+                if server != state.server_name {
+                    return (
+                        StatusCode::NOT_FOUND,
+                        Json(json!({ "error": "User not on this server" })),
+                    )
+                    .into_response();
+                }
+                lp
+            }
+            None => {
+                return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid MXID" })))
+                    .into_response()
+            }
+        }
+    } else {
+        user_id.clone()
+    };
+
+    match users::find_by_username(&state.db.pg, &localpart).await {
+        Ok(Some(user)) => {
+            let mxid = format!("@{}:{}", user.username, state.server_name);
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "user_id":      mxid,
+                    "displayname":  user.display_name,
+                    "avatar_url":   user.avatar,
+                    "bio":          user.bio,
+                })),
+            )
+            .into_response()
+        }
+        Ok(None) => {
+            (StatusCode::NOT_FOUND, Json(json!({ "error": "User not found" }))).into_response()
+        }
+        Err(e) => {
+            warn!("DB error resolving user {}: {}", localpart, e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "DB error" }))).into_response()
+        }
+    }
+}
+
+// ─── MXID helpers ─────────────────────────────────────────────────────────────
+
+/// Parse a Matrix-style / Nexus MXID: `@localpart:server.tld`.
+///
+/// Returns `Some((localpart, server))` or `None` if malformed.
+fn parse_mxid(mxid: &str) -> Option<(String, String)> {
+    let mxid = mxid.strip_prefix('@')?;
+    let colon = mxid.find(':')?;
+    let localpart = mxid[..colon].to_owned();
+    let server = mxid[colon + 1..].to_owned();
+    if localpart.is_empty() || server.is_empty() {
+        return None;
+    }
+    Some((localpart, server))
+}
+
+/// Upsert a remote user's profile into `federated_users`.
+///
+/// Called after accepting an inbound PDU to keep the remote profile cache
+/// up-to-date. For membership events the display name and avatar in the
+/// event content are used; for other event types only the MXID is stored.
+async fn upsert_federated_user(
+    pool: &sqlx::PgPool,
+    _local_server_name: &str,
+    sender: &str,
+    pdu: &Value,
+) -> Result<(), anyhow::Error> {
+    let (localpart, server) = match parse_mxid(sender) {
+        Some(parts) => parts,
+        None => {
+            debug!("Skipping federated user upsert: invalid MXID {}", sender);
+            return Ok(());
+        }
+    };
+
+    // Look up (or insert) the origin server to get its UUID.
+    let server_id: Option<uuid::Uuid> = sqlx::query(
+        "SELECT id FROM federated_servers WHERE server_name = $1",
+    )
+    .bind(&server)
+    .fetch_optional(pool)
+    .await?
+    .map(|r| r.try_get::<uuid::Uuid, _>("id").ok())
+    .flatten();
+
+    let server_id = match server_id {
+        Some(id) => id,
+        None => {
+            // Auto-register the server if we haven't seen it yet.
+            let row = sqlx::query(
+                "INSERT INTO federated_servers (server_name) VALUES ($1) \
+                 ON CONFLICT (server_name) DO UPDATE SET last_seen_at = NOW() \
+                 RETURNING id",
+            )
+            .bind(&server)
+            .fetch_one(pool)
+            .await?;
+            row.try_get::<uuid::Uuid, _>("id")?
+        }
+    };
+
+    // For `nexus.member.join` / `m.room.member` events, extract optional profile.
+    let event_type = pdu.get("type").and_then(Value::as_str).unwrap_or("");
+    let is_membership = event_type == "nexus.member.join"
+        || event_type == "nexus.member.leave"
+        || event_type == "m.room.member";
+
+    let display_name: Option<String> = if is_membership {
+        pdu.get("content")
+            .and_then(|c| c.get("displayname"))
+            .and_then(Value::as_str)
+            .map(String::from)
+    } else {
+        None
+    };
+    let avatar_url: Option<String> = if is_membership {
+        pdu.get("content")
+            .and_then(|c| c.get("avatar_url"))
+            .and_then(Value::as_str)
+            .map(String::from)
+    } else {
+        None
+    };
+
+    sqlx::query(
+        "INSERT INTO federated_users \
+         (mxid, localpart, server_id, display_name, avatar_url) \
+         VALUES ($1, $2, $3, $4, $5) \
+         ON CONFLICT (mxid) DO UPDATE SET \
+         display_name = COALESCE($4, federated_users.display_name), \
+         avatar_url   = COALESCE($5, federated_users.avatar_url)",
+    )
+    .bind(sender)
+    .bind(&localpart)
+    .bind(server_id)
+    .bind(display_name)
+    .bind(avatar_url)
+    .execute(pool)
+    .await?;
+
+    Ok(())
 }
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
