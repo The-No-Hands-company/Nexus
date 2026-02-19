@@ -2,6 +2,7 @@
 
 use axum::{
     extract::{Extension, Path, State},
+    middleware,
     routing::{get, post},
     Json, Router,
 };
@@ -21,11 +22,21 @@ use crate::{middleware::AuthContext, AppState};
 /// Server routes.
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/servers", post(create_server))
+        .route("/servers", get(list_my_servers).post(create_server))
         .route("/servers/{server_id}", get(get_server).patch(update_server).delete(delete_server))
         .route("/servers/{server_id}/members", get(list_members))
         .route("/servers/{server_id}/join", post(join_server))
         .route("/servers/{server_id}/leave", post(leave_server))
+        .route_layer(middleware::from_fn(crate::middleware::auth_middleware))
+}
+
+/// GET /api/v1/servers — List servers the authenticated user is a member of.
+async fn list_my_servers(
+    Extension(auth): Extension<AuthContext>,
+    State(state): State<Arc<AppState>>,
+) -> NexusResult<Json<Vec<ServerResponse>>> {
+    let user_servers = servers::list_user_servers(&state.db.pg, auth.user_id).await?;
+    Ok(Json(user_servers.into_iter().map(|s| s.into()).collect()))
 }
 
 /// POST /api/v1/servers — Create a new server.

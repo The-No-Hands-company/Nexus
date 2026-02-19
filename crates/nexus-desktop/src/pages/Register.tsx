@@ -3,11 +3,17 @@ import { Link } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { useStore, Session } from "../store";
 
+interface AuthUserInfo {
+  id: string;
+  username: string;
+  display_name?: string | null;
+  avatar?: string | null;
+}
+
 interface AuthResponse {
   access_token: string;
   refresh_token: string;
-  user_id: string;
-  username: string;
+  user: AuthUserInfo;
 }
 
 export default function RegisterPage() {
@@ -41,8 +47,8 @@ export default function RegisterPage() {
       });
 
       const session: Session = {
-        userId: resp.user_id,
-        username: resp.username,
+        userId: resp.user.id,
+        username: resp.user.username,
         serverUrl,
         accessToken: resp.access_token,
       };

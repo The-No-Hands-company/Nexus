@@ -58,21 +58,38 @@ export function useGateway() {
 
     const handleEvent = (event: GatewayEvent) => {
       switch (event.event_type) {
-        case "message_create": {
-          const msg = event.data as Message;
+        case "MESSAGE_CREATE": {
+          const raw = event.data as {
+            id: string;
+            channel_id: string;
+            author_id: string;
+            author_username?: string;
+            content: string;
+            created_at: string;
+            edited_at?: string;
+          };
+          const msg: Message = {
+            id: raw.id,
+            channelId: raw.channel_id,
+            authorId: raw.author_id,
+            authorUsername: raw.author_username ?? "Unknown",
+            content: raw.content,
+            createdAt: raw.created_at,
+            editedAt: raw.edited_at,
+          };
           appendMessage(msg.channelId, msg);
           break;
         }
-        case "voice_state_update": {
+        case "VOICE_STATE_UPDATE": {
           const participants = event.data as VoiceParticipant[];
           setVoiceParticipants(participants);
           break;
         }
-        case "ptt_start": {
+        case "PTT_START": {
           setPttActive(true);
           break;
         }
-        case "ptt_stop": {
+        case "PTT_STOP": {
           setPttActive(false);
           break;
         }

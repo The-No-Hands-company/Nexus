@@ -14,11 +14,18 @@ pub struct LoginRequest {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct AuthUserInfo {
+    pub id: Uuid,
+    pub username: String,
+    pub display_name: Option<String>,
+    pub avatar: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AuthResponse {
     pub access_token: String,
     pub refresh_token: String,
-    pub user_id: Uuid,
-    pub username: String,
+    pub user: AuthUserInfo,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -67,8 +74,8 @@ pub async fn register(
         let mut session = state.session.lock().unwrap();
         session.access_token = Some(auth.access_token.clone());
         session.refresh_token = Some(auth.refresh_token.clone());
-        session.user_id = Some(auth.user_id);
-        session.username = Some(auth.username.clone());
+        session.user_id = Some(auth.user.id);
+        session.username = Some(auth.user.username.clone());
     }
 
     Ok(auth)
@@ -104,8 +111,8 @@ pub async fn login(
         let mut session = state.session.lock().unwrap();
         session.access_token = Some(auth.access_token.clone());
         session.refresh_token = Some(auth.refresh_token.clone());
-        session.user_id = Some(auth.user_id);
-        session.username = Some(auth.username.clone());
+        session.user_id = Some(auth.user.id);
+        session.username = Some(auth.user.username.clone());
     }
 
     Ok(auth)

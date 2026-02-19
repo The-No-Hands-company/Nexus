@@ -163,7 +163,8 @@ async fn send_message(
         .await;
     }
 
-    let response = message_row_to_json(&msg, &[]);
+    let mut response = message_row_to_json(&msg, &[]);
+    response["author_username"] = serde_json::Value::String(auth.username.clone());
 
     // Emit MESSAGE_CREATE event to gateway
     let _ = state.gateway_tx.send(GatewayEvent {
@@ -206,7 +207,7 @@ async fn get_messages(
     }
 
     let limit = params.limit.unwrap_or(50).min(100).max(1);
-    let rows = messages::list_channel_messages(
+    let rows = messages::list_channel_messages_with_author(
         &state.db.pg,
         channel_id,
         params.before,
@@ -222,7 +223,7 @@ async fn get_messages(
             .await
             .unwrap_or_default();
         let my_reactions = get_user_reactions(&state, row.id, auth.user_id, &reaction_counts).await;
-        result.push(message_row_to_json_with_reactions(row, &reaction_counts, &my_reactions));
+        result.push(message_with_author_to_json(row, &reaction_counts, &my_reactions));
     }
 
     Ok(Json(result))
@@ -711,6 +712,53 @@ fn message_row_to_json(
     reaction_counts: &[reactions::ReactionCount],
 ) -> serde_json::Value {
     message_row_to_json_with_reactions(row, reaction_counts, &[])
+}
+
+/// Build the message JSON object with author_username included.
+fn message_with_author_to_json(
+    row: &messages::MessageWithAuthor,
+    reaction_counts: &[reactions::ReactionCount],
+    my_reactions: &[String],
+) -> serde_json::Value {
+    let reactions_json: Vec<serde_json::Value> = reaction_counts
+        .iter()
+        .map(|rc| {
+            serde_json::json!({
+                "emoji": rc.emoji,
+                "count": rc.count,
+                "me": my_reactions.contains(&rc.emoji),
+            })
+        })
+        .collect();
+
+    let reference = match (row.reference_message_id, row.reference_channel_id) {
+        (Some(mid), Some(cid)) => Some(serde_json::json!({
+            "message_id": mid,
+            "channel_id": cid,
+        })),
+        _ => None,
+    };
+
+    serde_json::json!({
+        "id": row.id,
+        "channel_id": row.channel_id,
+        "author_id": row.author_id,
+        "author_username": row.author_username,
+        "content": row.content,
+        "message_type": row.message_type,
+        "edited": row.edited,
+        "edited_at": row.edited_at,
+        "pinned": row.pinned,
+        "embeds": row.embeds,
+        "attachments": row.attachments,
+        "mentions": row.mentions,
+        "mention_roles": row.mention_roles,
+        "mention_everyone": row.mention_everyone,
+        "reference": reference,
+        "thread_id": row.thread_id,
+        "reactions": reactions_json,
+        "created_at": row.created_at,
+    })
 }
 
 fn message_row_to_json_with_reactions(

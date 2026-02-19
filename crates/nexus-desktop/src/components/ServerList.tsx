@@ -1,11 +1,14 @@
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useStore } from "../store";
 import clsx from "clsx";
+import CreateServerModal from "./CreateServerModal";
 
 export default function ServerList() {
   const { servers, activeServerId, setActiveServer, logout, session } =
     useStore();
   const navigate = useNavigate();
+  const [showCreate, setShowCreate] = useState(false);
 
   const handleSelectServer = (id: string) => {
     setActiveServer(id);
@@ -13,7 +16,8 @@ export default function ServerList() {
   };
 
   return (
-    <div className="w-[72px] bg-bg-900 flex flex-col items-center py-3 gap-2 overflow-y-auto shrink-0 no-select">
+    <>
+      <div className="w-[72px] bg-bg-900 flex flex-col items-center py-3 gap-2 overflow-y-auto shrink-0 no-select">
       {/* Nexus home button */}
       <button
         onClick={() => { setActiveServer(null); navigate("/"); }}
@@ -53,6 +57,17 @@ export default function ServerList() {
         </button>
       ))}
 
+      {/* Add server button */}
+      <button
+        onClick={() => setShowCreate(true)}
+        className="server-icon bg-bg-700 text-green-400 hover:bg-green-500 hover:text-white transition-colors"
+        title="Create a Server"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M19 13H13V19H11V13H5V11H11V5H13V11H19V13Z" />
+        </svg>
+      </button>
+
       {/* Spacer push logout to bottom */}
       <div className="flex-1" />
 
@@ -86,5 +101,10 @@ export default function ServerList() {
         </button>
       </div>
     </div>
+
+      {showCreate && (
+        <CreateServerModal onClose={() => setShowCreate(false)} />
+      )}
+    </>
   );
 }

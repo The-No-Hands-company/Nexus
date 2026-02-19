@@ -154,6 +154,94 @@ pub async fn list_channel_messages(
     }
 }
 
+/// Message row with author username (via JOIN with users table).
+#[derive(Debug, sqlx::FromRow)]
+pub struct MessageWithAuthor {
+    pub id: Uuid,
+    pub channel_id: Uuid,
+    pub author_id: Uuid,
+    pub author_username: String,
+    pub content: String,
+    pub message_type: i32,
+    pub edited: bool,
+    pub edited_at: Option<DateTime<Utc>>,
+    pub pinned: bool,
+    pub embeds: serde_json::Value,
+    pub attachments: serde_json::Value,
+    pub mentions: Vec<Uuid>,
+    pub mention_roles: Vec<Uuid>,
+    pub mention_everyone: bool,
+    pub reference_message_id: Option<Uuid>,
+    pub reference_channel_id: Option<Uuid>,
+    pub thread_id: Option<Uuid>,
+    pub flags: i32,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// List messages in a channel with author usernames (JOIN users), cursor-based pagination.
+pub async fn list_channel_messages_with_author(
+    pool: &PgPool,
+    channel_id: Uuid,
+    before: Option<Uuid>,
+    after: Option<Uuid>,
+    limit: i64,
+) -> Result<Vec<MessageWithAuthor>, sqlx::Error> {
+    let limit = limit.min(100).max(1);
+    if let Some(before_id) = before {
+        sqlx::query_as::<_, MessageWithAuthor>(
+            r#"
+            SELECT m.*, u.username AS author_username
+            FROM messages m
+            JOIN users u ON u.id = m.author_id
+            WHERE m.channel_id = $1
+              AND m.created_at < (SELECT created_at FROM messages WHERE id = $2)
+            ORDER BY m.created_at DESC
+            LIMIT $3
+            "#,
+        )
+        .bind(channel_id)
+        .bind(before_id)
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+    } else if let Some(after_id) = after {
+        sqlx::query_as::<_, MessageWithAuthor>(
+            r#"
+            SELECT * FROM (
+                SELECT m.*, u.username AS author_username
+                FROM messages m
+                JOIN users u ON u.id = m.author_id
+                WHERE m.channel_id = $1
+                  AND m.created_at > (SELECT created_at FROM messages WHERE id = $2)
+                ORDER BY m.created_at ASC
+                LIMIT $3
+            ) sub ORDER BY created_at DESC
+            "#,
+        )
+        .bind(channel_id)
+        .bind(after_id)
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+    } else {
+        sqlx::query_as::<_, MessageWithAuthor>(
+            r#"
+            SELECT m.*, u.username AS author_username
+            FROM messages m
+            JOIN users u ON u.id = m.author_id
+            WHERE m.channel_id = $1
+            ORDER BY m.created_at DESC
+            LIMIT $2
+            "#,
+        )
+        .bind(channel_id)
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+    }
+}
+
 /// Update a message's content (edit).
 pub async fn update_message(
     pool: &PgPool,
