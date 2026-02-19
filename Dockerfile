@@ -13,6 +13,7 @@ COPY crates/nexus-db/Cargo.toml crates/nexus-db/Cargo.toml
 COPY crates/nexus-api/Cargo.toml crates/nexus-api/Cargo.toml
 COPY crates/nexus-gateway/Cargo.toml crates/nexus-gateway/Cargo.toml
 COPY crates/nexus-voice/Cargo.toml crates/nexus-voice/Cargo.toml
+COPY crates/nexus-federation/Cargo.toml crates/nexus-federation/Cargo.toml
 COPY crates/nexus-server/Cargo.toml crates/nexus-server/Cargo.toml
 
 # Create dummy source files for dependency caching
@@ -21,6 +22,7 @@ RUN mkdir -p crates/nexus-common/src && echo "pub fn dummy() {}" > crates/nexus-
     mkdir -p crates/nexus-api/src && echo "pub fn dummy() {}" > crates/nexus-api/src/lib.rs && \
     mkdir -p crates/nexus-gateway/src && echo "pub fn dummy() {}" > crates/nexus-gateway/src/lib.rs && \
     mkdir -p crates/nexus-voice/src && echo "pub fn dummy() {}" > crates/nexus-voice/src/lib.rs && \
+    mkdir -p crates/nexus-federation/src && echo "pub fn dummy() {}" > crates/nexus-federation/src/lib.rs && \
     mkdir -p crates/nexus-server/src && echo "fn main() {}" > crates/nexus-server/src/main.rs
 
 # Build dependencies only (cached layer)

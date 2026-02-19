@@ -1,0 +1,67 @@
+# fly.toml — Nexus deployment on Fly.io
+# Deploy with: fly deploy
+# Docs: https://fly.io/docs/reference/configuration/
+
+app = "nexus"
+primary_region = "ams"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  SERVER__HOST = "0.0.0.0"
+  SERVER__PORT = "8080"
+  SERVER__GATEWAY_PORT = "8081"
+  SERVER__VOICE_PORT = "8082"
+  SERVER__FEDERATION_PORT = "8448"
+  RUST_LOG = "nexus=info,tower_http=warn"
+  # Set secrets via: fly secrets set JWT_SECRET=... DATABASE__URL=...
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8080
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+
+  [services.concurrency]
+    type = "requests"
+    hard_limit = 500
+    soft_limit = 400
+
+  [[services.http_checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "20s"
+    method = "GET"
+    path = "/api/v1/health"
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8081
+
+  [[services.ports]]
+    port = 8081
+    handlers = ["tls"]
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8448
+
+  [[services.ports]]
+    port = 8448
+    handlers = ["tls"]
+
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "1gb"
+
+[mounts]
+  source = "nexus_data"
+  destination = "/app/data"

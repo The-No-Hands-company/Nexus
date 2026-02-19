@@ -1,0 +1,63 @@
+# cargo-deny configuration
+# Run: cargo deny check
+# CI: see .github/workflows/ci.yml
+
+[advisories]
+# Vulnerability database
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+
+# Error on any unignored vulnerability
+deny = ["unsound", "unmaintained", "yanked", "notice"]
+ignore = []
+
+[licenses]
+# Allowed SPDX license expressions
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MPL-2.0",
+    "ISC",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "Unicode-DFS-2016",
+    "OpenSSL",
+    "CC0-1.0",
+    "Unlicense",
+    "Zlib",
+]
+# Deny these licenses explicitly
+deny = [
+    "GPL-2.0",   # GPL v2 only — no later or with exceptions
+    "AGPL-3.0",  # Our own code is AGPL; deny dependencies that are also AGPL
+                 # unless they're intentionally included
+]
+# Confidence threshold for licence detection
+confidence-threshold = 0.8
+
+[licenses.private]
+ignore = false
+
+[bans]
+# Disallow multiple versions of these crates
+multiple-versions = "warn"
+wildcards = "allow"
+
+# Deny these crates entirely
+deny = [
+    # Avoid old, unmaintained crypto
+    { name = "rust-crypto" },
+    # Use rustls instead of openssl where possible
+    # (openssl is allowed as a transitive dep of some C libs)
+]
+
+# Skip duplicate version checks for crates known to have two versions in the tree
+skip = []
+skip-tree = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

@@ -1,4 +1,4 @@
-//! Middleware — authentication extraction, rate limiting, etc.
+//! Middleware — authentication extraction, rate limiting, security headers, etc.
 
 use axum::{
     extract::Request,
@@ -70,3 +70,68 @@ impl AuthContext {
             .ok_or(NexusError::Unauthorized)
     }
 }
+
+// ── Security headers ──────────────────────────────────────────────────────────
+
+/// Add defensive security headers to every HTTP response.
+///
+/// Headers applied:
+/// - `X-Content-Type-Options: nosniff` — prevents MIME sniffing
+/// - `X-Frame-Options: DENY` — prevents clickjacking
+/// - `X-XSS-Protection: 1; mode=block` — legacy XSS protection
+/// - `Referrer-Policy: strict-origin-when-cross-origin`
+/// - `Permissions-Policy` — disables camera, mic, geolocation
+/// - `Strict-Transport-Security` — HSTS (max-age 2 years + preload)
+/// - `Content-Security-Policy` — restrictive CSP for API endpoints
+pub async fn security_headers(request: Request, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    let h = response.headers_mut();
+
+    macro_rules! set {
+        ($name:expr, $val:expr) => {
+            if let Ok(v) = $val.parse::<axum::http::HeaderValue>() {
+                h.insert($name, v);
+            }
+        };
+    }
+
+    set!(
+        axum::http::header::HeaderName::from_static("x-content-type-options"),
+        "nosniff"
+    );
+    set!(
+        axum::http::header::HeaderName::from_static("x-frame-options"),
+        "DENY"
+    );
+    set!(
+        axum::http::header::HeaderName::from_static("x-xss-protection"),
+        "1; mode=block"
+    );
+    set!(
+        axum::http::header::HeaderName::from_static("referrer-policy"),
+        "strict-origin-when-cross-origin"
+    );
+    set!(
+        axum::http::header::HeaderName::from_static("permissions-policy"),
+        "camera=(), microphone=(), geolocation=(), payment=()"
+    );
+    set!(
+        axum::http::header::HeaderName::from_static("strict-transport-security"),
+        "max-age=63072000; includeSubDomains; preload"
+    );
+    set!(
+        axum::http::header::HeaderName::from_static("content-security-policy"),
+        "default-src 'self'; \
+         script-src 'self'; \
+         style-src 'self' 'unsafe-inline'; \
+         img-src 'self' data: blob:; \
+         connect-src 'self' wss:; \
+         font-src 'self'; \
+         media-src 'self' blob:; \
+         worker-src 'self' blob:; \
+         frame-ancestors 'none'"
+    );
+
+    response
+}
+

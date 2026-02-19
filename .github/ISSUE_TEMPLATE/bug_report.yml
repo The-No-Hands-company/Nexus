@@ -1,0 +1,94 @@
+name: Bug Report
+description: Report a reproducible bug or regression
+title: "bug: "
+labels: ["bug", "needs-triage"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to report a bug. Please fill in as much detail as possible so we can reproduce and fix it quickly.
+
+        > ⚠️ **Security issue?** Please follow our [Security Policy](https://github.com/The-No-hands-Company/discordkiller/blob/main/SECURITY.md) instead of opening a public issue.
+
+  - type: input
+    id: nexus_version
+    attributes:
+      label: Nexus version
+      description: Output of `nexus --version` or the Docker image tag
+      placeholder: "v0.9.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment method
+      options:
+        - Docker Compose (dev)
+        - Docker Compose (prod)
+        - Kubernetes / Helm
+        - Fly.io
+        - Built from source
+      default: 0
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "Ubuntu 24.04 / macOS 14.4 / Windows 11"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the bug
+      description: A clear and concise description of what the bug is.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Minimal, numbered steps that reliably reproduce the issue.
+      placeholder: |
+        1. Start Nexus with `docker compose up`
+        2. Create a new server via the API
+        3. Send a message with content "…"
+        4. Observe the error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: What actually happened.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste any relevant log output. This will be formatted as code automatically.
+      render: shell
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Anything else that might help — screenshots, config snippets, etc.

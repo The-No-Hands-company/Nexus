@@ -1,0 +1,67 @@
+name: Feature Request
+description: Propose a new feature or enhancement
+title: "feat: "
+labels: ["enhancement", "needs-triage"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for the suggestion! Before opening this issue, please:
+        - Check the [roadmap](https://github.com/The-No-hands-Company/discordkiller/blob/main/ROADMAP.md) to see if the feature is already planned.
+        - Search [existing issues](https://github.com/The-No-hands-Company/discordkiller/issues) for similar requests.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Feature area
+      description: Which part of Nexus does this feature relate to?
+      options:
+        - REST API
+        - WebSocket / Gateway
+        - Voice
+        - Federation
+        - Self-hosting / Deployment
+        - Desktop client
+        - Documentation
+        - Developer experience
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What problem does this feature solve? What is the user need?
+      placeholder: "As a server admin, I need … because …"
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Describe the solution you have in mind. Include API shape, UI mockups, or config options if relevant.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What other approaches have you considered, and why did you rule them out?
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Anything else — links, prior art from other projects, screenshots, etc.
+
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution
+      options:
+        - label: I am willing to open a pull request to implement this feature

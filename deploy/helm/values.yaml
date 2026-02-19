@@ -1,0 +1,128 @@
+# Nexus Helm Chart — default values
+# Override with: helm install nexus ./deploy/helm -f my-values.yaml
+
+# ── Nexus server ──────────────────────────────────────────────────────────────
+replicaCount: 1
+
+image:
+  repository: ghcr.io/the-no-hands-company/nexus
+  pullPolicy: IfNotPresent
+  tag: ""  # defaults to appVersion
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# ── Service ───────────────────────────────────────────────────────────────────
+service:
+  type: ClusterIP
+  apiPort: 8080
+  gatewayPort: 8081
+  voicePort: 8082
+  federationPort: 8448
+
+# ── Ingress ───────────────────────────────────────────────────────────────────
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+  hosts:
+    - host: nexus.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: nexus-tls
+      hosts:
+        - nexus.example.com
+
+# ── Resources ─────────────────────────────────────────────────────────────────
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: 2000m
+    memory: 1Gi
+
+# ── Autoscaling ───────────────────────────────────────────────────────────────
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+
+# ── Config ────────────────────────────────────────────────────────────────────
+config:
+  serverName: "nexus.example.com"
+  logLevel: "nexus=info,tower_http=warn"
+  rustBacktrace: "0"
+
+# ── Secrets (set via --set or external secrets) ──────────────────────────────
+# All secrets should be provided via Kubernetes Secrets in production.
+secrets:
+  # Name of an existing secret to use. If set, secretValues below are ignored.
+  existingSecret: ""
+  secretValues:
+    jwtSecret: "CHANGE_ME_64_CHARS_MINIMUM"
+    postgresPassword: "CHANGE_ME"
+    redisPassword: "CHANGE_ME"
+    minioPassword: "CHANGE_ME"
+    meiliKey: "CHANGE_ME"
+
+# ── PostgreSQL (Bitnami sub-chart) ────────────────────────────────────────────
+postgresql:
+  enabled: true
+  auth:
+    database: nexus
+    username: nexus
+    password: "CHANGE_ME"
+  primary:
+    persistence:
+      size: 20Gi
+
+# ── Redis (Bitnami sub-chart) ─────────────────────────────────────────────────
+redis:
+  enabled: true
+  auth:
+    enabled: true
+    password: "CHANGE_ME"
+  architecture: standalone
+  master:
+    persistence:
+      size: 5Gi
+
+# ── MeiliSearch ───────────────────────────────────────────────────────────────
+meilisearch:
+  enabled: true
+  environment:
+    MEILI_ENV: production
+    MEILI_NO_ANALYTICS: "true"
+  persistence:
+    enabled: true
+    size: 10Gi
+
+# ── Pod settings ──────────────────────────────────────────────────────────────
+podAnnotations: {}
+podLabels: {}
+podSecurityContext:
+  fsGroup: 1000
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# ── Persistence ───────────────────────────────────────────────────────────────
+persistence:
+  enabled: false
+  storageClass: ""
+  size: 10Gi

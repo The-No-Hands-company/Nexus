@@ -33,3 +33,10 @@ rand = { workspace = true }
 meilisearch-sdk = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-config = { workspace = true }
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+
+[[bench]]
+name = "nexus_bench"
+harness = false

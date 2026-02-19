@@ -135,13 +135,43 @@
 - ✅ Discord webhook bridge (incoming)
 - ✅ Message relay (Nexus ↔ Matrix)
 
-## Phase 9: Launch (v0.9)
+## Phase 9: Launch (v0.9) ✅ Complete
 
-- Managed hosting (nexus.chat or similar)
-- Self-host documentation & one-click deploy
-- Security audit
-- Performance benchmarks
-- Community governance setup
+### 09-01: Deployment Infrastructure
+
+- [x] Multi-stage production Dockerfile (minimal image)
+- [x] `docker-compose.prod.yml` (all services, health checks, named volumes)
+- [x] Kubernetes Helm chart (`nexus-server`, `nexus-gateway`, `nexus-voice`)
+- [x] `fly.toml` for Fly.io deployment
+- [x] Environment variable reference documentation
+
+### 09-02: Self-Host Documentation & One-Click Deploy
+
+- [x] `docs/` directory structure
+- [x] Self-hosting guide (prerequisites, setup, configuration)
+- [x] `setup.sh` installer (env setup, DB migration, service start)
+- [x] Upgrade / migration guide
+
+### 09-03: Security Hardening
+
+- [x] `deny.toml` + cargo-deny CI step (audit vulnerabilities & licenses)
+- [x] Security HTTP headers middleware (HSTS, CSP, X-Frame-Options, Referrer-Policy)
+- [x] Auth hardening review (rate limiting, refresh token rotation, token expiry)
+- [x] `SECURITY.md` vulnerability disclosure policy
+
+### 09-04: Performance Benchmarks
+
+- [x] Criterion microbenchmarks for hot paths (message serialisation, canonical JSON, JWT validation)
+- [x] k6 load test scripts (auth, message send, WebSocket gateway)
+- [x] Baseline benchmark results committed to `benches/results/`
+
+### 09-05: Community Governance
+
+- [x] `CONTRIBUTING.md`
+- [x] `CODE_OF_CONDUCT.md`
+- [x] GitHub issue templates (bug report, feature request)
+- [x] GitHub PR template
+- [x] `SECURITY.md` (vulnerability disclosure)
 
 ## Phase 10: Mobile (v1.0)
 

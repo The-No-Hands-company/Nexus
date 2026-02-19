@@ -1,0 +1,178 @@
+# Nexus Production Stack
+# Deploy with: docker compose -f deploy/docker-compose.prod.yml up -d
+#
+# REQUIRED environment variables (set in .env.prod or export before running):
+#   NEXUS_POSTGRES_PASSWORD   — PostgreSQL password (strong random string)
+#   NEXUS_REDIS_PASSWORD      — Redis password
+#   NEXUS_MINIO_PASSWORD      — MinIO root password
+#   NEXUS_MEILI_KEY           — MeiliSearch master key
+#   NEXUS_JWT_SECRET          — JWT signing secret (≥64 chars)
+#   NEXUS_DOMAIN              — Public hostname (e.g. nexus.example.com)
+
+services:
+  # ── Nexus Server ───────────────────────────────────────────────────────────
+  nexus:
+    image: ghcr.io/the-no-hands-company/nexus:latest
+    container_name: nexus
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      scylla:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      meilisearch:
+        condition: service_healthy
+    environment:
+      DATABASE__URL: "postgres://nexus:${NEXUS_POSTGRES_PASSWORD}@postgres:5432/nexus"
+      REDIS__URL: "redis://:${NEXUS_REDIS_PASSWORD}@redis:6379"
+      SCYLLA__NODES: "scylla:9042"
+      STORAGE__ENDPOINT: "http://minio:9000"
+      STORAGE__ACCESS_KEY: "nexus"
+      STORAGE__SECRET_KEY: "${NEXUS_MINIO_PASSWORD}"
+      SEARCH__URL: "http://meilisearch:7700"
+      SEARCH__KEY: "${NEXUS_MEILI_KEY}"
+      AUTH__JWT_SECRET: "${NEXUS_JWT_SECRET}"
+      SERVER__NAME: "${NEXUS_DOMAIN:-localhost}"
+      SERVER__HOST: "0.0.0.0"
+      SERVER__PORT: "8080"
+      RUST_LOG: "nexus=info,tower_http=warn"
+    ports:
+      - "8080:8080"   # REST API
+      - "8081:8081"   # WebSocket Gateway
+      - "8082:8082"   # Voice signaling
+      - "8448:8448"   # Federation (Matrix S2S)
+    volumes:
+      - ./config.toml:/app/config.toml:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    networks:
+      - nexus-internal
+      - nexus-public
+
+  # ── PostgreSQL ─────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:17-alpine
+    container_name: nexus-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: nexus
+      POSTGRES_USER: nexus
+      POSTGRES_PASSWORD: "${NEXUS_POSTGRES_PASSWORD}"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexus"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nexus-internal
+
+  # ── Redis ──────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: nexus-redis
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${NEXUS_REDIS_PASSWORD}", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${NEXUS_REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nexus-internal
+
+  # ── ScyllaDB ───────────────────────────────────────────────────────────────
+  scylla:
+    image: scylladb/scylla:6.2
+    container_name: nexus-scylla
+    restart: unless-stopped
+    command: --smp 2 --memory 2G --overprovisioned 1 --authenticator PasswordAuthenticator
+    volumes:
+      - scylla_data:/var/lib/scylla
+    healthcheck:
+      test: ["CMD-SHELL", "nodetool status | grep -q UN"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    networks:
+      - nexus-internal
+
+  # ── MinIO ──────────────────────────────────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: nexus-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: nexus
+      MINIO_ROOT_PASSWORD: "${NEXUS_MINIO_PASSWORD}"
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nexus-internal
+
+  # ── MeiliSearch ────────────────────────────────────────────────────────────
+  meilisearch:
+    image: getmeili/meilisearch:v1.12
+    container_name: nexus-meilisearch
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: "${NEXUS_MEILI_KEY}"
+      MEILI_ENV: production
+      MEILI_NO_ANALYTICS: "true"
+    volumes:
+      - meilisearch_data:/meili_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nexus-internal
+
+  # ── Caddy (reverse proxy + TLS) ────────────────────────────────────────────
+  caddy:
+    image: caddy:2-alpine
+    container_name: nexus-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - nexus-public
+      - nexus-internal
+
+networks:
+  nexus-internal:
+    internal: true
+  nexus-public:
+
+volumes:
+  postgres_data:
+  redis_data:
+  scylla_data:
+  minio_data:
+  meilisearch_data:
+  caddy_data:
+  caddy_config:

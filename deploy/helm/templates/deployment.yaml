@@ -1,0 +1,118 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nexus.fullname" . }}
+  labels:
+    {{- include "nexus.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "nexus.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "nexus.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: api
+              containerPort: {{ .Values.service.apiPort }}
+              protocol: TCP
+            - name: gateway
+              containerPort: {{ .Values.service.gatewayPort }}
+              protocol: TCP
+            - name: voice
+              containerPort: {{ .Values.service.voicePort }}
+              protocol: TCP
+            - name: federation
+              containerPort: {{ .Values.service.federationPort }}
+              protocol: TCP
+          env:
+            - name: SERVER__NAME
+              value: {{ .Values.config.serverName | quote }}
+            - name: SERVER__HOST
+              value: "0.0.0.0"
+            - name: SERVER__PORT
+              value: {{ .Values.service.apiPort | quote }}
+            - name: RUST_LOG
+              value: {{ .Values.config.logLevel | quote }}
+            - name: AUTH__JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "nexus.secretName" . }}
+                  key: jwt-secret
+            - name: DATABASE__PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "nexus.secretName" . }}
+                  key: postgres-password
+            - name: REDIS__PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "nexus.secretName" . }}
+                  key: redis-password
+            - name: STORAGE__SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "nexus.secretName" . }}
+                  key: minio-password
+            - name: SEARCH__KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "nexus.secretName" . }}
+                  key: meili-key
+            {{- if .Values.postgresql.enabled }}
+            - name: DATABASE__URL
+              value: "postgres://{{ .Values.postgresql.auth.username }}:$(DATABASE__PASSWORD)@{{ include "nexus.fullname" . }}-postgresql:5432/{{ .Values.postgresql.auth.database }}"
+            {{- end }}
+            {{- if .Values.redis.enabled }}
+            - name: REDIS__URL
+              value: "redis://:$(REDIS__PASSWORD)@{{ include "nexus.fullname" . }}-redis-master:6379"
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: api
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: api
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

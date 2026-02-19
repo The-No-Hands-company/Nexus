@@ -80,6 +80,7 @@ pub fn build_router(state: AppState) -> Router {
         )
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .layer(tower_http::compression::CompressionLayer::new())
+        .layer(axum::middleware::from_fn(middleware::security_headers))
         .with_state(Arc::new(state))
 }
 
