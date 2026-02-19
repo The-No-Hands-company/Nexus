@@ -10,7 +10,7 @@ pub mod routes;
 use axum::Router;
 use nexus_common::gateway_event::GatewayEvent;
 use nexus_db::{search::SearchClient, storage::StorageClient, Database};
-use nexus_federation::ServerKeyPair;
+use nexus_federation::{client::FederationClient, ServerKeyPair};
 use nexus_voice::state::VoiceStateManager;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -35,6 +35,8 @@ pub struct AppState {
     pub server_name: String,
     /// Active Ed25519 signing key for all outbound federation requests.
     pub federation_key: Arc<ServerKeyPair>,
+    /// Signed HTTP client for outbound server-to-server federation requests.
+    pub federation_client: Arc<FederationClient>,
 }
 
 /// Build the complete API router with all routes and middleware.

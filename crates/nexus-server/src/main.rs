@@ -15,10 +15,11 @@ use nexus_db::{
     storage::{StorageClient, StorageConfig as DbStorageConfig},
     Database,
 };
-use nexus_federation::KeyManager;
+use nexus_federation::{FederationClient, KeyManager};
 use nexus_gateway::GatewayState;
 use nexus_voice::VoiceServer;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio::sync::broadcast;
 
 #[tokio::main]
@@ -79,6 +80,10 @@ async fn main() -> anyhow::Result<()> {
     // Load the active Ed25519 key from DB, or generate + persist a new one on first run.
     let federation_key = KeyManager::new(db.pg.clone()).load_or_generate().await?;
     tracing::info!("🔑 Federation signing key ready: {}", federation_key.key_id);
+    let federation_client = Arc::new(FederationClient::new(
+        &config.server.name,
+        federation_key.clone(),
+    ));
 
     // === REST API Server ===
     let api_state = AppState {
@@ -89,6 +94,7 @@ async fn main() -> anyhow::Result<()> {
         search,
         server_name: config.server.name.clone(),
         federation_key,
+        federation_client,
     };
     let api_router = build_router(api_state);
     let api_addr = SocketAddr::new(

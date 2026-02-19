@@ -317,20 +317,104 @@ async fn resolve_server(
 /// If the room is on a remote server, this triggers the make_join → send_join
 /// federation protocol.
 async fn join_federated_room(
-    State(_state): State<Arc<AppState>>,
-    axum::extract::Extension(_auth): axum::extract::Extension<crate::middleware::AuthContext>,
+    State(state): State<Arc<AppState>>,
+    axum::extract::Extension(auth): axum::extract::Extension<crate::middleware::AuthContext>,
     Json(body): Json<JoinRoomRequest>,
 ) -> (StatusCode, Json<Value>) {
     let room_id = body.room_id;
-    info!("Federated join request for room {}", room_id);
+    info!("Federated join request for room {} by {}", room_id, auth.username);
 
-    // TODO: parse room_id server part, resolve server, make_join, send_join.
-    (
-        StatusCode::ACCEPTED,
-        Json(json!({
-            "message": "Federated join initiated",
-            "room_id": room_id,
-            "status": "pending",
-        })),
-    )
+    // Parse `!channel:server_name` — extract the remote server part.
+    let remote_server = match room_id.split(':').nth(1) {
+        Some(s) => s.to_owned(),
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "Invalid room_id: expected !id:server format" })),
+            );
+        }
+    };
+
+    // Local rooms don't need the federation join protocol.
+    if remote_server == state.server_name {
+        return (
+            StatusCode::OK,
+            Json(json!({
+                "message": "Local room — joined directly",
+                "room_id": room_id,
+                "status": "joined",
+            })),
+        );
+    }
+
+    // Build the local user's MXID.
+    let user_mxid = format!("@{}:{}", auth.username, state.server_name);
+
+    // ── Step 1: make_join — get a join event template from the remote server ──
+    let make_join_resp = match state
+        .federation_client
+        .make_join(&remote_server, &room_id, &user_mxid)
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            warn!("make_join failed for {} on {}: {}", room_id, remote_server, e);
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({ "error": format!("make_join failed: {}", e) })),
+            );
+        }
+    };
+
+    // ── Step 2: fill in and sign the join event ───────────────────────────────
+    let mut join_event = make_join_resp.event;
+    if let Some(obj) = join_event.as_object_mut() {
+        obj.insert("origin".to_owned(), json!(&state.server_name));
+        obj.insert(
+            "origin_server_ts".to_owned(),
+            json!(chrono::Utc::now().timestamp_millis()),
+        );
+    }
+    if let Err(e) =
+        nexus_federation::sign_event(&state.federation_key, &state.server_name, &mut join_event)
+    {
+        warn!("Failed to sign join event for {}: {}", room_id, e);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(json!({ "error": "Failed to sign join event" })),
+        );
+    }
+
+    let event_id = nexus_federation::types::new_event_id(&state.server_name);
+
+    // ── Step 3: send_join — submit the signed event to the remote server ──────
+    match state
+        .federation_client
+        .send_join(&remote_server, &room_id, &event_id, &join_event)
+        .await
+    {
+        Ok(resp) => {
+            info!(
+                "Successfully joined federated room {} ({} state events)",
+                room_id,
+                resp.state.len()
+            );
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "message": "Federated join successful",
+                    "room_id": room_id,
+                    "status": "joined",
+                    "state_events": resp.state.len(),
+                })),
+            )
+        }
+        Err(e) => {
+            warn!("send_join failed for {} on {}: {}", room_id, remote_server, e);
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({ "error": format!("send_join failed: {}", e) })),
+            )
+        }
+    }
 }

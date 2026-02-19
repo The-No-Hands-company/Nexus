@@ -396,16 +396,43 @@ struct StateQuery {
 
 /// `GET /_nexus/federation/v1/state/{roomId}`
 async fn get_room_state(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(room_id): Path<String>,
-    Query(query): Query<StateQuery>,
+    Query(_query): Query<StateQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = extract_federation_origin(&headers) {
         return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response();
     }
-    // TODO: load state events from federated_rooms + federated_events.
-    (StatusCode::OK, Json(json!({ "pdus": [], "auth_chain": [] }))).into_response()
+
+    let pool = &state.db.pg;
+
+    let rows = sqlx::query(
+        "SELECT event_id, event_type, sender, origin_server, content, signatures, origin_server_ts \
+         FROM federated_events WHERE room_id = $1 ORDER BY origin_server_ts ASC LIMIT 100",
+    )
+    .bind(&room_id)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
+    let pdus: Vec<Value> = rows
+        .iter()
+        .map(|row| {
+            json!({
+                "event_id":  row.try_get::<String, _>("event_id").unwrap_or_default(),
+                "type":      row.try_get::<String, _>("event_type").unwrap_or_default(),
+                "room_id":   &room_id,
+                "sender":    row.try_get::<String, _>("sender").unwrap_or_default(),
+                "origin":    row.try_get::<String, _>("origin_server").unwrap_or_default(),
+                "content":   row.try_get::<Value, _>("content").unwrap_or(json!({})),
+                "signatures": row.try_get::<Value, _>("signatures").unwrap_or(json!({})),
+                "origin_server_ts": row.try_get::<i64, _>("origin_server_ts").unwrap_or(0),
+            })
+        })
+        .collect();
+
+    (StatusCode::OK, Json(json!({ "pdus": pdus, "auth_chain": [] }))).into_response()
 }
 
 // ─── Join protocol ────────────────────────────────────────────────────────────
@@ -446,19 +473,109 @@ async fn make_join(
 /// Accepts a signed join event from a remote server, adds the user to the
 /// room, and returns the current room state + auth chain.
 async fn send_join(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path((room_id, event_id)): Path<(String, String)>,
     Json(event): Json<Value>,
 ) -> impl IntoResponse {
-    if let Err(e) = extract_federation_origin(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response();
+    let origin = match extract_federation_origin(&headers) {
+        Ok(o) => o,
+        Err(e) => return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response(),
+    };
+
+    info!("Processing send_join for room {} event {} from {}", room_id, event_id, origin);
+
+    let pool = &state.db.pg;
+
+    // Verify signature (soft: skip when no keys are cached for the origin yet).
+    let verify_keys = load_server_verify_keys(pool, &origin).await;
+    if !verify_keys.is_empty() {
+        if let Err(e) = verify_pdu_signature(&event, &origin, &verify_keys) {
+            warn!("send_join sig verify failed from {}: {}", origin, e);
+            return (StatusCode::FORBIDDEN, Json(json!({ "error": "invalid signature" }))).into_response();
+        }
+    } else {
+        debug!("No cached keys for {} — accepting send_join without sig verify", origin);
     }
 
-    info!("Processing send_join for room {} event {}", room_id, event_id);
-    // TODO: verify join event signature, persist, dispatch to gateway.
+    // Upsert room.
+    let room_name = event
+        .get("content")
+        .and_then(|c| c.get("room_name"))
+        .and_then(Value::as_str)
+        .unwrap_or(&room_id)
+        .to_owned();
+    let _ = sqlx::query(
+        "INSERT INTO federated_rooms (room_id, origin_server, room_name, join_rule, member_count) \
+         VALUES ($1, $2, $3, 'public', 1) \
+         ON CONFLICT (room_id) DO UPDATE \
+         SET member_count = federated_rooms.member_count + 1, updated_at = NOW()",
+    )
+    .bind(&room_id)
+    .bind(&origin)
+    .bind(&room_name)
+    .execute(pool)
+    .await;
 
-    (StatusCode::OK, Json(json!({ "state": [], "auth_chain": [] }))).into_response()
+    // Persist join event.
+    let event_type = event.get("type").and_then(Value::as_str).unwrap_or("nexus.member.join").to_owned();
+    let sender = event.get("sender").and_then(Value::as_str).unwrap_or("").to_owned();
+    let ts = event.get("origin_server_ts").and_then(Value::as_i64).unwrap_or(0);
+    let content = event.get("content").cloned().unwrap_or(json!({}));
+    let sigs = event.get("signatures").cloned().unwrap_or(json!({}));
+    let _ = sqlx::query(
+        "INSERT INTO federated_events \
+         (event_id, room_id, event_type, sender, origin_server, origin_server_ts, content, signatures, txn_id) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'send_join') \
+         ON CONFLICT (event_id) DO NOTHING",
+    )
+    .bind(&event_id)
+    .bind(&room_id)
+    .bind(&event_type)
+    .bind(&sender)
+    .bind(&origin)
+    .bind(ts)
+    .bind(&content)
+    .bind(&sigs)
+    .execute(pool)
+    .await;
+
+    // Notify gateway of the member join.
+    let gw = nexus_common::gateway_event::GatewayEvent {
+        event_type: "FEDERATED_MEMBER_JOIN".to_owned(),
+        data: json!({ "room_id": room_id, "sender": sender, "origin": origin }),
+        server_id: None,
+        channel_id: None,
+        user_id: None,
+    };
+    let _ = state.gateway_tx.send(gw);
+
+    // Return room state snapshot.
+    let state_rows = sqlx::query(
+        "SELECT event_id, event_type, sender, origin_server, content, signatures, origin_server_ts \
+         FROM federated_events WHERE room_id = $1 ORDER BY origin_server_ts ASC LIMIT 100",
+    )
+    .bind(&room_id)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
+    let state_pdus: Vec<Value> = state_rows
+        .iter()
+        .map(|row| {
+            json!({
+                "event_id":  row.try_get::<String, _>("event_id").unwrap_or_default(),
+                "type":      row.try_get::<String, _>("event_type").unwrap_or_default(),
+                "room_id":   &room_id,
+                "sender":    row.try_get::<String, _>("sender").unwrap_or_default(),
+                "origin":    row.try_get::<String, _>("origin_server").unwrap_or_default(),
+                "content":   row.try_get::<Value, _>("content").unwrap_or(json!({})),
+                "origin_server_ts": row.try_get::<i64, _>("origin_server_ts").unwrap_or(0),
+            })
+        })
+        .collect();
+
+    (StatusCode::OK, Json(json!({ "state": state_pdus, "auth_chain": [] }))).into_response()
 }
 
 // ─── Backfill ─────────────────────────────────────────────────────────────────
@@ -474,7 +591,7 @@ struct BackfillQuery {
 /// Returns historical PDUs for a room, starting from the given event IDs,
 /// going backwards. Used to fill gaps in a remote server's event DAG.
 async fn backfill(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     Path(room_id): Path<String>,
     Query(query): Query<BackfillQuery>,
@@ -482,9 +599,54 @@ async fn backfill(
     if let Err(e) = extract_federation_origin(&headers) {
         return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response();
     }
-    let limit = query.limit.unwrap_or(20).min(100);
-    // TODO: fetch from federated_events in reverse order from v.
-    (StatusCode::OK, Json(json!({ "pdus": [] }))).into_response()
+    let pool = &state.db.pg;
+    let limit = query.limit.unwrap_or(20).min(100) as i64;
+
+    // Resolve starting timestamp from the first `v` event ID (if provided).
+    let start_ts: i64 = if let Some(ref v_param) = query.v {
+        let first_id = v_param.split(',').next().unwrap_or("").trim();
+        sqlx::query("SELECT origin_server_ts FROM federated_events WHERE event_id = $1")
+            .bind(first_id)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|row| row.try_get::<i64, _>("origin_server_ts").ok())
+            .unwrap_or(i64::MAX)
+    } else {
+        i64::MAX
+    };
+
+    let rows = sqlx::query(
+        "SELECT event_id, event_type, sender, origin_server, content, signatures, origin_server_ts \
+         FROM federated_events \
+         WHERE room_id = $1 AND origin_server_ts <= $2 \
+         ORDER BY origin_server_ts DESC LIMIT $3",
+    )
+    .bind(&room_id)
+    .bind(start_ts)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
+    let pdus: Vec<Value> = rows
+        .iter()
+        .map(|row| {
+            json!({
+                "event_id":  row.try_get::<String, _>("event_id").unwrap_or_default(),
+                "type":      row.try_get::<String, _>("event_type").unwrap_or_default(),
+                "room_id":   &room_id,
+                "sender":    row.try_get::<String, _>("sender").unwrap_or_default(),
+                "origin":    row.try_get::<String, _>("origin_server").unwrap_or_default(),
+                "content":   row.try_get::<Value, _>("content").unwrap_or(json!({})),
+                "signatures": row.try_get::<Value, _>("signatures").unwrap_or(json!({})),
+                "origin_server_ts": row.try_get::<i64, _>("origin_server_ts").unwrap_or(0),
+            })
+        })
+        .collect();
+
+    (StatusCode::OK, Json(json!({ "pdus": pdus }))).into_response()
 }
 
 // ─── Matrix AS bridge inbound ────────────────────────────────────────────────
@@ -493,9 +655,9 @@ async fn backfill(
 ///
 /// Matrix homeserver pushes events to this Application Service.
 /// Validates the `access_token` query param (our `hs_token`), then
-/// hands off to the bridge for processing.
+/// hands off to the bridge for processing and dispatches Nexus gateway events.
 async fn matrix_as_transaction(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
     Path(txn_id): Path<String>,
     Json(body): Json<Value>,
@@ -509,14 +671,61 @@ async fn matrix_as_transaction(
         return (StatusCode::FORBIDDEN, Json(json!({ "error": "Invalid homeserver token" }))).into_response();
     }
 
-    let event_count = body
-        .get("events")
-        .and_then(Value::as_array)
-        .map(Vec::len)
-        .unwrap_or(0);
+    // Parse body as a Matrix AS transaction.
+    let txn: nexus_federation::MatrixTransaction = match serde_json::from_value(body) {
+        Ok(t) => t,
+        Err(e) => {
+            warn!("matrix_as_transaction {}: parse error: {}", txn_id, e);
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": "invalid transaction body" }))).into_response();
+        }
+    };
 
-    info!("Matrix AS transaction {}: {} events", txn_id, event_count);
-    // TODO: pass to MatrixBridge::handle_transaction and dispatch Nexus events.
+    info!("Matrix AS transaction {}: {} events", txn_id, txn.events.len());
+
+    // Create bridge from env and translate events.
+    let homeserver_url = std::env::var("NEXUS_MATRIX_HS_URL").unwrap_or_default();
+    if !homeserver_url.is_empty() {
+        let bridge = nexus_federation::MatrixBridge::new(nexus_federation::BridgeConfig {
+            homeserver_url,
+            as_token: std::env::var("NEXUS_MATRIX_AS_TOKEN").unwrap_or_default(),
+            hs_token: std::env::var("NEXUS_MATRIX_HS_TOKEN").unwrap_or_default(),
+            bot_mxid: std::env::var("NEXUS_MATRIX_BOT_MXID").unwrap_or_default(),
+        });
+
+        for bridged in bridge.handle_transaction(txn).await {
+            match bridged {
+                nexus_federation::BridgedEvent::MessageCreate {
+                    matrix_room_id,
+                    sender_mxid,
+                    body,
+                    timestamp_ms,
+                } => {
+                    let gw = nexus_common::gateway_event::GatewayEvent {
+                        event_type: "MESSAGE_CREATE".to_owned(),
+                        data: json!({
+                            "source": "matrix",
+                            "matrix_room_id": matrix_room_id,
+                            "sender_mxid": sender_mxid,
+                            "content": { "body": body },
+                            "timestamp_ms": timestamp_ms,
+                        }),
+                        server_id: None,
+                        channel_id: None,
+                        user_id: None,
+                    };
+                    let _ = state.gateway_tx.send(gw);
+                }
+                nexus_federation::BridgedEvent::MemberJoin { matrix_room_id, mxid } => {
+                    debug!("Matrix member join: {} in {}", mxid, matrix_room_id);
+                }
+                nexus_federation::BridgedEvent::MemberLeave { matrix_room_id, mxid } => {
+                    debug!("Matrix member leave: {} in {}", mxid, matrix_room_id);
+                }
+            }
+        }
+    } else {
+        debug!("NEXUS_MATRIX_HS_URL not set — skipping bridge processing for {}", txn_id);
+    }
 
     (StatusCode::OK, Json(json!({}))).into_response()
 }

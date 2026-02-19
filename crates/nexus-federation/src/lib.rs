@@ -41,7 +41,10 @@ pub mod matrix_bridge;
 pub mod signatures;
 pub mod types;
 
+pub use client::FederationClient;
 pub use error::FederationError;
 pub use key_manager::KeyManager;
 pub use keys::ServerKeyPair;
+pub use matrix_bridge::{BridgeConfig, BridgedEvent, MatrixBridge, MatrixTransaction};
+pub use signatures::sign_event;
 pub use types::{FederationEvent, FederationTransaction, ServerInfo};
