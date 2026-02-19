@@ -99,41 +99,41 @@
 - ✅ Webhooks
 - ✅ Slash commands
 
-## Phase 8: Federation (v0.8) 🟡 In Progress
+## Phase 8: Federation (v0.8) ✅ Complete
 
 ### 08-01: Core Infrastructure
 
-- [ ] nexus-federation crate (key management, signing, event types)
-- [ ] Ed25519 server signing keys (generate, persist, rotate)
-- [ ] Server discovery via `.well-known/nexus/server`
-- [ ] Signed federation requests (HMAC + Ed25519 authorization headers)
+- ✅ nexus-federation crate (key management, signing, event types)
+- ✅ Ed25519 server signing keys (generate, persist, rotate)
+- ✅ Server discovery via `.well-known/nexus/server`
+- ✅ Signed federation requests (HMAC + Ed25519 authorization headers)
 
 ### 08-02: Server-to-Server Protocol
 
-- [ ] `PUT /_nexus/federation/v1/send/{txnId}` — receive events from remote servers
-- [ ] `GET /_nexus/federation/v1/event/{eventId}` — serve individual events
-- [ ] `GET /_nexus/federation/v1/state/{roomId}` — channel state exchange
-- [ ] `GET/_PUT /_nexus/federation/v1/make_join/{roomId}/{userId}` — join protocol
-- [ ] Federation backfill (`/backfill`, `/get_missing_events`)
+- ✅ `PUT /_nexus/federation/v1/send/{txnId}` — receive events from remote servers
+- ✅ `GET /_nexus/federation/v1/event/{eventId}` — serve individual events
+- ✅ `GET /_nexus/federation/v1/state/{roomId}` — channel state exchange
+- ✅ `GET/_PUT /_nexus/federation/v1/make_join/{roomId}/{userId}` — join protocol
+- ✅ Federation backfill (`/backfill`, `/get_missing_events`)
 
 ### 08-03: Federated Identity
 
-- [ ] federated_servers table + server trust list
-- [ ] federated_users table (remote user profiles)
-- [ ] `@user:server.tld` MXIDs for cross-server mentions
-- [ ] Remote user avatar/display-name resolution
+- ✅ federated_servers table + server trust list
+- ✅ federated_users table (remote user profiles)
+- ✅ `@user:server.tld` MXIDs for cross-server mentions
+- ✅ Remote user avatar/display-name resolution
 
 ### 08-04: Discovery & Directory
 
-- [ ] Public server directory API (`/api/v1/directory`)
-- [ ] Cross-server join flow via directory
-- [ ] Server search by name/topic
+- ✅ Public server directory API (`/api/v1/directory`)
+- ✅ Cross-server join flow via directory
+- ✅ Server search by name/topic
 
 ### 08-05: Bridge
 
-- [ ] Matrix Application Service bridge stub
-- [ ] Discord webhook bridge (incoming)
-- [ ] Message relay (Nexus ↔ Matrix)
+- ✅ Matrix Application Service bridge stub
+- ✅ Discord webhook bridge (incoming)
+- ✅ Message relay (Nexus ↔ Matrix)
 
 ## Phase 9: Launch (v0.9)
 
