@@ -35,25 +35,25 @@ pub fn router() -> Router<Arc<AppState>> {
         // Own device management
         .route("/devices", post(register_device).get(list_my_devices))
         .route(
-            "/devices/:device_id",
+            "/devices/{device_id}",
             get(get_device).delete(delete_device),
         )
         .route(
-            "/devices/:device_id/signed-pre-key",
+            "/devices/{device_id}/signed-pre-key",
             post(rotate_signed_pre_key),
         )
         .route(
-            "/devices/:device_id/one-time-pre-keys",
+            "/devices/{device_id}/one-time-pre-keys",
             post(upload_one_time_pre_keys),
         )
         .route(
-            "/devices/:device_id/one-time-pre-keys/count",
+            "/devices/{device_id}/one-time-pre-keys/count",
             get(count_one_time_pre_keys),
         )
         // Key bundles (for X3DH initiators)
-        .route("/users/:user_id/key-bundle", get(get_all_key_bundles))
+        .route("/users/{user_id}/key-bundle", get(get_all_key_bundles))
         .route(
-            "/users/:user_id/devices/:device_id/key-bundle",
+            "/users/{user_id}/devices/{device_id}/key-bundle",
             get(get_device_key_bundle),
         )
         .route_layer(middleware::from_fn(crate::middleware::auth_middleware))

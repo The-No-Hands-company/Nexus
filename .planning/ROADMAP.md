@@ -173,6 +173,38 @@
 - [x] GitHub PR template
 - [x] `SECURITY.md` (vulnerability disclosure)
 
+## Phase 9.5: Lite / Zero-Infra Mode (v0.9.5) 🔲 Planned
+
+> **Goal:** A single `nexus` binary you can download and run with zero external dependencies — no Postgres, no Redis, no Docker required. Install it, run it, invite friends to your server. The IRC model applied to Nexus.
+
+### 09.5-01: Embedded Storage Backend
+
+- [ ] Add `storage-lite` feature flag to `nexus-db`
+- [ ] Swap Postgres for **SQLite** (`sqlx` SQLite driver, same migration files)
+- [ ] Swap ScyllaDB for SQLite append-only messages table (partitioned by channel)
+- [ ] Swap MinIO for local filesystem storage (`tokio::fs`, configurable path)
+- [ ] Replace Redis pub/sub with in-process `tokio::sync::broadcast` channels
+- [ ] Feature-gate the heavy backend crates behind `storage-full` (default for prod builds)
+
+### 09.5-02: Embedded Search
+
+- [ ] Replace Meilisearch with `tantivy` (embedded Rust full-text search engine)
+- [ ] Index guilds, channels, users, messages in a local `tantivy` directory
+- [ ] Keep Meilisearch path active when `NEXUS_SEARCH_URL` env var is set
+
+### 09.5-03: Single-Binary Server Mode
+
+- [ ] `nexus serve --lite` flag that activates embedded backends automatically
+- [ ] Auto-create SQLite DB + data directories on first run
+- [ ] Auto-generate secrets and write a `nexus.toml` config on first run
+- [ ] Print a "Your server is running at http://localhost:8080" startup message
+
+### 09.5-04: Lite Distribution
+
+- [ ] GitHub Releases: attach pre-built `nexus-linux-x86_64`, `nexus-linux-aarch64`, `nexus-macos`, `nexus-windows.exe` binaries (via CI)
+- [ ] Single-line install script: `curl -fsSL https://get.nexus.chat | sh`
+- [ ] Update `docs/self-hosting.md` with a "Quick — no Docker" section at the top
+
 ## Phase 10: Mobile (v1.0)
 
 - React Native iOS + Android

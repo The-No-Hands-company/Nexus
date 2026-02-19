@@ -30,6 +30,50 @@ pub struct CurrentUser {
     pub presence: String,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct RegisterRequest {
+    pub username: String,
+    pub email: String,
+    pub password: String,
+}
+
+/// Register a new account and immediately store the resulting credentials.
+#[tauri::command]
+pub async fn register(
+    state: State<'_, AppState>,
+    username: String,
+    email: String,
+    password: String,
+) -> Result<AuthResponse, String> {
+    let session = state.session_snapshot();
+    let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
+
+    let resp = client
+        .post(format!("{base}/api/v1/auth/register"))
+        .json(&RegisterRequest { username, email, password })
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Registration failed ({status}): {body}"));
+    }
+
+    let auth: AuthResponse = resp.json().await.map_err(|e| e.to_string())?;
+
+    {
+        let mut session = state.session.lock().unwrap();
+        session.access_token = Some(auth.access_token.clone());
+        session.refresh_token = Some(auth.refresh_token.clone());
+        session.user_id = Some(auth.user_id);
+        session.username = Some(auth.username.clone());
+    }
+
+    Ok(auth)
+}
+
 /// Log in and store credentials in `AppState`.
 #[tauri::command]
 pub async fn login(

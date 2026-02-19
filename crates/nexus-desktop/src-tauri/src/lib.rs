@@ -55,6 +55,7 @@ pub fn run() {
         // ── Tauri commands ───────────────────────────────────────────────────
         .invoke_handler(tauri::generate_handler![
             // Auth
+            commands::auth::register,
             commands::auth::login,
             commands::auth::logout,
             commands::auth::refresh_token,

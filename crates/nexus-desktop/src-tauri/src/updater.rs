@@ -9,6 +9,7 @@ use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::UpdaterExt;
 use tokio::time::{interval, Duration};
 
+
 /// Spawn a background task that polls for updates on a fixed interval.
 ///
 /// Call from `app.setup()`:
@@ -16,7 +17,7 @@ use tokio::time::{interval, Duration};
 /// updater::schedule_check(app.handle().clone());
 /// ```
 pub fn schedule_check(app: AppHandle) {
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         // First check after 30 seconds (let the app settle)
         tokio::time::sleep(Duration::from_secs(30)).await;
         check_once(&app).await;

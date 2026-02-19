@@ -25,11 +25,11 @@ use crate::{middleware::AuthContext, AppState};
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route(
-            "/users/:user_id/devices/:device_id/safety-number",
+            "/users/{user_id}/devices/{device_id}/safety-number",
             get(get_safety_number),
         )
         .route(
-            "/users/:user_id/devices/:device_id/verify",
+            "/users/{user_id}/devices/{device_id}/verify",
             post(verify_device).delete(remove_verification),
         )
         .route("/users/@me/verifications", get(list_my_verifications))

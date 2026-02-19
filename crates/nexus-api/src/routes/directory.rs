@@ -37,7 +37,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/directory/servers", get(list_servers))
         .route("/directory/rooms", get(list_rooms))
         .route("/directory/rooms/search", get(search_rooms))
-        .route("/directory/resolve/:server_name", get(resolve_server))
+        .route("/directory/resolve/{server_name}", get(resolve_server))
         // Authenticated actions
         .route(
             "/directory/rooms/join",

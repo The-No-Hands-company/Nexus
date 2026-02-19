@@ -48,22 +48,22 @@ pub fn federation_router() -> Router<Arc<AppState>> {
         // Well-known delegation
         .route("/.well-known/nexus/server", get(well_known_server))
         // Federation S2S endpoints
-        .route("/_nexus/federation/v1/send/:txn_id", put(receive_transaction))
-        .route("/_nexus/federation/v1/event/:event_id", get(get_event))
-        .route("/_nexus/federation/v1/state/:room_id", get(get_room_state))
+        .route("/_nexus/federation/v1/send/{txn_id}", put(receive_transaction))
+        .route("/_nexus/federation/v1/event/{event_id}", get(get_event))
+        .route("/_nexus/federation/v1/state/{room_id}", get(get_room_state))
         .route(
-            "/_nexus/federation/v1/make_join/:room_id/:user_id",
+            "/_nexus/federation/v1/make_join/{room_id}/{user_id}",
             get(make_join),
         )
         .route(
-            "/_nexus/federation/v1/send_join/:room_id/:event_id",
+            "/_nexus/federation/v1/send_join/{room_id}/{event_id}",
             put(send_join),
         )
-        .route("/_nexus/federation/v1/backfill/:room_id", get(backfill))
+        .route("/_nexus/federation/v1/backfill/{room_id}", get(backfill))
         // v0.8/08-03: User profile endpoint (MXID resolution)
-        .route("/_nexus/federation/v1/user/:user_id", get(user_profile))
+        .route("/_nexus/federation/v1/user/{user_id}", get(user_profile))
         // Matrix Application Service bridge (inbound)
-        .route("/_matrix/app/v1/transactions/:txn_id", put(matrix_as_transaction))
+        .route("/_matrix/app/v1/transactions/{txn_id}", put(matrix_as_transaction))
 }
 
 // ─── Key document ─────────────────────────────────────────────────────────────

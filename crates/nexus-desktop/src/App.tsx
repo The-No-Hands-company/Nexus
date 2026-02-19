@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useStore } from "./store";
 import LoginPage from "./pages/Login";
+import RegisterPage from "./pages/Register";
 import MainLayout from "./pages/MainLayout";
 import OverlayPage from "./pages/Overlay";
 import UpdateBanner from "./components/UpdateBanner";
@@ -46,6 +47,10 @@ export default function App() {
             <Route
               path="/login"
               element={session ? <Navigate to="/" replace /> : <LoginPage />}
+            />
+            <Route
+              path="/register"
+              element={session ? <Navigate to="/" replace /> : <RegisterPage />}
             />
             <Route
               path="/*"

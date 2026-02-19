@@ -42,6 +42,8 @@ pub fn init() -> Result<&'static AppConfig, config::ConfigError> {
         .set_default("limits.max_message_length", 4000)?
         .set_default("limits.max_file_size_bytes", 104_857_600)? // 100MB default
         .set_default("limits.max_attachment_count", 10)?
+        .set_default("scylla.nodes", "127.0.0.1:9042")?
+        .set_default("scylla.keyspace", "nexus")?
         // Optional config file
         .add_source(config::File::with_name("config").required(false))
         // Environment variables (NEXUS_SERVER__HOST, NEXUS_DATABASE__URL, etc.)
@@ -97,9 +99,9 @@ pub struct RedisConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct ScyllaConfig {
-    /// ScyllaDB contact points
-    pub nodes: Vec<String>,
-    /// Keyspace name
+    /// ScyllaDB contact points — comma-separated, e.g. `127.0.0.1:9042,127.0.0.2:9042`
+    pub nodes: String,
+    /// Cassandra keyspace name
     pub keyspace: String,
 }
 

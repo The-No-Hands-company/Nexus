@@ -3,31 +3,43 @@ import { Link } from "react-router-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { useStore, Session } from "../store";
 
-interface LoginResponse {
+interface AuthResponse {
   access_token: string;
   refresh_token: string;
   user_id: string;
   username: string;
 }
 
-export default function LoginPage() {
+export default function RegisterPage() {
   const { setSession } = useStore();
 
   const [serverUrl, setServerUrl] = useState("http://localhost:8080");
   const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
+
+    if (password !== confirm) {
+      setError("Passwords do not match.");
+      return;
+    }
+
     setLoading(true);
     try {
-      // Persist server URL so commands know where to connect
       await invoke("set_server_url", { url: serverUrl });
 
-      const resp = await invoke<LoginResponse>("login", { username, password });
+      const resp = await invoke<AuthResponse>("register", {
+        username,
+        email,
+        password,
+      });
+
       const session: Session = {
         userId: resp.user_id,
         username: resp.username,
@@ -35,6 +47,7 @@ export default function LoginPage() {
         accessToken: resp.access_token,
       };
       setSession(session);
+      // App.tsx will redirect to "/" once session is set
     } catch (err) {
       setError(String(err));
     } finally {
@@ -50,8 +63,8 @@ export default function LoginPage() {
           <div className="w-16 h-16 rounded-2xl bg-accent-500 flex items-center justify-center mb-3">
             <span className="text-white text-3xl font-bold select-none">N</span>
           </div>
-          <h1 className="text-xl font-bold text-white">Welcome back</h1>
-          <p className="text-muted text-sm mt-1">Sign in to Nexus</p>
+          <h1 className="text-xl font-bold text-white">Create an account</h1>
+          <p className="text-muted text-sm mt-1">Join Nexus</p>
         </div>
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
@@ -86,6 +99,21 @@ export default function LoginPage() {
 
           <div>
             <label className="block text-xs font-semibold text-muted uppercase tracking-wide mb-1">
+              Email
+            </label>
+            <input
+              className="input"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              autoComplete="email"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-muted uppercase tracking-wide mb-1">
               Password
             </label>
             <input
@@ -94,7 +122,22 @@ export default function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
-              autoComplete="current-password"
+              autoComplete="new-password"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-muted uppercase tracking-wide mb-1">
+              Confirm Password
+            </label>
+            <input
+              className="input"
+              type="password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              placeholder="••••••••"
+              autoComplete="new-password"
               required
             />
           </div>
@@ -110,14 +153,14 @@ export default function LoginPage() {
             className="btn-primary mt-2 w-full"
             disabled={loading}
           >
-            {loading ? "Signing in…" : "Sign In"}
+            {loading ? "Creating account…" : "Create Account"}
           </button>
         </form>
 
         <p className="text-center text-sm text-muted mt-6">
-          Don't have an account?{" "}
-          <Link to="/register" className="text-accent-400 hover:underline">
-            Create one
+          Already have an account?{" "}
+          <Link to="/login" className="text-accent-400 hover:underline">
+            Sign in
           </Link>
         </p>
       </div>

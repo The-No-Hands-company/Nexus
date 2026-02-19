@@ -68,8 +68,8 @@ tokio-tungstenite = "0.26"
 futures-util = "0.3"
 
 # S3/Object storage
-aws-sdk-s3 = "1.65"
-aws-config = "1.5"
+aws-sdk-s3 = { version = "1.65", features = ["behavior-version-latest"] }
+aws-config = { version = "1.5", features = ["behavior-version-latest"] }
 
 # Search
 meilisearch-sdk = "0.27"

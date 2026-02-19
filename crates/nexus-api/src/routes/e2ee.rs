@@ -27,11 +27,11 @@ use nexus_common::gateway_event::GatewayEvent;
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route(
-            "/channels/:channel_id/encrypted-messages",
+            "/channels/{channel_id}/encrypted-messages",
             get(list_encrypted_messages).post(send_encrypted_message),
         )
         .route(
-            "/channels/:channel_id/e2ee",
+            "/channels/{channel_id}/e2ee",
             get(get_e2ee_config).put(enable_e2ee),
         )
         .route_layer(middleware::from_fn(crate::middleware::auth_middleware))
