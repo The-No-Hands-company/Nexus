@@ -24,7 +24,8 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tracing::info;
+use sqlx::Row as _;
+use tracing::{info, warn};
 
 use crate::AppState;
 
@@ -108,27 +109,55 @@ struct PaginatedServers {
 /// Return all servers listed in the `directory_servers` table.
 /// This includes our own server plus any federated servers that have opted in.
 async fn list_servers(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     Query(q): Query<PaginationQuery>,
 ) -> Json<PaginatedServers> {
     let limit = q.limit.unwrap_or(20).min(100) as i64;
 
-    // TODO: query directory_servers table from DB.
-    // Placeholder response so the endpoint works immediately.
-    let this_server =
-        std::env::var("NEXUS_SERVER_NAME").unwrap_or_else(|_| "localhost".to_owned());
+    let rows = sqlx::query(
+        "SELECT server_name, description, icon_url, public_room_count, total_users \
+         FROM directory_servers \
+         ORDER BY server_name ASC \
+         LIMIT $1",
+    )
+    .bind(limit)
+    .fetch_all(&state.db.pg)
+    .await;
 
-    Json(PaginatedServers {
-        servers: vec![ServerEntry {
-            server_name: this_server,
-            description: Some("This Nexus server".to_owned()),
-            icon_url: None,
-            public_room_count: 0,
-            total_users: 0,
-        }],
-        total_count: 1,
-        next_batch: None,
-    })
+    let mut servers: Vec<ServerEntry> = match rows {
+        Ok(rows) => rows
+            .into_iter()
+            .map(|r| ServerEntry {
+                server_name:      r.try_get("server_name").unwrap_or_default(),
+                description:      r.try_get("description").ok().flatten(),
+                icon_url:         r.try_get("icon_url").ok().flatten(),
+                public_room_count:r.try_get::<i32, _>("public_room_count").unwrap_or(0) as u64,
+                total_users:      r.try_get::<i32, _>("total_users").unwrap_or(0) as u64,
+            })
+            .collect(),
+        Err(e) => {
+            warn!("Failed to list directory servers: {}", e);
+            vec![]
+        }
+    };
+
+    // Always include this server first (even if not yet in directory_servers).
+    let this_name = state.server_name.clone();
+    if !servers.iter().any(|s| s.server_name == this_name) {
+        servers.insert(
+            0,
+            ServerEntry {
+                server_name: this_name,
+                description:      Some("This Nexus server".into()),
+                icon_url:         None,
+                public_room_count: 0,
+                total_users:       0,
+            },
+        );
+    }
+
+    let total_count = servers.len() as u64;
+    Json(PaginatedServers { servers, total_count, next_batch: None })
 }
 
 /// `GET /api/v1/directory/rooms`
@@ -136,12 +165,43 @@ async fn list_servers(
 /// Return all publicly joinable federated rooms — from this server and any
 /// remote servers in the directory.
 async fn list_rooms(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     Query(q): Query<PaginationQuery>,
 ) -> Json<PaginatedRooms> {
     let limit = q.limit.unwrap_or(20).min(100) as i64;
-    // TODO: query federated_rooms WHERE join_rule = 'public' ORDER BY member_count DESC.
-    Json(PaginatedRooms { rooms: vec![], total_count: 0, next_batch: None })
+
+    let rows = sqlx::query(
+        "SELECT room_id, name, topic, member_count, origin_server, join_rule \
+         FROM federated_rooms \
+         WHERE join_rule = 'public' \
+         ORDER BY member_count DESC \
+         LIMIT $1",
+    )
+    .bind(limit)
+    .fetch_all(&state.db.pg)
+    .await;
+
+    let rooms: Vec<RoomEntry> = match rows {
+        Ok(rows) => rows
+            .into_iter()
+            .map(|r| RoomEntry {
+                room_id:      r.try_get("room_id").unwrap_or_default(),
+                name:         r.try_get("name").ok().flatten(),
+                topic:        r.try_get("topic").ok().flatten(),
+                member_count: r.try_get::<i32, _>("member_count").unwrap_or(0) as u64,
+                server_name:  r.try_get("origin_server").unwrap_or_default(),
+                join_rule:    r.try_get("join_rule").unwrap_or_else(|_| "public".into()),
+                tags:         vec![],
+            })
+            .collect(),
+        Err(e) => {
+            warn!("Failed to list federated rooms: {}", e);
+            vec![]
+        }
+    };
+
+    let total_count = rooms.len() as u64;
+    Json(PaginatedRooms { rooms, total_count, next_batch: None })
 }
 
 /// `GET /api/v1/directory/rooms/search?q=<query>&server=<server>&limit=<n>`
@@ -149,15 +209,64 @@ async fn list_rooms(
 /// Full-text search across public room names and topics, optionally scoped
 /// to a specific server.
 async fn search_rooms(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     Query(q): Query<SearchQuery>,
 ) -> Json<PaginatedRooms> {
-    let _query_str = q.q.unwrap_or_default();
-    let _server_filter = q.server;
-    let _limit = q.limit.unwrap_or(20).min(100) as i64;
+    let query_str = format!("%{}%", q.q.unwrap_or_default());
+    let server_filter = q.server;
+    let limit = q.limit.unwrap_or(20).min(100) as i64;
 
-    // TODO: use MeiliSearch or ILIKE across federated_rooms to return matches.
-    Json(PaginatedRooms { rooms: vec![], total_count: 0, next_batch: None })
+    let rows = if let Some(ref server) = server_filter {
+        sqlx::query(
+            "SELECT room_id, name, topic, member_count, origin_server, join_rule \
+             FROM federated_rooms \
+             WHERE join_rule = 'public' \
+               AND origin_server = $1 \
+               AND (name ILIKE $2 OR topic ILIKE $2) \
+             ORDER BY member_count DESC \
+             LIMIT $3",
+        )
+        .bind(server)
+        .bind(&query_str)
+        .bind(limit)
+        .fetch_all(&state.db.pg)
+        .await
+    } else {
+        sqlx::query(
+            "SELECT room_id, name, topic, member_count, origin_server, join_rule \
+             FROM federated_rooms \
+             WHERE join_rule = 'public' \
+               AND (name ILIKE $1 OR topic ILIKE $1) \
+             ORDER BY member_count DESC \
+             LIMIT $2",
+        )
+        .bind(&query_str)
+        .bind(limit)
+        .fetch_all(&state.db.pg)
+        .await
+    };
+
+    let rooms: Vec<RoomEntry> = match rows {
+        Ok(rows) => rows
+            .into_iter()
+            .map(|r| RoomEntry {
+                room_id:      r.try_get("room_id").unwrap_or_default(),
+                name:         r.try_get("name").ok().flatten(),
+                topic:        r.try_get("topic").ok().flatten(),
+                member_count: r.try_get::<i32, _>("member_count").unwrap_or(0) as u64,
+                server_name:  r.try_get("origin_server").unwrap_or_default(),
+                join_rule:    r.try_get("join_rule").unwrap_or_else(|_| "public".into()),
+                tags:         vec![],
+            })
+            .collect(),
+        Err(e) => {
+            warn!("Failed to search federated rooms: {}", e);
+            vec![]
+        }
+    };
+
+    let total_count = rooms.len() as u64;
+    Json(PaginatedRooms { rooms, total_count, next_batch: None })
 }
 
 /// `GET /api/v1/directory/resolve/:server_name`
@@ -165,15 +274,41 @@ async fn search_rooms(
 /// Return the resolved federation base URL and key information for a server.
 /// Useful for clients that want to verify a server before joining a room.
 async fn resolve_server(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     Path(server_name): Path<String>,
 ) -> Json<Value> {
-    // TODO: call DiscoveryCache::resolve and return the result + cached key info.
-    Json(json!({
-        "server_name": server_name,
-        "base_url": format!("https://{}:8448", server_name),
-        "status": "unknown",
-    }))
+    // Check the local `federated_servers` cache first.
+    let row = sqlx::query(
+        "SELECT server_name, base_url, server_version, is_blocked \
+         FROM federated_servers \
+         WHERE server_name = $1",
+    )
+    .bind(&server_name)
+    .fetch_optional(&state.db.pg)
+    .await
+    .ok()
+    .flatten();
+
+    if let Some(r) = row {
+        let is_blocked: bool = r.try_get("is_blocked").unwrap_or(false);
+        let base_url: Option<String> = r.try_get("base_url").ok().flatten();
+        let version: Option<String> = r.try_get("server_version").ok().flatten();
+
+        Json(json!({
+            "server_name": server_name,
+            "base_url": base_url.unwrap_or_else(|| format!("https://{}:8448", server_name)),
+            "version": version,
+            "is_blocked": is_blocked,
+            "status": if is_blocked { "blocked" } else { "known" },
+        }))
+    } else {
+        // Not in cache — return a best-effort default for the caller to verify.
+        Json(json!({
+            "server_name": server_name,
+            "base_url": format!("https://{}:8448", server_name),
+            "status": "unknown",
+        }))
+    }
 }
 
 /// `POST /api/v1/directory/rooms/join`
