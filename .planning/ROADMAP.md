@@ -135,17 +135,17 @@
 - [ ] Discord webhook bridge (incoming)
 - [ ] Message relay (Nexus ↔ Matrix)
 
-## Phase 9: Mobile (v0.9)
-
-- React Native iOS + Android
-- Push notifications (FCM/APNs, self-hosted option via UnifiedPush)
-- Voice/video on mobile
-- Offline message queue
-
-## Phase 10: Launch (v1.0)
+## Phase 9: Launch (v0.9)
 
 - Managed hosting (nexus.chat or similar)
 - Self-host documentation & one-click deploy
 - Security audit
 - Performance benchmarks
 - Community governance setup
+
+## Phase 10: Mobile (v1.0)
+
+- React Native iOS + Android
+- Push notifications (FCM/APNs, self-hosted option via UnifiedPush)
+- Voice/video on mobile
+- Offline message queue
