@@ -118,10 +118,10 @@ async fn list_servers(
         "SELECT server_name, description, icon_url, public_room_count, total_users \
          FROM directory_servers \
          ORDER BY server_name ASC \
-         LIMIT $1",
+         LIMIT ?",
     )
     .bind(limit)
-    .fetch_all(&state.db.pg)
+    .fetch_all(&state.db.pool)
     .await;
 
     let mut servers: Vec<ServerEntry> = match rows {
@@ -175,10 +175,10 @@ async fn list_rooms(
          FROM federated_rooms \
          WHERE join_rule = 'public' \
          ORDER BY member_count DESC \
-         LIMIT $1",
+         LIMIT ?",
     )
     .bind(limit)
-    .fetch_all(&state.db.pg)
+    .fetch_all(&state.db.pool)
     .await;
 
     let rooms: Vec<RoomEntry> = match rows {
@@ -221,28 +221,28 @@ async fn search_rooms(
             "SELECT room_id, name, topic, member_count, origin_server, join_rule \
              FROM federated_rooms \
              WHERE join_rule = 'public' \
-               AND origin_server = $1 \
-               AND (name ILIKE $2 OR topic ILIKE $2) \
+               AND origin_server = ? \
+               AND (name ILIKE ? OR topic ILIKE ?) \
              ORDER BY member_count DESC \
-             LIMIT $3",
+             LIMIT ?",
         )
         .bind(server)
         .bind(&query_str)
         .bind(limit)
-        .fetch_all(&state.db.pg)
+        .fetch_all(&state.db.pool)
         .await
     } else {
         sqlx::query(
             "SELECT room_id, name, topic, member_count, origin_server, join_rule \
              FROM federated_rooms \
              WHERE join_rule = 'public' \
-               AND (name ILIKE $1 OR topic ILIKE $1) \
+               AND (name ILIKE ? OR topic ILIKE ?) \
              ORDER BY member_count DESC \
-             LIMIT $2",
+             LIMIT ?",
         )
         .bind(&query_str)
         .bind(limit)
-        .fetch_all(&state.db.pg)
+        .fetch_all(&state.db.pool)
         .await
     };
 
@@ -281,10 +281,10 @@ async fn resolve_server(
     let row = sqlx::query(
         "SELECT server_name, base_url, server_version, is_blocked \
          FROM federated_servers \
-         WHERE server_name = $1",
+         WHERE server_name = ?",
     )
     .bind(&server_name)
-    .fetch_optional(&state.db.pg)
+    .fetch_optional(&state.db.pool)
     .await
     .ok()
     .flatten();

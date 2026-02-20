@@ -32,7 +32,7 @@ async fn get_current_user(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
 ) -> NexusResult<Json<UserResponse>> {
-    let user = users::find_by_id(&state.db.pg, auth.user_id)
+    let user = users::find_by_id(&state.db.pool, auth.user_id)
         .await?
         .ok_or(NexusError::NotFound {
             resource: "User".into(),
@@ -51,7 +51,7 @@ async fn update_current_user(
 
     // If changing username, check availability
     if let Some(ref new_username) = body.username {
-        if let Some(existing) = users::find_by_username(&state.db.pg, new_username).await? {
+        if let Some(existing) = users::find_by_username(&state.db.pool, new_username).await? {
             if existing.id != auth.user_id {
                 return Err(NexusError::AlreadyExists {
                     resource: "Username".into(),
@@ -61,7 +61,7 @@ async fn update_current_user(
     }
 
     let user = users::update_user(
-        &state.db.pg,
+        &state.db.pool,
         auth.user_id,
         body.username.as_deref(),
         body.display_name.as_deref(),
@@ -78,7 +78,7 @@ async fn get_user(
     State(state): State<Arc<AppState>>,
     Path(user_id): Path<Uuid>,
 ) -> NexusResult<Json<UserResponse>> {
-    let user = users::find_by_id(&state.db.pg, user_id)
+    let user = users::find_by_id(&state.db.pool, user_id)
         .await?
         .ok_or(NexusError::NotFound {
             resource: "User".into(),

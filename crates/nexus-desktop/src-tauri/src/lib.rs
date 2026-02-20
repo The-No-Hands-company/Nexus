@@ -66,6 +66,7 @@ pub fn run() {
             commands::servers::create_server,
             commands::channels::list_channels,
             commands::channels::get_channel,
+            commands::channels::create_channel,
             // Messages
             commands::messages::send_message,
             commands::messages::fetch_history,

@@ -31,7 +31,7 @@ use uuid::Uuid;
 // ============================================================
 
 /// A registered device belonging to a user.
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Device {
     pub id: Uuid,
     pub user_id: Uuid,
@@ -94,7 +94,7 @@ pub struct OtpkPublic {
 // One-Time Pre-Keys
 // ============================================================
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OneTimePreKey {
     pub id: Uuid,
     pub device_id: Uuid,
@@ -108,7 +108,7 @@ pub struct OneTimePreKey {
 // E2EE Sessions
 // ============================================================
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct E2eeSession {
     pub id: Uuid,
     pub owner_device_id: Uuid,
@@ -128,7 +128,7 @@ pub struct E2eeSession {
 ///
 /// `ciphertext_map` is a JSON object: `{ "<device_uuid>": { "type": 1, "body": "<base64>" } }`
 /// where `type` 1 = PreKeySignalMessage (first message), 2 = SignalMessage (subsequent).
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EncryptedMessage {
     pub id: Uuid,
     pub channel_id: Uuid,
@@ -146,7 +146,7 @@ pub struct EncryptedMessage {
 // E2EE Channel Config
 // ============================================================
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct E2eeChannel {
     pub channel_id: Uuid,
     pub enabled_by: Uuid,
@@ -159,7 +159,7 @@ pub struct E2eeChannel {
 // Device Verification
 // ============================================================
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeviceVerification {
     pub id: Uuid,
     pub verifier_id: Uuid,

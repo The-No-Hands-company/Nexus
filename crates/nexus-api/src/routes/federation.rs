@@ -119,12 +119,12 @@ async fn receive_transaction(
     // ── 2. Idempotency: skip already-processed transactions ───────────────────
     match sqlx::query(
         "SELECT 1 FROM federation_txn_log \
-         WHERE txn_id = $1 AND origin_server = $2 \
+         WHERE txn_id = ? AND origin_server = ? \
          LIMIT 1",
     )
     .bind(&txn_id)
     .bind(&origin)
-    .fetch_optional(&state.db.pg)
+    .fetch_optional(&state.db.pool)
     .await
     {
         Ok(Some(_)) => {
@@ -138,18 +138,18 @@ async fn receive_transaction(
     // ── 3. Upsert origin server in federated_servers ──────────────────────────
     if let Err(e) = sqlx::query(
         "INSERT INTO federated_servers (server_name, last_seen_at) \
-         VALUES ($1, NOW()) \
+         VALUES (?, NOW()) \
          ON CONFLICT (server_name) DO UPDATE SET last_seen_at = NOW()",
     )
     .bind(&origin)
-    .execute(&state.db.pg)
+    .execute(&state.db.pool)
     .await
     {
         warn!("Failed to upsert federated server {}: {}", origin, e);
     }
 
     // ── 4. Load verify keys for the origin server ─────────────────────────────
-    let verify_keys = load_server_verify_keys(&state.db.pg, &origin).await;
+    let verify_keys = load_server_verify_keys(&state.db.pool, &origin).await;
 
     // ── 5. Process each PDU ───────────────────────────────────────────────────
     let pdus = body
@@ -166,7 +166,7 @@ async fn receive_transaction(
     let mut accepted = 0i32;
 
     for pdu in &pdus {
-        match process_pdu(&state.db.pg, &origin, &txn_id, &verify_keys, &state.server_name, pdu).await {
+        match process_pdu(&state.db.pool, &origin, &txn_id, &verify_keys, &state.server_name, pdu).await {
             Ok(true) => accepted += 1,
             Ok(false) => debug!("PDU from {} was a duplicate (already stored)", origin),
             Err(e) => warn!("Rejected PDU from {}: {}", origin, e),
@@ -182,14 +182,14 @@ async fn receive_transaction(
     if let Err(e) = sqlx::query(
         "INSERT INTO federation_txn_log \
          (txn_id, origin_server, pdu_count, edu_count) \
-         VALUES ($1, $2, $3, $4) \
+         VALUES (?, ?, ?, ?) \
          ON CONFLICT (txn_id, origin_server) DO NOTHING",
     )
     .bind(&txn_id)
     .bind(&origin)
     .bind(pdu_count)
     .bind(edu_count)
-    .execute(&state.db.pg)
+    .execute(&state.db.pool)
     .await
     {
         warn!("Failed to write federation txn log: {}", e);
@@ -250,18 +250,18 @@ async fn process_pdu(
         "INSERT INTO federated_events \
          (event_id, room_id, event_type, sender, origin_server, \
           origin_server_ts, content, signatures, txn_id) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) \
          ON CONFLICT (event_id) DO NOTHING",
     )
-    .bind(event_id)
-    .bind(room_id)
+    .bind(event_id.to_string())
+    .bind(room_id.to_string())
     .bind(event_type)
     .bind(sender)
     .bind(origin)
     .bind(origin_server_ts)
     .bind(&content)
     .bind(&signatures)
-    .bind(txn_id)
+    .bind(txn_id.to_string())
     .execute(pool)
     .await?;
 
@@ -324,7 +324,7 @@ async fn load_server_verify_keys(
     server_name: &str,
 ) -> serde_json::Map<String, Value> {
     let row = sqlx::query(
-        "SELECT verify_keys FROM federated_servers WHERE server_name = $1",
+        "SELECT verify_keys FROM federated_servers WHERE server_name = ?",
     )
     .bind(server_name)
     .fetch_optional(pool)
@@ -357,10 +357,10 @@ async fn get_event(
         "SELECT event_id, room_id, event_type, sender, origin_server, \
                 origin_server_ts, content, signatures \
          FROM federated_events \
-         WHERE event_id = $1 AND is_redacted = FALSE",
+         WHERE event_id = ? AND is_redacted = FALSE",
     )
     .bind(&event_id)
-    .fetch_optional(&state.db.pg)
+    .fetch_optional(&state.db.pool)
     .await;
 
     match row {
@@ -405,11 +405,11 @@ async fn get_room_state(
         return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response();
     }
 
-    let pool = &state.db.pg;
+    let pool = &state.db.pool;
 
     let rows = sqlx::query(
         "SELECT event_id, event_type, sender, origin_server, content, signatures, origin_server_ts \
-         FROM federated_events WHERE room_id = $1 ORDER BY origin_server_ts ASC LIMIT 100",
+         FROM federated_events WHERE room_id = ? ORDER BY origin_server_ts ASC LIMIT 100",
     )
     .bind(&room_id)
     .fetch_all(pool)
@@ -485,7 +485,7 @@ async fn send_join(
 
     info!("Processing send_join for room {} event {} from {}", room_id, event_id, origin);
 
-    let pool = &state.db.pg;
+    let pool = &state.db.pool;
 
     // Verify signature (soft: skip when no keys are cached for the origin yet).
     let verify_keys = load_server_verify_keys(pool, &origin).await;
@@ -507,7 +507,7 @@ async fn send_join(
         .to_owned();
     let _ = sqlx::query(
         "INSERT INTO federated_rooms (room_id, origin_server, room_name, join_rule, member_count) \
-         VALUES ($1, $2, $3, 'public', 1) \
+         VALUES (?, ?, ?, 'public', 1) \
          ON CONFLICT (room_id) DO UPDATE \
          SET member_count = federated_rooms.member_count + 1, updated_at = NOW()",
     )
@@ -526,7 +526,7 @@ async fn send_join(
     let _ = sqlx::query(
         "INSERT INTO federated_events \
          (event_id, room_id, event_type, sender, origin_server, origin_server_ts, content, signatures, txn_id) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'send_join') \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'send_join') \
          ON CONFLICT (event_id) DO NOTHING",
     )
     .bind(&event_id)
@@ -553,7 +553,7 @@ async fn send_join(
     // Return room state snapshot.
     let state_rows = sqlx::query(
         "SELECT event_id, event_type, sender, origin_server, content, signatures, origin_server_ts \
-         FROM federated_events WHERE room_id = $1 ORDER BY origin_server_ts ASC LIMIT 100",
+         FROM federated_events WHERE room_id = ? ORDER BY origin_server_ts ASC LIMIT 100",
     )
     .bind(&room_id)
     .fetch_all(pool)
@@ -599,14 +599,14 @@ async fn backfill(
     if let Err(e) = extract_federation_origin(&headers) {
         return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response();
     }
-    let pool = &state.db.pg;
+    let pool = &state.db.pool;
     let limit = query.limit.unwrap_or(20).min(100) as i64;
 
     // Resolve starting timestamp from the first `v` event ID (if provided).
     let start_ts: i64 = if let Some(ref v_param) = query.v {
         let first_id = v_param.split(',').next().unwrap_or("").trim();
-        sqlx::query("SELECT origin_server_ts FROM federated_events WHERE event_id = $1")
-            .bind(first_id)
+        sqlx::query("SELECT origin_server_ts FROM federated_events WHERE event_id = ?")
+            .bind(first_id.to_string())
             .fetch_optional(pool)
             .await
             .ok()
@@ -620,8 +620,8 @@ async fn backfill(
     let rows = sqlx::query(
         "SELECT event_id, event_type, sender, origin_server, content, signatures, origin_server_ts \
          FROM federated_events \
-         WHERE room_id = $1 AND origin_server_ts <= $2 \
-         ORDER BY origin_server_ts DESC LIMIT $3",
+         WHERE room_id = ? AND origin_server_ts <= ? \
+         ORDER BY origin_server_ts DESC LIMIT ?",
     )
     .bind(&room_id)
     .bind(start_ts)
@@ -771,7 +771,7 @@ async fn user_profile(
         user_id.clone()
     };
 
-    match users::find_by_username(&state.db.pg, &localpart).await {
+    match users::find_by_username(&state.db.pool, &localpart).await {
         Ok(Some(user)) => {
             let mxid = format!("@{}:{}", user.username, state.server_name);
             (
@@ -832,7 +832,7 @@ async fn upsert_federated_user(
 
     // Look up (or insert) the origin server to get its UUID.
     let server_id: Option<uuid::Uuid> = sqlx::query(
-        "SELECT id FROM federated_servers WHERE server_name = $1",
+        "SELECT id FROM federated_servers WHERE server_name = ?",
     )
     .bind(&server)
     .fetch_optional(pool)
@@ -845,7 +845,7 @@ async fn upsert_federated_user(
         None => {
             // Auto-register the server if we haven't seen it yet.
             let row = sqlx::query(
-                "INSERT INTO federated_servers (server_name) VALUES ($1) \
+                "INSERT INTO federated_servers (server_name) VALUES (?) \
                  ON CONFLICT (server_name) DO UPDATE SET last_seen_at = NOW() \
                  RETURNING id",
             )
@@ -882,14 +882,14 @@ async fn upsert_federated_user(
     sqlx::query(
         "INSERT INTO federated_users \
          (mxid, localpart, server_id, display_name, avatar_url) \
-         VALUES ($1, $2, $3, $4, $5) \
+         VALUES (?, ?, ?, ?, ?) \
          ON CONFLICT (mxid) DO UPDATE SET \
-         display_name = COALESCE($4, federated_users.display_name), \
-         avatar_url   = COALESCE($5, federated_users.avatar_url)",
+         display_name = COALESCE(?, federated_users.display_name), \
+         avatar_url   = COALESCE(?, federated_users.avatar_url)",
     )
     .bind(sender)
     .bind(&localpart)
-    .bind(server_id)
+    .bind(server_id.to_string())
     .bind(display_name)
     .bind(avatar_url)
     .execute(pool)

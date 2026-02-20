@@ -102,7 +102,7 @@ async fn create_emoji(
     })?;
 
     // Check server emoji limit
-    let count = emoji::count_for_server(&state.db.pg, server_id).await?;
+    let count = emoji::count_for_server(&state.db.pool, server_id).await?;
     if count >= MAX_EMOJI_PER_SERVER {
         return Err(NexusError::LimitReached {
             message: format!("Server has reached the emoji limit ({MAX_EMOJI_PER_SERVER})"),
@@ -130,7 +130,7 @@ async fn create_emoji(
         .ok();
 
     let row = emoji::create_emoji(
-        &state.db.pg,
+        &state.db.pool,
         emoji_id,
         server_id,
         auth.user_id,
@@ -165,7 +165,7 @@ async fn list_emoji(
     Path(server_id): Path<Uuid>,
 ) -> NexusResult<Json<Vec<ServerEmoji>>> {
     let _ = auth;
-    let rows = emoji::list_for_server(&state.db.pg, server_id).await?;
+    let rows = emoji::list_for_server(&state.db.pool, server_id).await?;
     let list: Vec<ServerEmoji> = rows.into_iter().map(Into::into).collect();
     Ok(Json(list))
 }
@@ -180,7 +180,7 @@ async fn get_emoji(
     Path((_server_id, emoji_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<ServerEmoji>> {
     let _ = auth;
-    let row = emoji::find_by_id(&state.db.pg, emoji_id)
+    let row = emoji::find_by_id(&state.db.pool, emoji_id)
         .await?
         .ok_or(NexusError::NotFound {
             resource: "Emoji".into(),
@@ -205,7 +205,7 @@ async fn update_emoji(
         message: "name is required".into(),
     })?;
 
-    let row = emoji::update_emoji(&state.db.pg, emoji_id, server_id, &name)
+    let row = emoji::update_emoji(&state.db.pool, emoji_id, server_id, &name)
         .await?;
 
     let se: ServerEmoji = row.into();
@@ -230,7 +230,7 @@ async fn delete_emoji(
     State(state): State<Arc<AppState>>,
     Path((server_id, emoji_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    let storage_key = emoji::delete_emoji(&state.db.pg, emoji_id, server_id)
+    let storage_key = emoji::delete_emoji(&state.db.pool, emoji_id, server_id)
         .await?
         .ok_or(NexusError::NotFound {
             resource: "Emoji".into(),

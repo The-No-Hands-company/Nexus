@@ -1,6 +1,6 @@
 import { useState, FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../invoke";
 import { useStore, Session } from "../store";
 
 interface AuthUserInfo {
@@ -37,6 +37,8 @@ export default function LoginPage() {
       const session: Session = {
         userId: resp.user.id,
         username: resp.user.username,
+        displayName: resp.user.display_name ?? undefined,
+        avatar: resp.user.avatar ?? undefined,
         serverUrl,
         accessToken: resp.access_token,
       };

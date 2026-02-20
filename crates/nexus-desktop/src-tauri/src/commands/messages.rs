@@ -60,6 +60,12 @@ pub async fn send_message(
     content: String,
 ) -> Result<MessageClient, String> {
     let session = state.session_snapshot();
+    if session.server_url.is_empty() {
+        return Err("No server URL configured. Please log in again.".into());
+    }
+    if session.access_token.is_none() {
+        return Err("Not authenticated. Please log in again.".into());
+    }
     let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
     let resp = client
         .post(format!("{base}/api/v1/channels/{channel_id}/messages"))
@@ -67,6 +73,11 @@ pub async fn send_message(
         .send()
         .await
         .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Server error {status}: {body}"));
+    }
     let raw: RawMessage = resp.json().await.map_err(|e| e.to_string())?;
     Ok(MessageClient::from(raw))
 }
@@ -88,6 +99,11 @@ pub async fn fetch_history(
         url.push_str(&format!("&before={b}"));
     }
     let resp = client.get(url).send().await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Server error {status}: {body}"));
+    }
     let raw: Vec<RawMessage> = resp.json().await.map_err(|e| e.to_string())?;
     Ok(raw.into_iter().map(MessageClient::from).collect())
 }

@@ -77,7 +77,7 @@ async fn get_global_commands(
     Path(app_id): Path<Uuid>,
 ) -> NexusResult<Json<Vec<SlashCommand>>> {
     verify_app_access(&state, app_id, auth.user_id).await?;
-    let cmds = slash_commands::get_global_commands(&state.db.pg, app_id).await?;
+    let cmds = slash_commands::get_global_commands(&state.db.pool, app_id).await?;
     Ok(Json(cmds))
 }
 
@@ -88,7 +88,7 @@ async fn get_global_command(
     Path((app_id, command_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<SlashCommand>> {
     verify_app_access(&state, app_id, auth.user_id).await?;
-    let cmd = slash_commands::get_command(&state.db.pg, command_id)
+    let cmd = slash_commands::get_command(&state.db.pool, command_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "command".to_string() })?;
     Ok(Json(cmd))
@@ -104,7 +104,7 @@ async fn create_global_command(
     verify_app_access(&state, app_id, auth.user_id).await?;
     let id = snowflake::generate_id();
     let cmd = slash_commands::upsert_command(
-        &state.db.pg,
+        &state.db.pool,
         id,
         app_id,
         None,
@@ -129,12 +129,12 @@ async fn edit_global_command(
     Json(body): Json<UpsertCommandRequest>,
 ) -> NexusResult<Json<SlashCommand>> {
     verify_app_access(&state, app_id, auth.user_id).await?;
-    let existing = slash_commands::get_command(&state.db.pg, command_id)
+    let existing = slash_commands::get_command(&state.db.pool, command_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "command".to_string() })?;
 
     let cmd = slash_commands::upsert_command(
-        &state.db.pg,
+        &state.db.pool,
         command_id,
         app_id,
         existing.server_id,
@@ -160,7 +160,7 @@ async fn delete_global_command(
     Path((app_id, command_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<axum::http::StatusCode> {
     verify_app_access(&state, app_id, auth.user_id).await?;
-    slash_commands::delete_command(&state.db.pg, command_id).await?;
+    slash_commands::delete_command(&state.db.pool, command_id).await?;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
@@ -185,7 +185,7 @@ async fn bulk_overwrite_global_commands(
         .collect();
 
     let cmds =
-        slash_commands::bulk_overwrite_global_commands(&state.db.pg, app_id, &commands).await?;
+        slash_commands::bulk_overwrite_global_commands(&state.db.pool, app_id, &commands).await?;
     Ok(Json(cmds))
 }
 
@@ -200,7 +200,7 @@ async fn get_server_commands(
     Path((app_id, server_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<Vec<SlashCommand>>> {
     verify_app_access(&state, app_id, auth.user_id).await?;
-    let cmds = slash_commands::get_server_commands(&state.db.pg, app_id, server_id).await?;
+    let cmds = slash_commands::get_server_commands(&state.db.pool, app_id, server_id).await?;
     Ok(Json(cmds))
 }
 
@@ -211,7 +211,7 @@ async fn get_server_command(
     Path((app_id, _server_id, command_id)): Path<(Uuid, Uuid, Uuid)>,
 ) -> NexusResult<Json<SlashCommand>> {
     verify_app_access(&state, app_id, auth.user_id).await?;
-    let cmd = slash_commands::get_command(&state.db.pg, command_id)
+    let cmd = slash_commands::get_command(&state.db.pool, command_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "command".to_string() })?;
     Ok(Json(cmd))
@@ -227,7 +227,7 @@ async fn create_server_command(
     verify_app_access(&state, app_id, auth.user_id).await?;
     let id = snowflake::generate_id();
     let cmd = slash_commands::upsert_command(
-        &state.db.pg,
+        &state.db.pool,
         id,
         app_id,
         Some(server_id),
@@ -251,11 +251,11 @@ async fn edit_server_command(
     Json(body): Json<UpsertCommandRequest>,
 ) -> NexusResult<Json<SlashCommand>> {
     verify_app_access(&state, app_id, auth.user_id).await?;
-    let existing = slash_commands::get_command(&state.db.pg, command_id)
+    let existing = slash_commands::get_command(&state.db.pool, command_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "command".to_string() })?;
     let cmd = slash_commands::upsert_command(
-        &state.db.pg,
+        &state.db.pool,
         command_id,
         app_id,
         existing.server_id,
@@ -280,7 +280,7 @@ async fn delete_server_command(
     Path((app_id, _server_id, command_id)): Path<(Uuid, Uuid, Uuid)>,
 ) -> NexusResult<axum::http::StatusCode> {
     verify_app_access(&state, app_id, auth.user_id).await?;
-    slash_commands::delete_command(&state.db.pg, command_id).await?;
+    slash_commands::delete_command(&state.db.pool, command_id).await?;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
@@ -305,7 +305,7 @@ async fn bulk_overwrite_server_commands(
         .collect();
 
     let cmds = slash_commands::bulk_overwrite_server_commands(
-        &state.db.pg,
+        &state.db.pool,
         app_id,
         server_id,
         &commands,
@@ -331,9 +331,9 @@ async fn list_available_commands(
     Query(q): Query<AvailableCommandsQuery>,
 ) -> NexusResult<Json<Vec<SlashCommand>>> {
     let cmds = if let Some(app_id) = q.application_id {
-        slash_commands::get_server_commands(&state.db.pg, app_id, server_id).await?
+        slash_commands::get_server_commands(&state.db.pool, app_id, server_id).await?
     } else {
-        slash_commands::get_all_server_commands(&state.db.pg, server_id).await?
+        slash_commands::get_all_server_commands(&state.db.pool, server_id).await?
     };
     Ok(Json(cmds))
 }
@@ -351,7 +351,7 @@ async fn create_interaction(
     // Resolve command to find application_id
     let command_id = body.command_id;
     let app_id = if let Some(cid) = command_id {
-        slash_commands::get_command(&state.db.pg, cid)
+        slash_commands::get_command(&state.db.pool, cid)
             .await?
             .ok_or(NexusError::NotFound { resource: "command".to_string() })?
             .application_id
@@ -370,7 +370,7 @@ async fn create_interaction(
         .collect();
 
     let interaction = slash_commands::create_interaction(
-        &state.db.pg,
+        &state.db.pool,
         interaction_id,
         app_id,
         &body.interaction_type,
@@ -429,7 +429,7 @@ async fn verify_app_access(
     app_id: Uuid,
     user_id: Uuid,
 ) -> NexusResult<()> {
-    let app = bots::get_bot(&state.db.pg, app_id)
+    let app = bots::get_bot(&state.db.pool, app_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "application".to_string() })?;
     if app.owner_id != user_id {

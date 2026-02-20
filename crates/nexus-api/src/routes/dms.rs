@@ -54,30 +54,30 @@ async fn list_dm_channels(
         r#"
         SELECT c.* FROM channels c
         INNER JOIN dm_participants dp ON dp.channel_id = c.id
-        WHERE dp.user_id = $1 AND c.channel_type IN ('dm', 'group_dm')
+        WHERE dp.user_id = ? AND c.channel_type IN ('dm', 'group_dm')
         ORDER BY c.updated_at DESC
         "#,
     )
-    .bind(auth.user_id)
-    .fetch_all(&state.db.pg)
+    .bind(auth.user_id.to_string())
+    .fetch_all(&state.db.pool)
     .await?;
 
     // For each DM, fetch the other participants
     let mut results = Vec::with_capacity(dms.len());
     for dm in &dms {
-        let participants: Vec<(Uuid,)> = sqlx::query_as(
-            "SELECT user_id FROM dm_participants WHERE channel_id = $1",
+        let participants: Vec<(String,)> = sqlx::query_as(
+            "SELECT user_id FROM dm_participants WHERE channel_id = ?",
         )
-        .bind(dm.id)
-        .fetch_all(&state.db.pg)
+        .bind(dm.id.to_string())
+        .fetch_all(&state.db.pool)
         .await?;
 
-        let participant_ids: Vec<Uuid> = participants.into_iter().map(|p| p.0).collect();
+        let participant_ids: Vec<Uuid> = participants.into_iter().filter_map(|p| p.0.parse().ok()).collect();
 
         // Fetch participant user info
         let mut users = Vec::new();
         for &uid in &participant_ids {
-            if let Some(user) = nexus_db::repository::users::find_by_id(&state.db.pg, uid).await? {
+            if let Some(user) = nexus_db::repository::users::find_by_id(&state.db.pool, uid).await? {
                 users.push(serde_json::json!({
                     "id": user.id,
                     "username": user.username,
@@ -115,18 +115,18 @@ async fn create_dm(
         }
 
         // Verify recipient exists
-        nexus_db::repository::users::find_by_id(&state.db.pg, recipient_id)
+        nexus_db::repository::users::find_by_id(&state.db.pool, recipient_id)
             .await?
             .ok_or(NexusError::NotFound {
                 resource: "User".into(),
             })?;
 
         let dm_id = snowflake::generate_id();
-        let dm = channels::find_or_create_dm(&state.db.pg, dm_id, auth.user_id, recipient_id)
+        let dm = channels::find_or_create_dm(&state.db.pool, dm_id, auth.user_id, recipient_id)
             .await?;
 
         // Fetch recipient info
-        let recipient = nexus_db::repository::users::find_by_id(&state.db.pg, recipient_id)
+        let recipient = nexus_db::repository::users::find_by_id(&state.db.pool, recipient_id)
             .await?
             .ok_or(NexusError::NotFound { resource: "User".into() })?;
 
@@ -164,7 +164,7 @@ async fn create_dm(
 
         // Create group DM channel
         let channel = channels::create_channel(
-            &state.db.pg,
+            &state.db.pool,
             channel_id,
             None,
             None,
@@ -180,17 +180,17 @@ async fn create_dm(
         all_participants.push(auth.user_id);
 
         for &uid in &all_participants {
-            sqlx::query("INSERT INTO dm_participants (channel_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING")
-                .bind(channel_id)
-                .bind(uid)
-                .execute(&state.db.pg)
+            sqlx::query("INSERT INTO dm_participants (channel_id, user_id) VALUES (?, ?) ON CONFLICT DO NOTHING")
+                .bind(channel_id.to_string())
+                .bind(uid.to_string())
+                .execute(&state.db.pool)
                 .await?;
         }
 
         // Fetch participant info
         let mut users = Vec::new();
         for &uid in &all_participants {
-            if let Some(user) = nexus_db::repository::users::find_by_id(&state.db.pg, uid).await? {
+            if let Some(user) = nexus_db::repository::users::find_by_id(&state.db.pool, uid).await? {
                 users.push(serde_json::json!({
                     "id": user.id,
                     "username": user.username,
@@ -222,11 +222,11 @@ async fn get_dm_channel(
 ) -> NexusResult<Json<serde_json::Value>> {
     // Verify user is a participant
     let is_participant: (bool,) = sqlx::query_as(
-        "SELECT EXISTS(SELECT 1 FROM dm_participants WHERE channel_id = $1 AND user_id = $2)",
+        "SELECT EXISTS(SELECT 1 FROM dm_participants WHERE channel_id = ? AND user_id = ?)",
     )
-    .bind(channel_id)
-    .bind(auth.user_id)
-    .fetch_one(&state.db.pg)
+    .bind(channel_id.to_string())
+    .bind(auth.user_id.to_string())
+    .fetch_one(&state.db.pool)
     .await?;
 
     if !is_participant.0 {
@@ -235,20 +235,24 @@ async fn get_dm_channel(
         });
     }
 
-    let channel = channels::find_by_id(&state.db.pg, channel_id)
+    let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
 
-    let participants: Vec<(Uuid,)> = sqlx::query_as(
-        "SELECT user_id FROM dm_participants WHERE channel_id = $1",
+    let participants: Vec<(String,)> = sqlx::query_as(
+        "SELECT user_id FROM dm_participants WHERE channel_id = ?",
     )
-    .bind(channel_id)
-    .fetch_all(&state.db.pg)
+    .bind(channel_id.to_string())
+    .fetch_all(&state.db.pool)
     .await?;
 
     let mut users = Vec::new();
-    for (uid,) in &participants {
-        if let Some(user) = nexus_db::repository::users::find_by_id(&state.db.pg, *uid).await? {
+    for (uid_str,) in &participants {
+        let uid: Uuid = match uid_str.parse() {
+            Ok(u) => u,
+            Err(_) => continue,
+        };
+        if let Some(user) = nexus_db::repository::users::find_by_id(&state.db.pool, uid).await? {
             users.push(serde_json::json!({
                 "id": user.id,
                 "username": user.username,

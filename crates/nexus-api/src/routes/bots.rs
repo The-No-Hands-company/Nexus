@@ -86,7 +86,7 @@ async fn list_applications(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
 ) -> NexusResult<Json<Vec<BotApplication>>> {
-    let bots = bots::get_bots_by_owner(&state.db.pg, auth.user_id).await?;
+    let bots = bots::get_bots_by_owner(&state.db.pool, auth.user_id).await?;
     Ok(Json(bots))
 }
 
@@ -96,7 +96,7 @@ async fn get_application(
     State(state): State<Arc<AppState>>,
     Path(app_id): Path<Uuid>,
 ) -> NexusResult<Json<BotApplication>> {
-    let bot = bots::get_bot(&state.db.pg, app_id)
+    let bot = bots::get_bot(&state.db.pool, app_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "application".to_string() })?;
 
@@ -119,7 +119,7 @@ async fn create_application(
     let public_key = generate_public_key();
 
     let bot = bots::create_bot(
-        &state.db.pg,
+        &state.db.pool,
         app_id,
         auth.user_id,
         &body.name,
@@ -144,7 +144,7 @@ async fn update_application(
     Json(body): Json<UpdateBotRequest>,
 ) -> NexusResult<Json<BotApplication>> {
     // Verify ownership
-    let existing = bots::get_bot(&state.db.pg, app_id)
+    let existing = bots::get_bot(&state.db.pool, app_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "application".to_string() })?;
     if existing.owner_id != auth.user_id {
@@ -152,7 +152,7 @@ async fn update_application(
     }
 
     let updated = bots::update_bot(
-        &state.db.pg,
+        &state.db.pool,
         app_id,
         body.name.as_deref(),
         body.description.as_deref(),
@@ -173,14 +173,14 @@ async fn delete_application(
     State(state): State<Arc<AppState>>,
     Path(app_id): Path<Uuid>,
 ) -> NexusResult<axum::http::StatusCode> {
-    let existing = bots::get_bot(&state.db.pg, app_id)
+    let existing = bots::get_bot(&state.db.pool, app_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "application".to_string() })?;
     if existing.owner_id != auth.user_id {
         return Err(NexusError::Forbidden);
     }
 
-    bots::delete_bot(&state.db.pg, app_id).await?;
+    bots::delete_bot(&state.db.pool, app_id).await?;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
@@ -190,7 +190,7 @@ async fn reset_token(
     State(state): State<Arc<AppState>>,
     Path(app_id): Path<Uuid>,
 ) -> NexusResult<Json<BotToken>> {
-    let existing = bots::get_bot(&state.db.pg, app_id)
+    let existing = bots::get_bot(&state.db.pool, app_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "application".to_string() })?;
     if existing.owner_id != auth.user_id {
@@ -199,7 +199,7 @@ async fn reset_token(
 
     let raw_token = generate_bot_token();
     let token_hash = hash_token(&raw_token);
-    bots::update_bot_token(&state.db.pg, app_id, &token_hash).await?;
+    bots::update_bot_token(&state.db.pool, app_id, &token_hash).await?;
 
     Ok(Json(BotToken { token: format!("Bot {raw_token}") }))
 }
@@ -214,7 +214,7 @@ async fn list_server_bots(
     State(state): State<Arc<AppState>>,
     Path(server_id): Path<Uuid>,
 ) -> NexusResult<Json<Vec<BotServerInstall>>> {
-    let installs = bots::get_server_bots(&state.db.pg, server_id).await?;
+    let installs = bots::get_server_bots(&state.db.pool, server_id).await?;
     Ok(Json(installs))
 }
 
@@ -233,7 +233,7 @@ async fn install_bot(
     Json(body): Json<InstallBotBody>,
 ) -> NexusResult<Json<BotServerInstall>> {
     // Verify bot exists
-    let _bot = bots::get_bot(&state.db.pg, body.bot_id)
+    let _bot = bots::get_bot(&state.db.pool, body.bot_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "bot".to_string() })?;
 
@@ -241,7 +241,7 @@ async fn install_bot(
     let permissions = body.permissions.unwrap_or(0);
 
     let install = bots::install_bot_to_server(
-        &state.db.pg,
+        &state.db.pool,
         body.bot_id,
         server_id,
         auth.user_id,
@@ -259,6 +259,6 @@ async fn uninstall_bot(
     State(state): State<Arc<AppState>>,
     Path((server_id, bot_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<axum::http::StatusCode> {
-    bots::uninstall_bot_from_server(&state.db.pg, bot_id, server_id).await?;
+    bots::uninstall_bot_from_server(&state.db.pool, bot_id, server_id).await?;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }

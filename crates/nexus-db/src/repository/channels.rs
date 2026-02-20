@@ -1,12 +1,12 @@
 //! Channel repository.
 
 use nexus_common::models::channel::Channel;
-use sqlx::PgPool;
+
 use uuid::Uuid;
 
 /// Create a new channel.
 pub async fn create_channel(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     id: Uuid,
     server_id: Option<Uuid>,
     parent_id: Option<Uuid>,
@@ -22,13 +22,13 @@ pub async fn create_channel(
             nsfw, rate_limit_per_user, encrypted, permission_overwrites,
             archived, locked, created_at, updated_at
         )
-        VALUES ($1, $2, $3, $4::channel_type, $5, $6, $7, false, 0, false, '[]', false, false, NOW(), NOW())
+        VALUES (?, ?, ?, ?, ?, ?, ?, false, 0, false, '[]', false, false, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         RETURNING *
         "#,
     )
-    .bind(id)
-    .bind(server_id)
-    .bind(parent_id)
+    .bind(id.to_string())
+    .bind(server_id.map(|u| u.to_string()))
+    .bind(parent_id.map(|u| u.to_string()))
     .bind(channel_type)
     .bind(name)
     .bind(topic)
@@ -39,28 +39,28 @@ pub async fn create_channel(
 
 /// List channels in a server.
 pub async fn list_server_channels(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     server_id: Uuid,
 ) -> Result<Vec<Channel>, sqlx::Error> {
     sqlx::query_as::<_, Channel>(
-        "SELECT * FROM channels WHERE server_id = $1 ORDER BY position, created_at",
+        "SELECT * FROM channels WHERE server_id = ? ORDER BY position, created_at",
     )
-    .bind(server_id)
+    .bind(server_id.to_string())
     .fetch_all(pool)
     .await
 }
 
 /// Find a channel by ID.
-pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Channel>, sqlx::Error> {
-    sqlx::query_as::<_, Channel>("SELECT * FROM channels WHERE id = $1")
-        .bind(id)
+pub async fn find_by_id(pool: &sqlx::AnyPool, id: Uuid) -> Result<Option<Channel>, sqlx::Error> {
+    sqlx::query_as::<_, Channel>("SELECT * FROM channels WHERE id = ?")
+        .bind(id.to_string())
         .fetch_optional(pool)
         .await
 }
 
 /// Update a channel.
 pub async fn update_channel(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     id: Uuid,
     name: Option<&str>,
     topic: Option<&str>,
@@ -71,17 +71,17 @@ pub async fn update_channel(
     sqlx::query_as::<_, Channel>(
         r#"
         UPDATE channels SET
-            name = COALESCE($2, name),
-            topic = COALESCE($3, topic),
-            position = COALESCE($4, position),
-            nsfw = COALESCE($5, nsfw),
-            rate_limit_per_user = COALESCE($6, rate_limit_per_user),
-            updated_at = NOW()
-        WHERE id = $1
+            name = COALESCE(?, name),
+            topic = COALESCE(?, topic),
+            position = COALESCE(?, position),
+            nsfw = COALESCE(?, nsfw),
+            rate_limit_per_user = COALESCE(?, rate_limit_per_user),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
         RETURNING *
         "#,
     )
-    .bind(id)
+    .bind(id.to_string())
     .bind(name)
     .bind(topic)
     .bind(position)
@@ -92,9 +92,9 @@ pub async fn update_channel(
 }
 
 /// Delete a channel.
-pub async fn delete_channel(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
-    sqlx::query("DELETE FROM channels WHERE id = $1")
-        .bind(id)
+pub async fn delete_channel(pool: &sqlx::AnyPool, id: Uuid) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM channels WHERE id = ?")
+        .bind(id.to_string())
         .execute(pool)
         .await?;
     Ok(())
@@ -102,7 +102,7 @@ pub async fn delete_channel(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> 
 
 /// Create a DM channel between two users.
 pub async fn find_or_create_dm(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     id: Uuid,
     user1: Uuid,
     user2: Uuid,
@@ -111,14 +111,14 @@ pub async fn find_or_create_dm(
     let existing = sqlx::query_as::<_, Channel>(
         r#"
         SELECT c.* FROM channels c
-        INNER JOIN dm_participants dp1 ON dp1.channel_id = c.id AND dp1.user_id = $1
-        INNER JOIN dm_participants dp2 ON dp2.channel_id = c.id AND dp2.user_id = $2
+        INNER JOIN dm_participants dp1 ON dp1.channel_id = c.id AND dp1.user_id = ?
+        INNER JOIN dm_participants dp2 ON dp2.channel_id = c.id AND dp2.user_id = ?
         WHERE c.channel_type = 'dm'
         LIMIT 1
         "#,
     )
-    .bind(user1)
-    .bind(user2)
+    .bind(user1.to_string())
+    .bind(user2.to_string())
     .fetch_optional(pool)
     .await?;
 
@@ -130,10 +130,11 @@ pub async fn find_or_create_dm(
     let channel = create_channel(pool, id, None, None, "dm", None, None, 0).await?;
 
     // Add participants
-    sqlx::query("INSERT INTO dm_participants (channel_id, user_id) VALUES ($1, $2), ($1, $3)")
-        .bind(channel.id)
-        .bind(user1)
-        .bind(user2)
+    sqlx::query("INSERT INTO dm_participants (channel_id, user_id) VALUES (?, ?), (?, ?)")
+        .bind(channel.id.to_string())
+        .bind(user1.to_string())
+        .bind(channel.id.to_string())
+        .bind(user2.to_string())
         .execute(pool)
         .await?;
 

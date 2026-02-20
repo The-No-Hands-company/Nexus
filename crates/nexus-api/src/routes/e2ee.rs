@@ -55,7 +55,7 @@ async fn list_encrypted_messages(
 ) -> NexusResult<Json<Vec<EncryptedMessage>>> {
     let limit = params.limit.unwrap_or(50).min(100);
     let msgs = keystore::list_encrypted_messages(
-        &state.db.pg,
+        &state.db.pool,
         channel_id,
         params.before_sequence,
         limit,
@@ -95,7 +95,7 @@ async fn send_encrypted_message(
     // or we require it embedded. Here we accept it from the ciphertext_map structure —
     // the sender MUST include their own device in the map.
     // We pick the first device registered to this user as the "sender device".
-    let devices = nexus_db::repository::keystore::list_devices(&state.db.pg, auth.user_id)
+    let devices = nexus_db::repository::keystore::list_devices(&state.db.pool, auth.user_id)
         .await
         .map_err(|e| NexusError::Internal(e))?;
 
@@ -104,7 +104,7 @@ async fn send_encrypted_message(
     })?;
 
     let msg = keystore::store_encrypted_message(
-        &state.db.pg,
+        &state.db.pool,
         channel_id,
         auth.user_id,
         sender_device.id,
@@ -146,7 +146,7 @@ async fn get_e2ee_config(
     State(state): State<Arc<AppState>>,
     Path(channel_id): Path<Uuid>,
 ) -> NexusResult<Json<Option<E2eeChannel>>> {
-    let config = keystore::get_e2ee_channel(&state.db.pg, channel_id)
+    let config = keystore::get_e2ee_channel(&state.db.pool, channel_id)
         .await
         .map_err(|e| NexusError::Internal(e))?;
     Ok(Json(config))
@@ -170,7 +170,7 @@ async fn enable_e2ee(
         });
     }
 
-    let config = keystore::enable_e2ee_channel(&state.db.pg, channel_id, auth.user_id, rotation_secs)
+    let config = keystore::enable_e2ee_channel(&state.db.pool, channel_id, auth.user_id, rotation_secs)
         .await
         .map_err(|e| NexusError::Internal(e))?;
 

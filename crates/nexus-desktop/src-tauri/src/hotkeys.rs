@@ -17,7 +17,13 @@ const DEFAULT_PTT_SHORTCUT: &str = "CapsLock";
 /// Register the default push-to-talk shortcut on application startup.
 pub fn register_defaults<R: Runtime>(app: &mut App<R>) -> tauri::Result<()> {
     let handle = app.handle().clone();
-    register_ptt_shortcut(&handle, DEFAULT_PTT_SHORTCUT)?;
+    // Unregister anything left over from a previous session before registering.
+    // This prevents a panic when the OS still holds the hotkey from a stale process.
+    let _ = handle.global_shortcut().unregister_all();
+    if let Err(e) = register_ptt_shortcut(&handle, DEFAULT_PTT_SHORTCUT) {
+        // Log and continue — PTT simply won't work until the user changes it in Settings.
+        tracing::warn!("Could not register PTT shortcut '{}': {}. PTT disabled until reassigned in Settings > Voice.", DEFAULT_PTT_SHORTCUT, e);
+    }
     Ok(())
 }
 
@@ -27,6 +33,9 @@ pub fn register_ptt_shortcut<R: Runtime>(app: &AppHandle<R>, shortcut_str: &str)
     let shortcut: Shortcut = shortcut_str.parse().map_err(|e| {
         tauri::Error::Anyhow(anyhow::anyhow!("Invalid shortcut '{}': {}", shortcut_str, e))
     })?;
+
+    // Always clear our own shortcuts first — safe to call even if nothing is registered.
+    let _ = app.global_shortcut().unregister_all();
 
     app.global_shortcut().on_shortcut(shortcut, move |_app, _shortcut, event| {
         match event.state {

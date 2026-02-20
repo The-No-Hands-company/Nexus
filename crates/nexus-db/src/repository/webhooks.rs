@@ -1,81 +1,80 @@
 //! Webhook repository — incoming and outgoing webhooks.
 
 use anyhow::Result;
-use sqlx::{PgPool, Row};
+use sqlx::Row;
 use uuid::Uuid;
 
 use nexus_common::models::webhook::{Webhook, WebhookType};
 
-fn row_to_webhook(row: &sqlx::postgres::PgRow) -> Webhook {
+fn row_to_webhook(row: &sqlx::any::AnyRow) -> Webhook {
     let wt: String = row.try_get("webhook_type").unwrap_or_default();
     let webhook_type = match wt.as_str() {
         "outgoing" => WebhookType::Outgoing,
         _ => WebhookType::Incoming,
     };
     Webhook {
-        id: row.try_get("id").unwrap(),
+        id: row.try_get::<String, _>("id").unwrap_or_default().parse().unwrap_or_default(),
         webhook_type,
-        server_id: row.try_get("server_id").unwrap_or(None),
-        channel_id: row.try_get("channel_id").unwrap_or(None),
-        creator_id: row.try_get("creator_id").unwrap_or(None),
-        name: row.try_get("name").unwrap(),
+        server_id: row.try_get::<Option<String>, _>("server_id").unwrap_or(None).and_then(|s| s.parse().ok()),
+        channel_id: row.try_get::<Option<String>, _>("channel_id").unwrap_or(None).and_then(|s| s.parse().ok()),
+        creator_id: row.try_get::<Option<String>, _>("creator_id").unwrap_or(None).and_then(|s| s.parse().ok()),
+        name: row.try_get("name").unwrap_or_default(),
         avatar: row.try_get("avatar").unwrap_or(None),
         token: row.try_get("token").unwrap_or(None),
         url: row.try_get("url").unwrap_or(None),
-        events: {
-            let v: Option<serde_json::Value> = row.try_get("events").unwrap_or(None);
-            v.and_then(|j| serde_json::from_value(j).ok()).unwrap_or_default()
-        },
+        events: row.try_get::<Option<String>, _>("events").unwrap_or(None)
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default(),
         active: row.try_get("active").unwrap_or(true),
         delivery_count: row.try_get("delivery_count").unwrap_or(0),
-        created_at: row.try_get("created_at").unwrap(),
-        updated_at: row.try_get("updated_at").unwrap(),
+        created_at: crate::any_compat::get_datetime(row, "created_at").unwrap_or_default(),
+        updated_at: crate::any_compat::get_datetime(row, "updated_at").unwrap_or_default(),
     }
 }
 
-pub async fn get_webhook(pool: &PgPool, webhook_id: Uuid) -> Result<Option<Webhook>> {
-    let row = sqlx::query("SELECT * FROM webhooks WHERE id = $1")
-        .bind(webhook_id)
+pub async fn get_webhook(pool: &sqlx::AnyPool, webhook_id: Uuid) -> Result<Option<Webhook>> {
+    let row = sqlx::query("SELECT * FROM webhooks WHERE id = ?")
+        .bind(webhook_id.to_string())
         .fetch_optional(pool)
         .await?;
     Ok(row.as_ref().map(row_to_webhook))
 }
 
 pub async fn get_webhook_by_token(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     webhook_id: Uuid,
     token: &str,
 ) -> Result<Option<Webhook>> {
-    let row = sqlx::query("SELECT * FROM webhooks WHERE id = $1 AND token = $2")
-        .bind(webhook_id)
+    let row = sqlx::query("SELECT * FROM webhooks WHERE id = ? AND token = ?")
+        .bind(webhook_id.to_string())
         .bind(token)
         .fetch_optional(pool)
         .await?;
     Ok(row.as_ref().map(row_to_webhook))
 }
 
-pub async fn get_channel_webhooks(pool: &PgPool, channel_id: Uuid) -> Result<Vec<Webhook>> {
+pub async fn get_channel_webhooks(pool: &sqlx::AnyPool, channel_id: Uuid) -> Result<Vec<Webhook>> {
     let rows = sqlx::query(
-        "SELECT * FROM webhooks WHERE channel_id = $1 ORDER BY created_at DESC",
+        "SELECT * FROM webhooks WHERE channel_id = ? ORDER BY created_at DESC",
     )
-    .bind(channel_id)
+    .bind(channel_id.to_string())
     .fetch_all(pool)
     .await?;
     Ok(rows.iter().map(row_to_webhook).collect())
 }
 
-pub async fn get_server_webhooks(pool: &PgPool, server_id: Uuid) -> Result<Vec<Webhook>> {
+pub async fn get_server_webhooks(pool: &sqlx::AnyPool, server_id: Uuid) -> Result<Vec<Webhook>> {
     let rows = sqlx::query(
-        "SELECT * FROM webhooks WHERE server_id = $1 ORDER BY created_at DESC",
+        "SELECT * FROM webhooks WHERE server_id = ? ORDER BY created_at DESC",
     )
-    .bind(server_id)
+    .bind(server_id.to_string())
     .fetch_all(pool)
     .await?;
     Ok(rows.iter().map(row_to_webhook).collect())
 }
 
 pub async fn create_incoming_webhook(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     id: Uuid,
     server_id: Uuid,
     channel_id: Uuid,
@@ -87,13 +86,13 @@ pub async fn create_incoming_webhook(
     let row = sqlx::query(
         r#"INSERT INTO webhooks
                (id, server_id, channel_id, creator_id, name, avatar, token, webhook_type)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, 'incoming')
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'incoming')
            RETURNING *"#,
     )
-    .bind(id)
-    .bind(server_id)
-    .bind(channel_id)
-    .bind(creator_id)
+    .bind(id.to_string())
+    .bind(server_id.to_string())
+    .bind(channel_id.to_string())
+    .bind(creator_id.to_string())
     .bind(name)
     .bind(avatar)
     .bind(token)
@@ -103,7 +102,7 @@ pub async fn create_incoming_webhook(
 }
 
 pub async fn create_outgoing_webhook(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     id: Uuid,
     server_id: Uuid,
     creator_id: Uuid,
@@ -112,16 +111,16 @@ pub async fn create_outgoing_webhook(
     events: &[String],
     avatar: Option<&str>,
 ) -> Result<Webhook> {
-    let events_json = serde_json::to_value(events)?;
+    let events_json = serde_json::to_string(events)?;
     let row = sqlx::query(
         r#"INSERT INTO webhooks
                (id, server_id, creator_id, name, url, events, avatar, webhook_type)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, 'outgoing')
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'outgoing')
            RETURNING *"#,
     )
-    .bind(id)
-    .bind(server_id)
-    .bind(creator_id)
+    .bind(id.to_string())
+    .bind(server_id.to_string())
+    .bind(creator_id.to_string())
     .bind(name)
     .bind(url)
     .bind(events_json)
@@ -132,7 +131,7 @@ pub async fn create_outgoing_webhook(
 }
 
 pub async fn update_webhook(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     webhook_id: Uuid,
     name: Option<&str>,
     avatar: Option<&str>,
@@ -141,34 +140,34 @@ pub async fn update_webhook(
     events: Option<&[String]>,
     active: Option<bool>,
 ) -> Result<Option<Webhook>> {
-    let events_json = events.map(serde_json::to_value).transpose()?;
+    let events_json = events.map(|e| serde_json::to_string(e).unwrap_or_default());
     let row = sqlx::query(
         r#"UPDATE webhooks SET
-               name       = COALESCE($2, name),
-               avatar     = COALESCE($3, avatar),
-               channel_id = COALESCE($4, channel_id),
-               url        = COALESCE($5, url),
-               events     = COALESCE($6, events),
-               active     = COALESCE($7, active),
-               updated_at = NOW()
-           WHERE id = $1
+               name       = COALESCE(?, name),
+               avatar     = COALESCE(?, avatar),
+               channel_id = COALESCE(?, channel_id),
+               url        = COALESCE(?, url),
+               events     = COALESCE(?, events),
+               active     = COALESCE(?, active),
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?
            RETURNING *"#,
     )
-    .bind(webhook_id)
     .bind(name)
     .bind(avatar)
-    .bind(channel_id)
+    .bind(channel_id.map(|u| u.to_string()))
     .bind(url)
     .bind(events_json)
     .bind(active)
+    .bind(webhook_id.to_string())
     .fetch_optional(pool)
     .await?;
     Ok(row.as_ref().map(row_to_webhook))
 }
 
-pub async fn delete_webhook(pool: &PgPool, webhook_id: Uuid) -> Result<bool> {
-    let result = sqlx::query("DELETE FROM webhooks WHERE id = $1")
-        .bind(webhook_id)
+pub async fn delete_webhook(pool: &sqlx::AnyPool, webhook_id: Uuid) -> Result<bool> {
+    let result = sqlx::query("DELETE FROM webhooks WHERE id = ?")
+        .bind(webhook_id.to_string())
         .execute(pool)
         .await?;
     Ok(result.rows_affected() > 0)

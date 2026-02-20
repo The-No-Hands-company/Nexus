@@ -186,7 +186,7 @@ async fn upload_file(
 
     // Persist attachment metadata
     let row = attachments::create_attachment(
-        &state.db.pg,
+        &state.db.pool,
         attachment_id,
         auth.user_id,
         None, // server_id — we don't know yet
@@ -205,7 +205,7 @@ async fn upload_file(
 
     // Mark ready immediately (no async processing for now)
     let row = attachments::mark_ready(
-        &state.db.pg,
+        &state.db.pool,
         row.id,
         url.as_deref().unwrap_or(""),
         None, // blurhash — would need async image processing
@@ -237,7 +237,7 @@ async fn get_attachment(
 ) -> NexusResult<Json<AttachmentResponse>> {
     let _ = auth; // auth just verifies the user is logged in
 
-    let row = attachments::find_by_id(&state.db.pg, id)
+    let row = attachments::find_by_id(&state.db.pool, id)
         .await?
         .ok_or(NexusError::NotFound {
             resource: "Attachment".into(),
@@ -278,7 +278,7 @@ async fn delete_attachment(
     Path(id): Path<Uuid>,
 ) -> NexusResult<Json<serde_json::Value>> {
     // Find the attachment first to get the storage key
-    let row = attachments::find_by_id(&state.db.pg, id)
+    let row = attachments::find_by_id(&state.db.pool, id)
         .await?
         .ok_or(NexusError::NotFound {
             resource: "Attachment".into(),
@@ -290,7 +290,7 @@ async fn delete_attachment(
     }
 
     // Delete from DB
-    attachments::delete_attachment(&state.db.pg, id, auth.user_id).await?;
+    attachments::delete_attachment(&state.db.pool, id, auth.user_id).await?;
 
     // Delete from object storage (best-effort — don't fail if already gone)
     let _ = state.storage.delete_object(&row.storage_key).await;

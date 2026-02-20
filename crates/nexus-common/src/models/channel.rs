@@ -12,7 +12,7 @@ use uuid::Uuid;
 use validator::Validate;
 
 /// A channel within a server or a DM conversation.
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Channel {
     pub id: Uuid,
 
@@ -23,7 +23,6 @@ pub struct Channel {
     pub parent_id: Option<Uuid>,
 
     /// Channel type
-    #[sqlx(rename = "channel_type")]
     pub channel_type: ChannelType,
 
     /// Channel name (required for server channels)
@@ -70,7 +69,7 @@ pub struct Channel {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
-#[sqlx(type_name = "channel_type", rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum ChannelType {
     /// Standard text channel in a server

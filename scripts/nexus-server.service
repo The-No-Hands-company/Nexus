@@ -1,0 +1,20 @@
+[Unit]
+Description=Nexus API & Gateway Server
+Documentation=https://github.com/The-No-hands-Company/nexus
+After=network-online.target podman-compose@nexus.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# ---- adjust this path if you cloned Nexus elsewhere ----
+WorkingDirectory=%h/projects/Active/discordkiller
+EnvironmentFile=%h/projects/Active/discordkiller/.env
+ExecStart=%h/.cargo/bin/cargo run -p nexus-server
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=nexus-server
+
+[Install]
+WantedBy=default.target

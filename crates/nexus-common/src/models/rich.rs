@@ -47,7 +47,7 @@ pub struct Thread {
 }
 
 /// Row returned from the `threads` table join.
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug)]
 pub struct ThreadRow {
     pub channel_id: Uuid,
     pub parent_message_id: Option<Uuid>,
@@ -119,7 +119,7 @@ pub struct ServerEmoji {
 }
 
 /// Row from the `server_emoji` table.
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug)]
 pub struct ServerEmojiRow {
     pub id: Uuid,
     pub server_id: Uuid,
@@ -172,7 +172,7 @@ pub struct UpdateEmojiRequest {
 // ============================================================
 
 /// Row from the `attachments` table.
-#[derive(Debug, sqlx::FromRow)]
+#[derive(Debug)]
 pub struct AttachmentRow {
     pub id: Uuid,
     pub uploader_id: Uuid,

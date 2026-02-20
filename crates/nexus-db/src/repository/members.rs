@@ -1,37 +1,37 @@
 //! Member repository — server membership management.
 
 use nexus_common::models::member::Member;
-use sqlx::PgPool;
+
 use uuid::Uuid;
 
 /// Add a user as a member of a server.
 pub async fn add_member(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     user_id: Uuid,
     server_id: Uuid,
 ) -> Result<Member, sqlx::Error> {
     sqlx::query_as::<_, Member>(
         r#"
         INSERT INTO members (user_id, server_id, roles, muted, deafened, joined_at)
-        VALUES ($1, $2, ARRAY[]::UUID[], false, false, NOW())
+        VALUES (?, ?, ARRAY[]::UUID[], false, false, CURRENT_TIMESTAMP)
         RETURNING *
         "#,
     )
-    .bind(user_id)
-    .bind(server_id)
+    .bind(user_id.to_string())
+    .bind(server_id.to_string())
     .fetch_one(pool)
     .await
 }
 
 /// Remove a member from a server.
 pub async fn remove_member(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     user_id: Uuid,
     server_id: Uuid,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("DELETE FROM members WHERE user_id = $1 AND server_id = $2")
-        .bind(user_id)
-        .bind(server_id)
+    sqlx::query("DELETE FROM members WHERE user_id = ? AND server_id = ?")
+        .bind(user_id.to_string())
+        .bind(server_id.to_string())
         .execute(pool)
         .await?;
     Ok(())
@@ -39,22 +39,22 @@ pub async fn remove_member(
 
 /// Get a member by user ID and server ID.
 pub async fn find_member(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     user_id: Uuid,
     server_id: Uuid,
 ) -> Result<Option<Member>, sqlx::Error> {
     sqlx::query_as::<_, Member>(
-        "SELECT * FROM members WHERE user_id = $1 AND server_id = $2",
+        "SELECT * FROM members WHERE user_id = ? AND server_id = ?",
     )
-    .bind(user_id)
-    .bind(server_id)
+    .bind(user_id.to_string())
+    .bind(server_id.to_string())
     .fetch_optional(pool)
     .await
 }
 
 /// List members of a server with pagination.
 pub async fn list_members(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     server_id: Uuid,
     limit: i64,
     offset: i64,
@@ -62,12 +62,12 @@ pub async fn list_members(
     sqlx::query_as::<_, Member>(
         r#"
         SELECT * FROM members
-        WHERE server_id = $1
+        WHERE server_id = ?
         ORDER BY joined_at
-        LIMIT $2 OFFSET $3
+        LIMIT ? OFFSET ?
         "#,
     )
-    .bind(server_id)
+    .bind(server_id.to_string())
     .bind(limit)
     .bind(offset)
     .fetch_all(pool)
@@ -76,14 +76,14 @@ pub async fn list_members(
 
 /// Update member nickname.
 pub async fn update_nickname(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     user_id: Uuid,
     server_id: Uuid,
     nickname: Option<&str>,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE members SET nickname = $3 WHERE user_id = $1 AND server_id = $2")
-        .bind(user_id)
-        .bind(server_id)
+    sqlx::query("UPDATE members SET nickname = ? WHERE user_id = ? AND server_id = ?")
+        .bind(user_id.to_string())
+        .bind(server_id.to_string())
         .bind(nickname)
         .execute(pool)
         .await?;
@@ -92,17 +92,17 @@ pub async fn update_nickname(
 
 /// Add a role to a member.
 pub async fn add_role(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     user_id: Uuid,
     server_id: Uuid,
     role_id: Uuid,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "UPDATE members SET roles = array_append(roles, $3) WHERE user_id = $1 AND server_id = $2 AND NOT ($3 = ANY(roles))",
+        "UPDATE members SET roles = array_append(roles, ?) WHERE user_id = ? AND server_id = ? AND NOT (? = ANY(roles))",
     )
-    .bind(user_id)
-    .bind(server_id)
-    .bind(role_id)
+    .bind(user_id.to_string())
+    .bind(server_id.to_string())
+    .bind(role_id.to_string())
     .execute(pool)
     .await?;
     Ok(())
@@ -110,17 +110,17 @@ pub async fn add_role(
 
 /// Remove a role from a member.
 pub async fn remove_role(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     user_id: Uuid,
     server_id: Uuid,
     role_id: Uuid,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "UPDATE members SET roles = array_remove(roles, $3) WHERE user_id = $1 AND server_id = $2",
+        "UPDATE members SET roles = array_remove(roles, ?) WHERE user_id = ? AND server_id = ?",
     )
-    .bind(user_id)
-    .bind(server_id)
-    .bind(role_id)
+    .bind(user_id.to_string())
+    .bind(server_id.to_string())
+    .bind(role_id.to_string())
     .execute(pool)
     .await?;
     Ok(())
@@ -128,16 +128,16 @@ pub async fn remove_role(
 
 /// Check if a user is a member of a server.
 pub async fn is_member(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     user_id: Uuid,
     server_id: Uuid,
 ) -> Result<bool, sqlx::Error> {
-    let result: Option<(i64,)> = sqlx::query_as(
-        "SELECT 1 FROM members WHERE user_id = $1 AND server_id = $2",
+    let result: (bool,) = sqlx::query_as(
+        "SELECT EXISTS(SELECT 1 FROM members WHERE user_id = ? AND server_id = ?)",
     )
-    .bind(user_id)
-    .bind(server_id)
-    .fetch_optional(pool)
+    .bind(user_id.to_string())
+    .bind(server_id.to_string())
+    .fetch_one(pool)
     .await?;
-    Ok(result.is_some())
+    Ok(result.0)
 }

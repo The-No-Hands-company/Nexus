@@ -86,7 +86,7 @@ async fn get_voice_channel_state(
     Path(channel_id): Path<Uuid>,
 ) -> NexusResult<Json<VoiceChannelResponse>> {
     // Verify channel exists
-    let _channel = nexus_db::repository::channels::find_by_id(&state.db.pg, channel_id)
+    let _channel = nexus_db::repository::channels::find_by_id(&state.db.pool, channel_id)
         .await
         .map_err(NexusError::Database)?
         .ok_or_else(|| NexusError::NotFound { resource: "Channel".into() })?;
@@ -111,7 +111,7 @@ async fn voice_join_preflight(
     Path(channel_id): Path<Uuid>,
 ) -> NexusResult<Json<VoiceJoinResponse>> {
     // Verify channel exists and is a voice channel
-    let channel = nexus_db::repository::channels::find_by_id(&state.db.pg, channel_id)
+    let channel = nexus_db::repository::channels::find_by_id(&state.db.pool, channel_id)
         .await
         .map_err(NexusError::Database)?
         .ok_or_else(|| NexusError::NotFound { resource: "Channel".into() })?;
@@ -142,7 +142,7 @@ async fn voice_join_preflight(
     // If it's a server channel, check membership
     if let Some(server_id) = channel.server_id {
         let _member =
-            nexus_db::repository::members::find_member(&state.db.pg, auth.user_id, server_id)
+            nexus_db::repository::members::find_member(&state.db.pool, auth.user_id, server_id)
                 .await
                 .map_err(NexusError::Database)?
                 .ok_or(NexusError::Forbidden)?;
@@ -239,7 +239,7 @@ async fn server_mute(
     Json(action): Json<VoiceModAction>,
 ) -> NexusResult<Json<VoiceState>> {
     // Verify the channel exists and is in a server
-    let channel = nexus_db::repository::channels::find_by_id(&state.db.pg, channel_id)
+    let channel = nexus_db::repository::channels::find_by_id(&state.db.pool, channel_id)
         .await
         .map_err(NexusError::Database)?
         .ok_or_else(|| NexusError::NotFound { resource: "Channel".into() })?;
@@ -251,7 +251,7 @@ async fn server_mute(
     // Check the moderator has permission (MUTE_MEMBERS)
     // For now, check they're a member. Full permission check coming in v0.4.
     let _moderator =
-        nexus_db::repository::members::find_member(&state.db.pg, auth.user_id, server_id)
+        nexus_db::repository::members::find_member(&state.db.pool, auth.user_id, server_id)
             .await
             .map_err(NexusError::Database)?
             .ok_or(NexusError::Forbidden)?;

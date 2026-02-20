@@ -44,17 +44,34 @@ pub struct ServerDocument {
 // ============================================================
 
 /// MeiliSearch client wrapper.
+/// When constructed with [`SearchClient::disabled`] all write operations are
+/// no-ops and read operations return an appropriate error, allowing the rest of
+/// the application to compile and run without MeiliSearch (lite mode).
 #[derive(Clone)]
 pub struct SearchClient {
-    inner: Client,
+    inner: Option<Client>,
 }
 
 impl SearchClient {
     /// Construct from URL + master key.
     pub fn new(url: &str, api_key: &str) -> Self {
         Self {
-            inner: Client::new(url, Some(api_key)).expect("Failed to create MeiliSearch client"),
+            inner: Some(
+                Client::new(url, Some(api_key))
+                    .expect("Failed to create MeiliSearch client"),
+            ),
         }
+    }
+
+    /// Construct a disabled client (lite mode — no MeiliSearch).
+    /// All write operations are no-ops; search returns an empty result set.
+    pub fn disabled() -> Self {
+        Self { inner: None }
+    }
+
+    /// Returns `true` if this client is connected to a live MeiliSearch instance.
+    pub fn is_enabled(&self) -> bool {
+        self.inner.is_some()
     }
 
     // ------------------------------------------------------------------
@@ -63,23 +80,26 @@ impl SearchClient {
 
     /// Create and configure indexes on first run.
     pub async fn bootstrap_indexes(&self) -> Result<()> {
+        if self.inner.is_none() {
+            return Ok(());
+        }
         self.setup_messages_index().await?;
         self.setup_servers_index().await?;
         Ok(())
     }
 
     async fn setup_messages_index(&self) -> Result<()> {
+        let inner = match &self.inner { Some(c) => c, None => return Ok(()) };
         // Attempt to create; ignore if already exists
-        if let Ok(task) = self
-            .inner
+        if let Ok(task) = inner
             .create_index("messages", Some("id"))
             .await
         {
             // Wait for task to complete (non-critical, best effort)
-            let _ = self.inner.wait_for_task(task, None, None).await;
+            let _ = inner.wait_for_task(task, None, None).await;
         }
 
-        let index = self.inner.index("messages");
+        let index = inner.index("messages");
 
         // Configure searchable attributes
         index
@@ -110,15 +130,15 @@ impl SearchClient {
     }
 
     async fn setup_servers_index(&self) -> Result<()> {
-        if let Ok(task) = self
-            .inner
+        let inner = match &self.inner { Some(c) => c, None => return Ok(()) };
+        if let Ok(task) = inner
             .create_index("servers", Some("id"))
             .await
         {
-            let _ = self.inner.wait_for_task(task, None, None).await;
+            let _ = inner.wait_for_task(task, None, None).await;
         }
 
-        let index = self.inner.index("servers");
+        let index = inner.index("servers");
         index
             .set_searchable_attributes(["name", "description"])
             .await
@@ -133,7 +153,8 @@ impl SearchClient {
 
     /// Index (or update) a single message document.
     pub async fn index_message(&self, doc: MessageDocument) -> Result<()> {
-        let index = self.inner.index("messages");
+        let inner = match &self.inner { Some(c) => c, None => return Ok(()) };
+        let index = inner.index("messages");
         index
             .add_or_update(&[doc], Some("id"))
             .await
@@ -146,7 +167,8 @@ impl SearchClient {
         if docs.is_empty() {
             return Ok(());
         }
-        let index = self.inner.index("messages");
+        let inner = match &self.inner { Some(c) => c, None => return Ok(()) };
+        let index = inner.index("messages");
         index
             .add_or_update(&docs, Some("id"))
             .await
@@ -156,7 +178,8 @@ impl SearchClient {
 
     /// Delete a message from the index.
     pub async fn delete_message(&self, message_id: Uuid) -> Result<()> {
-        let index = self.inner.index("messages");
+        let inner = match &self.inner { Some(c) => c, None => return Ok(()) };
+        let index = inner.index("messages");
         index
             .delete_document(message_id.to_string())
             .await
@@ -178,7 +201,11 @@ impl SearchClient {
         limit: usize,
         offset: usize,
     ) -> Result<SearchResults<MessageDocument>> {
-        let index = self.inner.index("messages");
+        let inner = match &self.inner {
+            Some(c) => c,
+            None => anyhow::bail!("Full-text search is not available in lite mode"),
+        };
+        let index = inner.index("messages");
 
         // Build filter string
         let mut filters: Vec<String> = Vec::new();
@@ -194,17 +221,17 @@ impl SearchClient {
 
         let filter_str = filters.join(" AND ");
 
-        let mut search = index.search();
-        search.with_query(query)
+        let mut search_req = index.search();
+        search_req.with_query(query)
             .with_limit(limit)
             .with_offset(offset)
             .with_sort(&["created_at:desc"]);
 
         if !filter_str.is_empty() {
-            search.with_filter(&filter_str);
+            search_req.with_filter(&filter_str);
         }
 
-        search
+        search_req
             .execute::<MessageDocument>()
             .await
             .context("MeiliSearch query failed")
@@ -216,14 +243,30 @@ impl SearchClient {
 
     /// Process pending sync queue entries from the database.
     /// Call this from a background task every few seconds.
-    pub async fn process_sync_queue(&self, pool: &sqlx::PgPool) -> Result<()> {
-        #[derive(sqlx::FromRow)]
+    pub async fn process_sync_queue(&self, pool: &sqlx::AnyPool) -> Result<()> {
+        if self.inner.is_none() {
+            return Ok(());
+        }
         struct QueueRow {
             id: i64,
             operation: String,
             index_name: String,
             document_id: String,
             payload: Option<serde_json::Value>,
+        }
+
+        impl<'r> sqlx::FromRow<'r, sqlx::any::AnyRow> for QueueRow {
+            fn from_row(row: &'r sqlx::any::AnyRow) -> Result<Self, sqlx::Error> {
+                use sqlx::Row;
+                use crate::any_compat::get_opt_json_value;
+                Ok(QueueRow {
+                    id: row.try_get("id")?,
+                    operation: row.try_get("operation")?,
+                    index_name: row.try_get("index_name")?,
+                    document_id: row.try_get("document_id")?,
+                    payload: get_opt_json_value(row, "payload")?,
+                })
+            }
         }
 
         let rows = sqlx::query_as::<_, QueueRow>(
@@ -275,7 +318,7 @@ impl SearchClient {
                 );
             } else {
                 sqlx::query(
-                    "UPDATE search_sync_queue SET processed = true WHERE id = $1",
+                    "UPDATE search_sync_queue SET processed = true WHERE id = ?",
                 )
                 .bind(row.id)
                 .execute(pool)
@@ -289,7 +332,7 @@ impl SearchClient {
 
     /// Enqueue a message to be indexed (called after message creation/edit).
     pub async fn enqueue_message_index(
-        pool: &sqlx::PgPool,
+        pool: &sqlx::AnyPool,
         message_id: Uuid,
         doc: &MessageDocument,
     ) -> Result<()> {
@@ -297,11 +340,11 @@ impl SearchClient {
         sqlx::query(
             r#"
             INSERT INTO search_sync_queue (operation, index_name, document_id, payload)
-            VALUES ('index', 'messages', $1, $2)
+            VALUES ('index', 'messages', ?, ?)
             "#,
         )
         .bind(message_id.to_string())
-        .bind(payload)
+        .bind(serde_json::to_string(&payload).unwrap_or_default())
         .execute(pool)
         .await
         .context("Failed to enqueue message for search indexing")?;
@@ -309,11 +352,11 @@ impl SearchClient {
     }
 
     /// Enqueue a message deletion from the index.
-    pub async fn enqueue_message_delete(pool: &sqlx::PgPool, message_id: Uuid) -> Result<()> {
+    pub async fn enqueue_message_delete(pool: &sqlx::AnyPool, message_id: Uuid) -> Result<()> {
         sqlx::query(
             r#"
             INSERT INTO search_sync_queue (operation, index_name, document_id)
-            VALUES ('delete', 'messages', $1)
+            VALUES ('delete', 'messages', ?)
             "#,
         )
         .bind(message_id.to_string())

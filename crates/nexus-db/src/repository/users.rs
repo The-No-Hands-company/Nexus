@@ -1,12 +1,12 @@
 //! User repository — CRUD operations for user accounts.
 
 use nexus_common::models::user::User;
-use sqlx::PgPool;
+
 use uuid::Uuid;
 
 /// Create a new user account.
 pub async fn create_user(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     id: Uuid,
     username: &str,
     email: Option<&str>,
@@ -15,11 +15,11 @@ pub async fn create_user(
     sqlx::query_as::<_, User>(
         r#"
         INSERT INTO users (id, username, email, password_hash, presence, flags, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, 'offline', 0, NOW(), NOW())
+        VALUES (?, ?, ?, ?, 'offline', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         RETURNING *
         "#,
     )
-    .bind(id)
+    .bind(id.to_string())
     .bind(username)
     .bind(email)
     .bind(password_hash)
@@ -28,24 +28,24 @@ pub async fn create_user(
 }
 
 /// Find a user by their unique ID.
-pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<User>, sqlx::Error> {
-    sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = $1")
-        .bind(id)
+pub async fn find_by_id(pool: &sqlx::AnyPool, id: Uuid) -> Result<Option<User>, sqlx::Error> {
+    sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
+        .bind(id.to_string())
         .fetch_optional(pool)
         .await
 }
 
 /// Find a user by username (case-insensitive).
-pub async fn find_by_username(pool: &PgPool, username: &str) -> Result<Option<User>, sqlx::Error> {
-    sqlx::query_as::<_, User>("SELECT * FROM users WHERE LOWER(username) = LOWER($1)")
+pub async fn find_by_username(pool: &sqlx::AnyPool, username: &str) -> Result<Option<User>, sqlx::Error> {
+    sqlx::query_as::<_, User>("SELECT * FROM users WHERE LOWER(username) = LOWER(?)")
         .bind(username)
         .fetch_optional(pool)
         .await
 }
 
 /// Find a user by email.
-pub async fn find_by_email(pool: &PgPool, email: &str) -> Result<Option<User>, sqlx::Error> {
-    sqlx::query_as::<_, User>("SELECT * FROM users WHERE LOWER(email) = LOWER($1)")
+pub async fn find_by_email(pool: &sqlx::AnyPool, email: &str) -> Result<Option<User>, sqlx::Error> {
+    sqlx::query_as::<_, User>("SELECT * FROM users WHERE LOWER(email) = LOWER(?)")
         .bind(email)
         .fetch_optional(pool)
         .await
@@ -53,7 +53,7 @@ pub async fn find_by_email(pool: &PgPool, email: &str) -> Result<Option<User>, s
 
 /// Update user profile fields.
 pub async fn update_user(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     id: Uuid,
     username: Option<&str>,
     display_name: Option<&str>,
@@ -63,16 +63,16 @@ pub async fn update_user(
     sqlx::query_as::<_, User>(
         r#"
         UPDATE users SET
-            username = COALESCE($2, username),
-            display_name = COALESCE($3, display_name),
-            bio = COALESCE($4, bio),
-            status = COALESCE($5, status),
-            updated_at = NOW()
-        WHERE id = $1
+            username = COALESCE(?, username),
+            display_name = COALESCE(?, display_name),
+            bio = COALESCE(?, bio),
+            status = COALESCE(?, status),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
         RETURNING *
         "#,
     )
-    .bind(id)
+    .bind(id.to_string())
     .bind(username)
     .bind(display_name)
     .bind(bio)
@@ -83,12 +83,12 @@ pub async fn update_user(
 
 /// Update user presence state.
 pub async fn update_presence(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     id: Uuid,
     presence: &str,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE users SET presence = $2::user_presence WHERE id = $1")
-        .bind(id)
+    sqlx::query("UPDATE users SET presence = ?::user_presence WHERE id = ?")
+        .bind(id.to_string())
         .bind(presence)
         .execute(pool)
         .await?;
@@ -96,24 +96,24 @@ pub async fn update_presence(
 }
 
 /// Delete a user account (soft delete — sets DISABLED flag).
-pub async fn soft_delete_user(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
+pub async fn soft_delete_user(pool: &sqlx::AnyPool, id: Uuid) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
         UPDATE users SET
             flags = flags | (1 << 5),
             email = NULL,
-            updated_at = NOW()
-        WHERE id = $1
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
         "#,
     )
-    .bind(id)
+    .bind(id.to_string())
     .execute(pool)
     .await?;
     Ok(())
 }
 
 /// Count total users (for admin dashboard).
-pub async fn count_users(pool: &PgPool) -> Result<i64, sqlx::Error> {
+pub async fn count_users(pool: &sqlx::AnyPool) -> Result<i64, sqlx::Error> {
     let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users WHERE (flags & (1 << 5)) = 0")
         .fetch_one(pool)
         .await?;

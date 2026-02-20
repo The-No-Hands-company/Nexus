@@ -49,7 +49,7 @@ async fn get_safety_number(
     Path((target_user_id, target_device_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<SafetyNumberResponse>> {
     // Fetch the target device
-    let target_device = keystore::find_device(&state.db.pg, target_device_id)
+    let target_device = keystore::find_device(&state.db.pool, target_device_id)
         .await
         .map_err(|e| NexusError::Internal(e))?
         .ok_or(NexusError::NotFound {
@@ -63,7 +63,7 @@ async fn get_safety_number(
     }
 
     // Fetch the caller's first/primary device for their identity key
-    let my_devices = keystore::list_devices(&state.db.pg, auth.user_id)
+    let my_devices = keystore::list_devices(&state.db.pool, auth.user_id)
         .await
         .map_err(|e| NexusError::Internal(e))?;
 
@@ -99,7 +99,7 @@ async fn verify_device(
     Json(body): Json<VerifyDeviceRequest>,
 ) -> NexusResult<Json<DeviceVerification>> {
     // Ensure device exists
-    keystore::find_device(&state.db.pg, device_id)
+    keystore::find_device(&state.db.pool, device_id)
         .await
         .map_err(|e| NexusError::Internal(e))?
         .ok_or(NexusError::NotFound {
@@ -112,7 +112,7 @@ async fn verify_device(
         nexus_common::models::crypto::VerificationMethod::Emoji => "emoji",
     };
 
-    let verification = keystore::verify_device(&state.db.pg, auth.user_id, device_id, method_str)
+    let verification = keystore::verify_device(&state.db.pool, auth.user_id, device_id, method_str)
         .await
         .map_err(|e| NexusError::Internal(e))?;
 
@@ -131,9 +131,9 @@ async fn remove_verification(
     sqlx::query(
         "DELETE FROM device_verifications WHERE verifier_id = $1 AND target_device_id = $2",
     )
-    .bind(auth.user_id)
-    .bind(device_id)
-    .execute(&state.db.pg)
+    .bind(auth.user_id.to_string())
+    .bind(device_id.to_string())
+    .execute(&state.db.pool)
     .await
     .map_err(|e| NexusError::Database(e))?;
 
@@ -148,7 +148,7 @@ async fn list_my_verifications(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
 ) -> NexusResult<Json<Vec<DeviceVerification>>> {
-    let verifications = keystore::list_verifications(&state.db.pg, auth.user_id)
+    let verifications = keystore::list_verifications(&state.db.pool, auth.user_id)
         .await
         .map_err(|e| NexusError::Internal(e))?;
     Ok(Json(verifications))

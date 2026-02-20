@@ -37,6 +37,42 @@ curl https://your-domain.com/api/v1/health
 
 ---
 
+## Quick Start (Lite / Single Binary)
+
+For home labs, small teams, or local testing you can run the entire backend as a
+single binary with an embedded SQLite database — no Docker, Postgres, Redis, or
+MinIO required.
+
+```bash
+# Build the release binary (first time ~2–3 min)
+cargo build -p nexus-server --release
+
+# Start in lite mode — SQLite is created automatically at ./nexus.db
+NEXUS_JWT_SECRET=$(openssl rand -hex 64) \
+  ./target/release/nexus serve --lite
+
+# Optional: specify a custom database path and bind address
+NEXUS_JWT_SECRET=... \
+  ./target/release/nexus serve --lite \
+    --db-path /data/nexus.db \
+    --bind 0.0.0.0:4000
+```
+
+> **What `--lite` enables**
+> - SQLite via `sqlx::AnyPool` (no external database)
+> - In-process auth (JWT only, no Redis session store)
+> - Local filesystem storage (no MinIO / S3)
+> - Voice signalling disabled (no SFU)
+> - Federation disabled
+>
+> **What you lose vs. the full stack**
+> - Horizontal scaling (single process only)
+> - Full-text search (MeiliSearch not available)
+> - Voice/video calls
+> - ActivityPub / Matrix federation
+
+---
+
 ## Manual Setup
 
 ### 1. Create environment file

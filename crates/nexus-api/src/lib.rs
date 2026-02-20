@@ -72,6 +72,8 @@ pub fn build_router(state: AppState) -> Router {
         .nest("/api/v1", api_routes)
         // v0.8 Federation — server-to-server endpoints (live outside /api/v1)
         .merge(routes::federation::federation_router())
+        // Local file serving (lite mode — no-op in full mode)
+        .merge(routes::files::router())
         .layer(
             tower_http::cors::CorsLayer::new()
                 .allow_origin(tower_http::cors::Any)

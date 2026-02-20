@@ -91,7 +91,7 @@ async fn create_thread(
     validate_request(&body)?;
 
     // Verify parent channel exists
-    let _channel = channels::find_by_id(&state.db.pg, channel_id)
+    let _channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
         .ok_or(NexusError::NotFound {
             resource: "Channel".into(),
@@ -121,14 +121,14 @@ async fn create_thread(
         FROM channels WHERE id = $2
         "#,
     )
-    .bind(thread_channel_id)
-    .bind(channel_id)
+    .bind(thread_channel_id.to_string())
+    .bind(channel_id.to_string())
     .bind(&body.title)
-    .execute(&state.db.pg)
+    .execute(&state.db.pool)
     .await?;
 
     let row = threads::create_thread(
-        &state.db.pg,
+        &state.db.pool,
         thread_channel_id,
         channel_id,
         body.message_id,
@@ -140,7 +140,7 @@ async fn create_thread(
     .await?;
 
     // Auto-add the creator as a thread member
-    let _ = threads::add_member(&state.db.pg, thread_channel_id, auth.user_id).await;
+    let _ = threads::add_member(&state.db.pool, thread_channel_id, auth.user_id).await;
 
     let thread = thread_response(row);
 
@@ -174,7 +174,7 @@ async fn list_active_threads(
     let _ = auth;
     let limit = params.limit.unwrap_or(50).min(100);
 
-    let rows = threads::list_active(&state.db.pg, channel_id, limit).await?;
+    let rows = threads::list_active(&state.db.pool, channel_id, limit).await?;
     let list: Vec<Thread> = rows.into_iter().map(thread_response).collect();
     Ok(Json(list))
 }
@@ -198,7 +198,7 @@ async fn list_archived_threads(
     let _ = auth;
     let limit = params.limit.unwrap_or(25).min(100);
 
-    let rows = threads::list_archived(&state.db.pg, channel_id, limit, params.before).await?;
+    let rows = threads::list_archived(&state.db.pool, channel_id, limit, params.before).await?;
     let list: Vec<Thread> = rows.into_iter().map(thread_response).collect();
     Ok(Json(list))
 }
@@ -213,7 +213,7 @@ async fn get_thread(
     Path((_channel_id, thread_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<Thread>> {
     let _ = auth;
-    let row = threads::find_by_id(&state.db.pg, thread_id)
+    let row = threads::find_by_id(&state.db.pool, thread_id)
         .await?
         .ok_or(NexusError::NotFound {
             resource: "Thread".into(),
@@ -234,7 +234,7 @@ async fn update_thread(
     validate_request(&body)?;
 
     // Must be thread owner or have MANAGE_THREADS permission (simplified: owner only)
-    let existing = threads::find_by_id(&state.db.pg, thread_id)
+    let existing = threads::find_by_id(&state.db.pool, thread_id)
         .await?
         .ok_or(NexusError::NotFound {
             resource: "Thread".into(),
@@ -248,7 +248,7 @@ async fn update_thread(
 
     let tags_slice = body.tags.as_deref();
     let row = threads::update_thread(
-        &state.db.pg,
+        &state.db.pool,
         thread_id,
         body.title.as_deref(),
         body.archived,
@@ -280,7 +280,7 @@ async fn join_thread(
     State(state): State<Arc<AppState>>,
     Path((_channel_id, thread_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    threads::add_member(&state.db.pg, thread_id, auth.user_id).await?;
+    threads::add_member(&state.db.pool, thread_id, auth.user_id).await?;
     Ok(Json(serde_json::json!({ "joined": true })))
 }
 
@@ -289,7 +289,7 @@ async fn leave_thread(
     State(state): State<Arc<AppState>>,
     Path((_channel_id, thread_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    let removed = threads::remove_member(&state.db.pg, thread_id, auth.user_id).await?;
+    let removed = threads::remove_member(&state.db.pool, thread_id, auth.user_id).await?;
     Ok(Json(serde_json::json!({ "left": removed })))
 }
 
@@ -299,7 +299,7 @@ async fn list_thread_members(
     Path((_channel_id, thread_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<Vec<Uuid>>> {
     let _ = auth;
-    let members = threads::list_members(&state.db.pg, thread_id).await?;
+    let members = threads::list_members(&state.db.pool, thread_id).await?;
     Ok(Json(members))
 }
 

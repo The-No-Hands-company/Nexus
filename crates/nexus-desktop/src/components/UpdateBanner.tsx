@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../invoke";
 import { useStore } from "../store";
 
 export default function UpdateBanner() {

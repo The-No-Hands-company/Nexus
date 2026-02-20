@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback } from "react";
 import { useParams } from "react-router-dom";
 import { useStore, Message } from "../store";
 import MessageInput from "./MessageInput";
-import { formatDistanceToNow } from "date-fns";
+import { formatDistanceToNow, format, isToday, isYesterday } from "date-fns";
 import clsx from "clsx";
 
 export default function ChatView() {
@@ -39,9 +39,11 @@ export default function ChatView() {
   return (
     <div className="flex flex-col h-full bg-bg-800">
       {/* Channel header */}
-      <div className="h-12 px-4 flex items-center gap-2 border-b border-bg-600 shrink-0 no-select">
-        <span className="text-muted">#</span>
-        <span className="font-semibold text-white text-sm">{channel?.name}</span>
+      <div className="h-12 px-4 flex items-center gap-2 border-b border-bg-600/50 shrink-0 no-select">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className="text-muted shrink-0">
+          <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/>
+        </svg>
+        <span className="font-semibold text-fg text-sm">{channel?.name}</span>
         {channel?.isE2ee && (
           <span className="text-xs bg-green-900/40 text-green-400 px-1.5 py-0.5 rounded font-medium">
             E2EE
@@ -67,20 +69,73 @@ export default function ChatView() {
             new Date(msg.createdAt).getTime() -
               new Date(prevMsg.createdAt).getTime() <
               5 * 60 * 1000;
+          // Date separator when the calendar day changes
+          const newDay = !prevMsg ||
+            new Date(msg.createdAt).toDateString() !== new Date(prevMsg.createdAt).toDateString();
           return (
-            <MessageRow
-              key={msg.id}
-              msg={msg}
-              grouped={grouped}
-              isOwn={msg.authorId === session?.userId}
-            />
+            <>
+              {newDay && <DateSeparator key={`sep-${msg.id}`} date={new Date(msg.createdAt)} />}
+              <MessageRow
+                key={msg.id}
+                msg={msg}
+                grouped={grouped && !newDay}
+                isOwn={msg.authorId === session?.userId}
+              />
+            </>
           );
         })}
         <div ref={bottomRef} />
       </div>
 
+      {/* Typing bar */}
+      {channelId && <TypingBar channelId={channelId} />}
+
       {/* Input */}
       <MessageInput channelId={channelId} isE2ee={!!channel?.isE2ee} />
+    </div>
+  );
+}
+
+// ── Date separator ────────────────────────────────────────────────────────────
+function DateSeparator({ date }: { date: Date }) {
+  const label = isToday(date)
+    ? "Today"
+    : isYesterday(date)
+    ? "Yesterday"
+    : format(date, "MMMM d, yyyy");
+  return (
+    <div className="flex items-center gap-3 my-3 px-1 no-select">
+      <div className="flex-1 h-px bg-bg-600/40" />
+      <span className="text-[11px] text-muted/60 font-medium uppercase tracking-wider shrink-0">
+        {label}
+      </span>
+      <div className="flex-1 h-px bg-bg-600/40" />
+    </div>
+  );
+}
+
+// ── Typing indicator bar ──────────────────────────────────────────────────────
+export function TypingBar({ channelId }: { channelId: string }) {
+  const typingUsers = useStore((s) => s.typingUsers[channelId] ?? []);
+  if (typingUsers.length === 0) return null;
+
+  let label: string;
+  if (typingUsers.length === 1) label = `${typingUsers[0]} is typing…`;
+  else if (typingUsers.length === 2) label = `${typingUsers[0]} and ${typingUsers[1]} are typing…`;
+  else label = "Several people are typing…";
+
+  return (
+    <div className="px-4 pb-1 flex items-center gap-1.5">
+      <span className="flex gap-0.5 items-end h-3">
+        {[0, 1, 2].map((i) => (
+          <span
+            key={i}
+            className="w-1 h-1 rounded-full bg-muted/60 animate-bounce"
+            style={{ animationDelay: `${i * 0.15}s` }}
+          />
+        ))}
+      </span>
+      <span className="text-xs text-muted/70 italic">{label}</span>
     </div>
   );
 }
@@ -103,7 +158,7 @@ function MessageRow({
     >
       {/* Avatar column */}
       <div className="w-9 shrink-0 mt-0.5">
-        {!grouped && (
+        {!grouped ? (
           <div
             className={clsx(
               "w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold",
@@ -112,6 +167,10 @@ function MessageRow({
           >
             {msg.authorUsername[0]?.toUpperCase()}
           </div>
+        ) : (
+          <span className="opacity-0 group-hover:opacity-100 text-[10px] text-muted/50 block text-right pr-1 leading-[2.25rem] transition-opacity select-none">
+            {format(new Date(msg.createdAt), "HH:mm")}
+          </span>
         )}
       </div>
 

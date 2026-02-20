@@ -2,6 +2,7 @@
 
 use axum::{
     extract::{Extension, Path, State},
+    middleware,
     routing::get,
     Json, Router,
 };
@@ -19,15 +20,16 @@ use crate::{middleware::AuthContext, AppState};
 
 /// Channel routes.
 pub fn router() -> Router<Arc<AppState>> {
-    Router::new()
-        .route(
-            "/servers/{server_id}/channels",
-            get(list_channels).post(create_channel),
-        )
+    // Routes that require authentication
+    let authed = Router::new()
+        .route("/servers/{server_id}/channels", get(list_channels).post(create_channel))
         .route(
             "/channels/{channel_id}",
             get(get_channel).patch(update_channel).delete(delete_channel),
         )
+        .route_layer(middleware::from_fn(crate::middleware::auth_middleware));
+
+    Router::new().merge(authed)
 }
 
 /// GET /api/v1/servers/:server_id/channels
@@ -35,7 +37,7 @@ async fn list_channels(
     State(state): State<Arc<AppState>>,
     Path(server_id): Path<Uuid>,
 ) -> NexusResult<Json<Vec<nexus_common::models::channel::Channel>>> {
-    let channel_list = channels::list_server_channels(&state.db.pg, server_id).await?;
+    let channel_list = channels::list_server_channels(&state.db.pool, server_id).await?;
     Ok(Json(channel_list))
 }
 
@@ -49,7 +51,7 @@ async fn create_channel(
     validate_request(&body)?;
 
     // Verify server exists and user has permission
-    let server = servers::find_by_id(&state.db.pg, server_id)
+    let server = servers::find_by_id(&state.db.pool, server_id)
         .await?
         .ok_or(NexusError::NotFound {
             resource: "Server".into(),
@@ -70,7 +72,7 @@ async fn create_channel(
         .to_string();
 
     let channel = channels::create_channel(
-        &state.db.pg,
+        &state.db.pool,
         channel_id,
         Some(server_id),
         body.parent_id,
@@ -96,7 +98,7 @@ async fn get_channel(
     State(state): State<Arc<AppState>>,
     Path(channel_id): Path<Uuid>,
 ) -> NexusResult<Json<nexus_common::models::channel::Channel>> {
-    let channel = channels::find_by_id(&state.db.pg, channel_id)
+    let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
         .ok_or(NexusError::NotFound {
             resource: "Channel".into(),
@@ -114,7 +116,7 @@ async fn update_channel(
 ) -> NexusResult<Json<nexus_common::models::channel::Channel>> {
     validate_request(&body)?;
 
-    let _channel = channels::find_by_id(&state.db.pg, channel_id)
+    let _channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
         .ok_or(NexusError::NotFound {
             resource: "Channel".into(),
@@ -122,7 +124,7 @@ async fn update_channel(
 
     // TODO: proper permission check
     let updated = channels::update_channel(
-        &state.db.pg,
+        &state.db.pool,
         channel_id,
         body.name.as_deref(),
         body.topic.as_deref(),
@@ -142,7 +144,7 @@ async fn delete_channel(
     Path(channel_id): Path<Uuid>,
 ) -> NexusResult<Json<serde_json::Value>> {
     // TODO: proper permission check
-    channels::delete_channel(&state.db.pg, channel_id).await?;
+    channels::delete_channel(&state.db.pool, channel_id).await?;
 
     tracing::info!(channel_id = %channel_id, "Channel deleted");
 

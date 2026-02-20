@@ -1,13 +1,43 @@
 import { useState } from "react";
 import { useStore } from "../store";
+import { invoke } from "../invoke";
 import ThemeSwitcher from "../themes/ThemeSwitcher";
 import type { PluginManifest } from "../plugins/types";
 
 export default function SettingsPage() {
-  const { plugins, enabledPlugins, installPlugin, uninstallPlugin, togglePlugin } = useStore();
+  const { plugins, enabledPlugins, installPlugin, uninstallPlugin, togglePlugin, session, setSession } = useStore();
   const [urlInput, setUrlInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Profile section state
+  const [displayName, setDisplayName] = useState(session?.displayName ?? "");
+  const [avatarUrl, setAvatarUrl] = useState(session?.avatar ?? "");
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileMsg, setProfileMsg] = useState<string | null>(null);
+
+  const saveProfile = async () => {
+    if (!session) return;
+    setProfileSaving(true);
+    setProfileMsg(null);
+    try {
+      await invoke("update_profile", {
+        displayName: displayName.trim() || null,
+        avatarUrl: avatarUrl.trim() || null,
+      });
+      setSession({
+        ...session,
+        displayName: displayName.trim() || undefined,
+        avatar: avatarUrl.trim() || undefined,
+      });
+      setProfileMsg("Saved!");
+      setTimeout(() => setProfileMsg(null), 2500);
+    } catch (e) {
+      setProfileMsg(`Error: ${String(e)}`);
+    } finally {
+      setProfileSaving(false);
+    }
+  };
 
   const handleInstall = async () => {
     const url = urlInput.trim();
@@ -34,7 +64,62 @@ export default function SettingsPage() {
     <div className="flex-1 overflow-y-auto p-8 text-sm">
       <h1 className="text-2xl font-bold mb-6">Settings</h1>
 
-      {/* ── Appearance ───────────────────────────────── */}
+      {/* ── Profile ──────────────────────────────────────────── */}
+      <section className="mb-10">
+        <h2 className="text-base font-semibold mb-4 border-b border-bg-600 pb-2">Profile</h2>
+        <div className="flex gap-6 items-start max-w-lg">
+          {/* Avatar preview */}
+          <div className="shrink-0">
+            {avatarUrl ? (
+              <img
+                src={avatarUrl}
+                alt="avatar"
+                className="w-16 h-16 rounded-full object-cover"
+                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+              />
+            ) : (
+              <div className="w-16 h-16 rounded-full bg-accent-500 flex items-center justify-center text-2xl font-bold text-white select-none">
+                {(session?.displayName ?? session?.username ?? '?')[0].toUpperCase()}
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-3 flex-1">
+            <div>
+              <label className="block text-xs font-semibold text-muted uppercase tracking-wide mb-1">Display Name</label>
+              <input
+                className="input w-full"
+                placeholder={session?.username ?? ''}
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-muted uppercase tracking-wide mb-1">Avatar URL</label>
+              <input
+                className="input w-full"
+                placeholder="https://example.com/avatar.png"
+                value={avatarUrl}
+                onChange={(e) => setAvatarUrl(e.target.value)}
+              />
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={saveProfile}
+                disabled={profileSaving}
+                className="btn-primary disabled:opacity-50"
+              >
+                {profileSaving ? 'Saving…' : 'Save Changes'}
+              </button>
+              {profileMsg && (
+                <span className={profileMsg.startsWith('Error') ? 'text-dnd text-xs' : 'text-green-400 text-xs'}>
+                  {profileMsg}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
       <section className="mb-10">
         <h2 className="text-base font-semibold mb-4 border-b border-bg-600 pb-2">Appearance</h2>
         <div className="max-w-xs">

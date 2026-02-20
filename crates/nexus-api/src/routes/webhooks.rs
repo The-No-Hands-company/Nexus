@@ -74,7 +74,7 @@ async fn get_channel_webhooks(
     State(state): State<Arc<AppState>>,
     Path(channel_id): Path<Uuid>,
 ) -> NexusResult<Json<Vec<Webhook>>> {
-    let hooks = webhooks::get_channel_webhooks(&state.db.pg, channel_id).await?;
+    let hooks = webhooks::get_channel_webhooks(&state.db.pool, channel_id).await?;
     Ok(Json(hooks))
 }
 
@@ -86,7 +86,7 @@ async fn create_incoming_webhook(
     Json(body): Json<CreateIncomingWebhookRequest>,
 ) -> NexusResult<Json<Webhook>> {
     // Look up the channel to get server_id
-    let channel = channels::find_by_id(&state.db.pg, channel_id)
+    let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "channel".to_string() })?;
     let server_id = channel.server_id.ok_or(NexusError::Validation {
@@ -97,7 +97,7 @@ async fn create_incoming_webhook(
     let token = generate_webhook_token();
 
     let wh = webhooks::create_incoming_webhook(
-        &state.db.pg,
+        &state.db.pool,
         id,
         server_id,
         channel_id,
@@ -121,7 +121,7 @@ async fn create_outgoing_webhook(
     let id = snowflake::generate_id();
 
     let wh = webhooks::create_outgoing_webhook(
-        &state.db.pg,
+        &state.db.pool,
         id,
         server_id,
         auth.user_id,
@@ -141,7 +141,7 @@ async fn get_webhook_authed(
     State(state): State<Arc<AppState>>,
     Path(webhook_id): Path<Uuid>,
 ) -> NexusResult<Json<Webhook>> {
-    let wh = webhooks::get_webhook(&state.db.pg, webhook_id)
+    let wh = webhooks::get_webhook(&state.db.pool, webhook_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "webhook".to_string() })?;
 
@@ -160,7 +160,7 @@ async fn modify_webhook(
     Path(webhook_id): Path<Uuid>,
     Json(body): Json<ModifyWebhookRequest>,
 ) -> NexusResult<Json<Webhook>> {
-    let existing = webhooks::get_webhook(&state.db.pg, webhook_id)
+    let existing = webhooks::get_webhook(&state.db.pool, webhook_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "webhook".to_string() })?;
     if existing.creator_id != Some(auth.user_id) {
@@ -168,7 +168,7 @@ async fn modify_webhook(
     }
 
     let updated = webhooks::update_webhook(
-        &state.db.pg,
+        &state.db.pool,
         webhook_id,
         body.name.as_deref(),
         body.avatar.as_deref(),
@@ -189,14 +189,14 @@ async fn delete_webhook(
     State(state): State<Arc<AppState>>,
     Path(webhook_id): Path<Uuid>,
 ) -> NexusResult<axum::http::StatusCode> {
-    let existing = webhooks::get_webhook(&state.db.pg, webhook_id)
+    let existing = webhooks::get_webhook(&state.db.pool, webhook_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "webhook".to_string() })?;
     if existing.creator_id != Some(auth.user_id) {
         return Err(NexusError::Forbidden);
     }
 
-    webhooks::delete_webhook(&state.db.pg, webhook_id).await?;
+    webhooks::delete_webhook(&state.db.pool, webhook_id).await?;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
@@ -209,7 +209,7 @@ async fn get_webhook_public(
     State(state): State<Arc<AppState>>,
     Path((webhook_id, token)): Path<(Uuid, String)>,
 ) -> NexusResult<Json<Webhook>> {
-    let wh = webhooks::get_webhook_by_token(&state.db.pg, webhook_id, &token)
+    let wh = webhooks::get_webhook_by_token(&state.db.pool, webhook_id, &token)
         .await?
         .ok_or(NexusError::NotFound { resource: "webhook".to_string() })?;
     Ok(Json(wh))
@@ -222,7 +222,7 @@ async fn execute_webhook(
     Json(body): Json<ExecuteWebhookRequest>,
 ) -> NexusResult<axum::http::StatusCode> {
     // Validate token
-    let wh = webhooks::get_webhook_by_token(&state.db.pg, webhook_id, &token)
+    let wh = webhooks::get_webhook_by_token(&state.db.pool, webhook_id, &token)
         .await?
         .ok_or(NexusError::NotFound { resource: "webhook".to_string() })?;
 
@@ -244,7 +244,7 @@ async fn execute_webhook(
     // Build a stub message record — in production this would go through the
     // full message creation pipeline including thread resolution, embeds, etc.
     let message = messages::create_message(
-        &state.db.pg,
+        &state.db.pool,
         msg_id,
         channel_id,
         // Use webhook UUID as pseudo user_id

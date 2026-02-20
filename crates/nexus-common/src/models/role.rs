@@ -11,7 +11,7 @@ use uuid::Uuid;
 use validator::Validate;
 
 /// A role within a server.
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Role {
     pub id: Uuid,
     pub server_id: Uuid,

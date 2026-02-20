@@ -9,7 +9,7 @@ use uuid::Uuid;
 use validator::Validate;
 
 /// A Nexus user account.
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct User {
     /// Unique user ID (UUID v7 — time-sortable)
     pub id: Uuid,
@@ -41,7 +41,6 @@ pub struct User {
     pub status: Option<String>,
 
     /// Online presence state
-    #[sqlx(rename = "presence")]
     pub presence: UserPresence,
 
     /// User flags (bitfield: staff, verified, bot, etc.)
@@ -56,7 +55,7 @@ pub struct User {
 
 /// Presence states — what users want that Discord almost got right.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
-#[sqlx(type_name = "user_presence", rename_all = "snake_case")]
+#[sqlx(type_name = "text", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum UserPresence {
     /// User is actively connected

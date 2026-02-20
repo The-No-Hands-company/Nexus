@@ -1,11 +1,13 @@
 import { create } from "zustand";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./invoke";
 import type { PluginManifest } from "./plugins/types";
 import { DEFAULT_THEME_ID } from "./themes/themes";
 
 export interface Session {
   userId: string;
   username: string;
+  displayName?: string;
+  avatar?: string;
   serverUrl: string;
   accessToken: string;
 }
@@ -82,6 +84,13 @@ interface StoreState {
   prependMessages: (channelId: string, msgs: Message[]) => void;
   setMessages: (channelId: string, msgs: Message[]) => void;
 
+  // Typing — keyed by channelId → list of usernames currently typing
+  typingUsers: Record<string, string[]>;
+  setTyping: (channelId: string, username: string, active: boolean) => void;
+
+  // Unread — channelIds that have received messages since last viewed
+  unreadChannels: Record<string, boolean>;
+
   // Voice
   voiceParticipants: VoiceParticipant[];
   joinedVoiceChannelId: string | null;
@@ -112,7 +121,11 @@ interface StoreState {
   loadServers: () => Promise<void>;
   loadChannels: (serverId: string) => Promise<void>;
   loadMessages: (channelId: string, before?: string) => Promise<void>;
+  createChannel: (serverId: string, name: string, channelType: string) => Promise<Channel>;
 }
+
+// Module-level map so typing-clear timeouts survive re-renders
+const _typingTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 export const useStore = create<StoreState>((set, get) => ({
   // ─── Auth ─────────────────────────────────────────────────────────────
@@ -129,7 +142,11 @@ export const useStore = create<StoreState>((set, get) => ({
   channels: [],
   activeChannelId: null,
   setChannels: (channels) => set({ channels }),
-  setActiveChannel: (id) => set({ activeChannelId: id }),
+  setActiveChannel: (id) => set((s) => {
+    const unreadChannels = { ...s.unreadChannels };
+    if (id) delete unreadChannels[id];
+    return { activeChannelId: id, unreadChannels };
+  }),
 
   // ─── Messages ─────────────────────────────────────────────────────────
   messages: {},
@@ -138,8 +155,10 @@ export const useStore = create<StoreState>((set, get) => ({
       messages: {
         ...s.messages,
         [channelId]: [...(s.messages[channelId] ?? []), msg],
-      },
-    })),
+      },      // Mark channel unread if the user isn't currently looking at it
+      unreadChannels: s.activeChannelId === channelId
+        ? s.unreadChannels
+        : { ...s.unreadChannels, [channelId]: true },    })),
   prependMessages: (channelId, msgs) =>
     set((s) => ({
       messages: {
@@ -151,6 +170,41 @@ export const useStore = create<StoreState>((set, get) => ({
     set((s) => ({
       messages: { ...s.messages, [channelId]: msgs },
     })),
+
+  // ─── Typing ───────────────────────────────────────────────────────────────
+  typingUsers: {},
+  setTyping: (channelId, username, active) => {
+    const key = `${channelId}:${username}`;
+    if (active) {
+      set((s) => ({
+        typingUsers: {
+          ...s.typingUsers,
+          [channelId]: [...new Set([...(s.typingUsers[channelId] ?? []), username])],
+        },
+      }));
+      if (_typingTimers.has(key)) clearTimeout(_typingTimers.get(key)!);
+      _typingTimers.set(key, setTimeout(() => {
+        set((s) => ({
+          typingUsers: {
+            ...s.typingUsers,
+            [channelId]: (s.typingUsers[channelId] ?? []).filter((u) => u !== username),
+          },
+        }));
+        _typingTimers.delete(key);
+      }, 6000));
+    } else {
+      if (_typingTimers.has(key)) { clearTimeout(_typingTimers.get(key)!); _typingTimers.delete(key); }
+      set((s) => ({
+        typingUsers: {
+          ...s.typingUsers,
+          [channelId]: (s.typingUsers[channelId] ?? []).filter((u) => u !== username),
+        },
+      }));
+    }
+  },
+
+  // ─── Unread ───────────────────────────────────────────────────────────────
+  unreadChannels: {},
 
   // ─── Voice ────────────────────────────────────────────────────────────
   voiceParticipants: [],
@@ -214,11 +268,15 @@ export const useStore = create<StoreState>((set, get) => ({
     } catch {
       // ignore
     }
+    _typingTimers.forEach(clearTimeout);
+    _typingTimers.clear();
     set({
       session: null,
       servers: [],
       channels: [],
       messages: {},
+      typingUsers: {},
+      unreadChannels: {},
       activeServerId: null,
       activeChannelId: null,
     });
@@ -240,6 +298,12 @@ export const useStore = create<StoreState>((set, get) => ({
     } catch (e) {
       console.error("loadChannels error", e);
     }
+  },
+
+  createChannel: async (serverId: string, name: string, channelType: string): Promise<Channel> => {
+    const ch = await invoke<Channel>("create_channel", { serverId, name, channelType });
+    set((s) => ({ channels: [...s.channels, ch] }));
+    return ch;
   },
 
   loadMessages: async (channelId: string, before?: string) => {

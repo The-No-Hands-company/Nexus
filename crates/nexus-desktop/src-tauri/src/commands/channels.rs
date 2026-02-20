@@ -41,6 +41,38 @@ impl From<RawChannel> for ChannelClient {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+struct CreateChannelRequest {
+    pub name: String,
+    pub channel_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub topic: Option<String>,
+}
+
+#[tauri::command]
+pub async fn create_channel(
+    state: State<'_, AppState>,
+    server_id: Uuid,
+    name: String,
+    channel_type: String,
+) -> Result<ChannelClient, String> {
+    let session = state.session_snapshot();
+    let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
+    let resp = client
+        .post(format!("{base}/api/v1/servers/{server_id}/channels"))
+        .json(&CreateChannelRequest { name, channel_type, topic: None })
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("Server error {status}: {body}"));
+    }
+    let raw: RawChannel = resp.json().await.map_err(|e| e.to_string())?;
+    Ok(ChannelClient::from(raw))
+}
+
 #[tauri::command]
 pub async fn list_channels(
     state: State<'_, AppState>,

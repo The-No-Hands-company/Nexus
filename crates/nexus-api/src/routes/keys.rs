@@ -87,7 +87,7 @@ async fn register_device(
         .unwrap_or_else(|| "unknown".into());
 
     let device = keystore::create_device(
-        &state.db.pg,
+        &state.db.pool,
         auth.user_id,
         &body.name,
         &device_type_str,
@@ -106,7 +106,7 @@ async fn register_device(
             .iter()
             .map(|k| (k.key_id, k.public_key.clone()))
             .collect();
-        keystore::insert_one_time_pre_keys(&state.db.pg, device.id, &pairs)
+        keystore::insert_one_time_pre_keys(&state.db.pool, device.id, &pairs)
             .await
             .map_err(|e| NexusError::Internal(e))?;
     }
@@ -122,7 +122,7 @@ async fn list_my_devices(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
 ) -> NexusResult<Json<Vec<Device>>> {
-    let devices = keystore::list_devices(&state.db.pg, auth.user_id)
+    let devices = keystore::list_devices(&state.db.pool, auth.user_id)
         .await
         .map_err(|e| NexusError::Internal(e))?;
     Ok(Json(devices))
@@ -137,7 +137,7 @@ async fn get_device(
     State(state): State<Arc<AppState>>,
     Path(device_id): Path<Uuid>,
 ) -> NexusResult<Json<Device>> {
-    let device = keystore::find_device(&state.db.pg, device_id)
+    let device = keystore::find_device(&state.db.pool, device_id)
         .await
         .map_err(|e| NexusError::Internal(e))?
         .ok_or(NexusError::NotFound {
@@ -160,7 +160,7 @@ async fn delete_device(
     State(state): State<Arc<AppState>>,
     Path(device_id): Path<Uuid>,
 ) -> NexusResult<()> {
-    let device = keystore::find_device(&state.db.pg, device_id)
+    let device = keystore::find_device(&state.db.pool, device_id)
         .await
         .map_err(|e| NexusError::Internal(e))?
         .ok_or(NexusError::NotFound {
@@ -171,7 +171,7 @@ async fn delete_device(
         return Err(NexusError::Forbidden);
     }
 
-    keystore::delete_device(&state.db.pg, device_id)
+    keystore::delete_device(&state.db.pool, device_id)
         .await
         .map_err(|e| NexusError::Internal(e))?;
 
@@ -188,7 +188,7 @@ async fn rotate_signed_pre_key(
     Path(device_id): Path<Uuid>,
     Json(body): Json<RotateSignedPreKeyRequest>,
 ) -> NexusResult<()> {
-    let device = keystore::find_device(&state.db.pg, device_id)
+    let device = keystore::find_device(&state.db.pool, device_id)
         .await
         .map_err(|e| NexusError::Internal(e))?
         .ok_or(NexusError::NotFound {
@@ -209,7 +209,7 @@ async fn rotate_signed_pre_key(
     })?;
 
     keystore::rotate_signed_pre_key(
-        &state.db.pg,
+        &state.db.pool,
         device_id,
         &body.signed_pre_key,
         &body.signed_pre_key_sig,
@@ -231,7 +231,7 @@ async fn upload_one_time_pre_keys(
     Path(device_id): Path<Uuid>,
     Json(body): Json<UploadOtpkRequest>,
 ) -> NexusResult<Json<OtpkCountResponse>> {
-    let device = keystore::find_device(&state.db.pg, device_id)
+    let device = keystore::find_device(&state.db.pool, device_id)
         .await
         .map_err(|e| NexusError::Internal(e))?
         .ok_or(NexusError::NotFound {
@@ -249,11 +249,11 @@ async fn upload_one_time_pre_keys(
     }
 
     let pairs: Vec<(i32, String)> = body.keys.iter().map(|k| (k.key_id, k.public_key.clone())).collect();
-    keystore::insert_one_time_pre_keys(&state.db.pg, device_id, &pairs)
+    keystore::insert_one_time_pre_keys(&state.db.pool, device_id, &pairs)
         .await
         .map_err(|e| NexusError::Internal(e))?;
 
-    let remaining = keystore::count_one_time_pre_keys(&state.db.pg, device_id)
+    let remaining = keystore::count_one_time_pre_keys(&state.db.pool, device_id)
         .await
         .map_err(|e| NexusError::Internal(e))?;
 
@@ -269,7 +269,7 @@ async fn count_one_time_pre_keys(
     State(state): State<Arc<AppState>>,
     Path(device_id): Path<Uuid>,
 ) -> NexusResult<Json<OtpkCountResponse>> {
-    let device = keystore::find_device(&state.db.pg, device_id)
+    let device = keystore::find_device(&state.db.pool, device_id)
         .await
         .map_err(|e| NexusError::Internal(e))?
         .ok_or(NexusError::NotFound {
@@ -280,7 +280,7 @@ async fn count_one_time_pre_keys(
         return Err(NexusError::Forbidden);
     }
 
-    let remaining = keystore::count_one_time_pre_keys(&state.db.pg, device_id)
+    let remaining = keystore::count_one_time_pre_keys(&state.db.pool, device_id)
         .await
         .map_err(|e| NexusError::Internal(e))?;
 
@@ -296,7 +296,7 @@ async fn get_all_key_bundles(
     State(state): State<Arc<AppState>>,
     Path(user_id): Path<Uuid>,
 ) -> NexusResult<Json<Vec<KeyBundle>>> {
-    let bundles = keystore::get_all_key_bundles(&state.db.pg, user_id)
+    let bundles = keystore::get_all_key_bundles(&state.db.pool, user_id)
         .await
         .map_err(|e| NexusError::Internal(e))?;
     Ok(Json(bundles))
@@ -311,7 +311,7 @@ async fn get_device_key_bundle(
     State(state): State<Arc<AppState>>,
     Path((_user_id, device_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<KeyBundle>> {
-    let bundle = keystore::get_key_bundle(&state.db.pg, device_id)
+    let bundle = keystore::get_key_bundle(&state.db.pool, device_id)
         .await
         .map_err(|e| NexusError::Internal(e))?
         .ok_or(NexusError::NotFound {

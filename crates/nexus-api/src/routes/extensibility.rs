@@ -69,7 +69,7 @@ async fn list_plugins(
     Query(q): Query<PaginationQuery>,
 ) -> NexusResult<Json<Vec<ClientPlugin>>> {
     let limit = q.limit.min(100);
-    let items = plugins::list_plugins(&state.db.pg, limit, q.offset).await?;
+    let items = plugins::list_plugins(&state.db.pool, limit, q.offset).await?;
     Ok(Json(items))
 }
 
@@ -79,7 +79,7 @@ async fn get_plugin(
     State(state): State<Arc<AppState>>,
     Path(slug): Path<String>,
 ) -> NexusResult<Json<ClientPlugin>> {
-    let plugin = plugins::get_plugin_by_slug(&state.db.pg, &slug)
+    let plugin = plugins::get_plugin_by_slug(&state.db.pool, &slug)
         .await?
         .ok_or(NexusError::NotFound { resource: "plugin".to_string() })?;
     Ok(Json(plugin))
@@ -93,7 +93,7 @@ async fn submit_plugin(
 ) -> NexusResult<Json<ClientPlugin>> {
     let id = snowflake::generate_id();
     let plugin = plugins::create_plugin(
-        &state.db.pg,
+        &state.db.pool,
         id,
         Some(auth.user_id),
         &body.name,
@@ -117,7 +117,7 @@ async fn get_my_plugins(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
 ) -> NexusResult<Json<Vec<UserPluginInstall>>> {
-    let installs = plugins::get_user_plugins(&state.db.pg, auth.user_id).await?;
+    let installs = plugins::get_user_plugins(&state.db.pool, auth.user_id).await?;
     Ok(Json(installs))
 }
 
@@ -133,11 +133,11 @@ async fn install_plugin(
     Json(body): Json<InstallPluginBody>,
 ) -> NexusResult<axum::http::StatusCode> {
     // Verify plugin exists
-    plugins::get_plugin_by_id(&state.db.pg, body.plugin_id)
+    plugins::get_plugin_by_id(&state.db.pool, body.plugin_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "plugin".to_string() })?;
 
-    plugins::install_plugin(&state.db.pg, auth.user_id, body.plugin_id).await?;
+    plugins::install_plugin(&state.db.pool, auth.user_id, body.plugin_id).await?;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
@@ -147,7 +147,7 @@ async fn uninstall_plugin(
     State(state): State<Arc<AppState>>,
     Path(plugin_id): Path<Uuid>,
 ) -> NexusResult<axum::http::StatusCode> {
-    plugins::uninstall_plugin(&state.db.pg, auth.user_id, plugin_id).await?;
+    plugins::uninstall_plugin(&state.db.pool, auth.user_id, plugin_id).await?;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
@@ -159,7 +159,7 @@ async fn update_plugin_settings(
     Json(body): Json<UpdatePluginSettingsRequest>,
 ) -> NexusResult<axum::http::StatusCode> {
     plugins::update_plugin_install(
-        &state.db.pg,
+        &state.db.pool,
         auth.user_id,
         plugin_id,
         body.enabled,
@@ -180,7 +180,7 @@ async fn list_themes(
     Query(q): Query<PaginationQuery>,
 ) -> NexusResult<Json<Vec<Theme>>> {
     let limit = q.limit.min(100);
-    let items = plugins::list_themes(&state.db.pg, limit, q.offset).await?;
+    let items = plugins::list_themes(&state.db.pool, limit, q.offset).await?;
     Ok(Json(items))
 }
 
@@ -190,7 +190,7 @@ async fn get_theme(
     State(state): State<Arc<AppState>>,
     Path(slug): Path<String>,
 ) -> NexusResult<Json<Theme>> {
-    let theme = plugins::get_theme_by_slug(&state.db.pg, &slug)
+    let theme = plugins::get_theme_by_slug(&state.db.pool, &slug)
         .await?
         .ok_or(NexusError::NotFound { resource: "theme".to_string() })?;
     Ok(Json(theme))
@@ -204,7 +204,7 @@ async fn submit_theme(
 ) -> NexusResult<Json<Theme>> {
     let id = snowflake::generate_id();
     let theme = plugins::create_theme(
-        &state.db.pg,
+        &state.db.pool,
         id,
         Some(auth.user_id),
         &body.name,
@@ -228,7 +228,7 @@ async fn get_my_themes(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
 ) -> NexusResult<Json<Vec<UserThemeInstall>>> {
-    let installs = plugins::get_user_themes(&state.db.pg, auth.user_id).await?;
+    let installs = plugins::get_user_themes(&state.db.pool, auth.user_id).await?;
     Ok(Json(installs))
 }
 
@@ -243,7 +243,7 @@ async fn install_theme(
     State(state): State<Arc<AppState>>,
     Json(body): Json<InstallThemeBody>,
 ) -> NexusResult<axum::http::StatusCode> {
-    plugins::install_theme(&state.db.pg, auth.user_id, body.theme_id).await?;
+    plugins::install_theme(&state.db.pool, auth.user_id, body.theme_id).await?;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
@@ -253,7 +253,7 @@ async fn uninstall_theme(
     State(state): State<Arc<AppState>>,
     Path(theme_id): Path<Uuid>,
 ) -> NexusResult<axum::http::StatusCode> {
-    plugins::uninstall_theme(&state.db.pg, auth.user_id, theme_id).await?;
+    plugins::uninstall_theme(&state.db.pool, auth.user_id, theme_id).await?;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
@@ -263,7 +263,7 @@ async fn activate_theme(
     State(state): State<Arc<AppState>>,
     Path(theme_id): Path<Uuid>,
 ) -> NexusResult<axum::http::StatusCode> {
-    let success = plugins::activate_theme(&state.db.pg, auth.user_id, theme_id).await?;
+    let success = plugins::activate_theme(&state.db.pool, auth.user_id, theme_id).await?;
     if !success {
         return Err(NexusError::NotFound { resource: "theme".to_string() });
     }

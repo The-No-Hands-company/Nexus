@@ -1,7 +1,7 @@
 //! Custom emoji repository — CRUD for server-level custom emoji.
 
 use nexus_common::models::rich::ServerEmojiRow;
-use sqlx::PgPool;
+
 use uuid::Uuid;
 
 // Module-level helper rows (sqlx::FromRow cannot be derived on local types)
@@ -17,7 +17,7 @@ struct CountRow { count: i64 }
 
 /// Insert a new custom emoji for a server.
 pub async fn create_emoji(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     id: Uuid,
     server_id: Uuid,
     creator_id: Uuid,
@@ -33,13 +33,13 @@ pub async fn create_emoji(
             storage_key, url, animated,
             managed, available, created_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, false, true, NOW())
+        VALUES (?, ?, ?, ?, ?, ?, ?, false, true, CURRENT_TIMESTAMP)
         RETURNING *
         "#,
     )
-    .bind(id)
-    .bind(server_id)
-    .bind(creator_id)
+    .bind(id.to_string())
+    .bind(server_id.to_string())
+    .bind(creator_id.to_string())
     .bind(name)
     .bind(storage_key)
     .bind(url)
@@ -54,38 +54,38 @@ pub async fn create_emoji(
 
 /// Get all emoji for a server.
 pub async fn list_for_server(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     server_id: Uuid,
 ) -> Result<Vec<ServerEmojiRow>, sqlx::Error> {
     sqlx::query_as::<_, ServerEmojiRow>(
-        "SELECT * FROM server_emoji WHERE server_id = $1 ORDER BY name",
+        "SELECT * FROM server_emoji WHERE server_id = ? ORDER BY name",
     )
-    .bind(server_id)
+    .bind(server_id.to_string())
     .fetch_all(pool)
     .await
 }
 
 /// Get a single emoji by ID.
 pub async fn find_by_id(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     id: Uuid,
 ) -> Result<Option<ServerEmojiRow>, sqlx::Error> {
-    sqlx::query_as::<_, ServerEmojiRow>("SELECT * FROM server_emoji WHERE id = $1")
-        .bind(id)
+    sqlx::query_as::<_, ServerEmojiRow>("SELECT * FROM server_emoji WHERE id = ?")
+        .bind(id.to_string())
         .fetch_optional(pool)
         .await
 }
 
 /// Get a single emoji by server + name.
 pub async fn find_by_name(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     server_id: Uuid,
     name: &str,
 ) -> Result<Option<ServerEmojiRow>, sqlx::Error> {
     sqlx::query_as::<_, ServerEmojiRow>(
-        "SELECT * FROM server_emoji WHERE server_id = $1 AND name = $2",
+        "SELECT * FROM server_emoji WHERE server_id = ? AND name = ?",
     )
-    .bind(server_id)
+    .bind(server_id.to_string())
     .bind(name)
     .fetch_optional(pool)
     .await
@@ -97,7 +97,7 @@ pub async fn find_by_name(
 
 /// Rename an emoji.
 pub async fn update_emoji(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     id: Uuid,
     server_id: Uuid,
     name: &str,
@@ -105,22 +105,22 @@ pub async fn update_emoji(
     sqlx::query_as::<_, ServerEmojiRow>(
         r#"
         UPDATE server_emoji
-        SET name = $3
-        WHERE id = $1 AND server_id = $2
+        SET name = ?
+        WHERE id = ? AND server_id = ?
         RETURNING *
         "#,
     )
-    .bind(id)
-    .bind(server_id)
+    .bind(id.to_string())
+    .bind(server_id.to_string())
     .bind(name)
     .fetch_one(pool)
     .await
 }
 
 /// Set an emoji's public URL after upload.
-pub async fn set_url(pool: &PgPool, id: Uuid, url: &str) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE server_emoji SET url = $2 WHERE id = $1")
-        .bind(id)
+pub async fn set_url(pool: &sqlx::AnyPool, id: Uuid, url: &str) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE server_emoji SET url = ? WHERE id = ?")
+        .bind(id.to_string())
         .bind(url)
         .execute(pool)
         .await?;
@@ -133,26 +133,26 @@ pub async fn set_url(pool: &PgPool, id: Uuid, url: &str) -> Result<(), sqlx::Err
 
 /// Delete an emoji. Returns the storage_key so the caller can clean up storage.
 pub async fn delete_emoji(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     id: Uuid,
     server_id: Uuid,
 ) -> Result<Option<String>, sqlx::Error> {
     let row = sqlx::query_as::<_, StorageKeyRow>(
-        "DELETE FROM server_emoji WHERE id = $1 AND server_id = $2 RETURNING storage_key",
+        "DELETE FROM server_emoji WHERE id = ? AND server_id = ? RETURNING storage_key",
     )
-    .bind(id)
-    .bind(server_id)
+    .bind(id.to_string())
+    .bind(server_id.to_string())
     .fetch_optional(pool)
     .await?;
     Ok(row.map(|r| r.storage_key))
 }
 
 /// Count emoji for a server (for limit enforcement).
-pub async fn count_for_server(pool: &PgPool, server_id: Uuid) -> Result<i64, sqlx::Error> {
+pub async fn count_for_server(pool: &sqlx::AnyPool, server_id: Uuid) -> Result<i64, sqlx::Error> {
     let row = sqlx::query_as::<_, CountRow>(
-        "SELECT COUNT(*) AS count FROM server_emoji WHERE server_id = $1",
+        "SELECT COUNT(*) AS count FROM server_emoji WHERE server_id = ?",
     )
-    .bind(server_id)
+    .bind(server_id.to_string())
     .fetch_one(pool)
     .await?;
     Ok(row.count)

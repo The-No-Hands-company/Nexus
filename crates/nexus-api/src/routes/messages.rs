@@ -112,7 +112,7 @@ async fn send_message(
     validate_request(&body)?;
 
     // Verify channel exists
-    let channel = channels::find_by_id(&state.db.pg, channel_id)
+    let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
         .ok_or(NexusError::NotFound {
             resource: "Channel".into(),
@@ -120,7 +120,7 @@ async fn send_message(
 
     // If this is a server channel, verify user is a member
     if let Some(server_id) = channel.server_id {
-        if !members::is_member(&state.db.pg, auth.user_id, server_id).await? {
+        if !members::is_member(&state.db.pool, auth.user_id, server_id).await? {
             return Err(NexusError::Forbidden);
         }
     }
@@ -139,7 +139,7 @@ async fn send_message(
 
     let message_id = snowflake::generate_id();
     let msg = messages::create_message(
-        &state.db.pg,
+        &state.db.pool,
         message_id,
         channel_id,
         auth.user_id,
@@ -156,7 +156,7 @@ async fn send_message(
     // Increment mention counts for mentioned users
     for mentioned_user_id in &mentions {
         let _ = read_states::increment_mention_count(
-            &state.db.pg,
+            &state.db.pool,
             *mentioned_user_id,
             channel_id,
         )
@@ -193,7 +193,7 @@ async fn get_messages(
     Query(params): Query<MessageHistoryParams>,
 ) -> NexusResult<Json<Vec<serde_json::Value>>> {
     // Verify channel exists
-    let channel = channels::find_by_id(&state.db.pg, channel_id)
+    let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
         .ok_or(NexusError::NotFound {
             resource: "Channel".into(),
@@ -201,14 +201,14 @@ async fn get_messages(
 
     // If server channel, verify membership
     if let Some(server_id) = channel.server_id {
-        if !members::is_member(&state.db.pg, auth.user_id, server_id).await? {
+        if !members::is_member(&state.db.pool, auth.user_id, server_id).await? {
             return Err(NexusError::Forbidden);
         }
     }
 
     let limit = params.limit.unwrap_or(50).min(100).max(1);
     let rows = messages::list_channel_messages_with_author(
-        &state.db.pg,
+        &state.db.pool,
         channel_id,
         params.before,
         params.after,
@@ -219,7 +219,7 @@ async fn get_messages(
     // Fetch reactions for all messages in batch
     let mut result = Vec::with_capacity(rows.len());
     for row in &rows {
-        let reaction_counts = reactions::get_reaction_counts(&state.db.pg, row.id)
+        let reaction_counts = reactions::get_reaction_counts(&state.db.pool, row.id)
             .await
             .unwrap_or_default();
         let my_reactions = get_user_reactions(&state, row.id, auth.user_id, &reaction_counts).await;
@@ -235,7 +235,7 @@ async fn get_message(
     State(state): State<Arc<AppState>>,
     Path((channel_id, message_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    let msg = messages::find_by_id(&state.db.pg, message_id)
+    let msg = messages::find_by_id(&state.db.pool, message_id)
         .await?
         .ok_or(NexusError::NotFound {
             resource: "Message".into(),
@@ -247,7 +247,7 @@ async fn get_message(
         });
     }
 
-    let reaction_counts = reactions::get_reaction_counts(&state.db.pg, message_id)
+    let reaction_counts = reactions::get_reaction_counts(&state.db.pool, message_id)
         .await
         .unwrap_or_default();
 
@@ -263,7 +263,7 @@ async fn edit_message(
 ) -> NexusResult<Json<serde_json::Value>> {
     validate_request(&body)?;
 
-    let msg = messages::find_by_id(&state.db.pg, message_id)
+    let msg = messages::find_by_id(&state.db.pool, message_id)
         .await?
         .ok_or(NexusError::NotFound {
             resource: "Message".into(),
@@ -284,9 +284,9 @@ async fn edit_message(
         message: "Content is required".into(),
     })?;
 
-    let updated = messages::update_message(&state.db.pg, message_id, content).await?;
+    let updated = messages::update_message(&state.db.pool, message_id, content).await?;
 
-    let channel = channels::find_by_id(&state.db.pg, channel_id).await?.ok_or(NexusError::NotFound {
+    let channel = channels::find_by_id(&state.db.pool, channel_id).await?.ok_or(NexusError::NotFound {
         resource: "Channel".into(),
     })?;
 
@@ -310,7 +310,7 @@ async fn delete_message(
     State(state): State<Arc<AppState>>,
     Path((channel_id, message_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    let msg = messages::find_by_id(&state.db.pg, message_id)
+    let msg = messages::find_by_id(&state.db.pool, message_id)
         .await?
         .ok_or(NexusError::NotFound {
             resource: "Message".into(),
@@ -323,14 +323,14 @@ async fn delete_message(
     }
 
     // Author can delete their own, or MANAGE_MESSAGES permission in server channels
-    let channel = channels::find_by_id(&state.db.pg, channel_id).await?.ok_or(NexusError::NotFound {
+    let channel = channels::find_by_id(&state.db.pool, channel_id).await?.ok_or(NexusError::NotFound {
         resource: "Channel".into(),
     })?;
 
     if msg.author_id != auth.user_id {
         // Check if user has MANAGE_MESSAGES permission
         if let Some(server_id) = channel.server_id {
-            let server = nexus_db::repository::servers::find_by_id(&state.db.pg, server_id)
+            let server = nexus_db::repository::servers::find_by_id(&state.db.pool, server_id)
                 .await?
                 .ok_or(NexusError::NotFound { resource: "Server".into() })?;
             if server.owner_id != auth.user_id {
@@ -343,7 +343,7 @@ async fn delete_message(
         }
     }
 
-    messages::delete_message(&state.db.pg, message_id).await?;
+    messages::delete_message(&state.db.pool, message_id).await?;
 
     // Emit MESSAGE_DELETE event
     let _ = state.gateway_tx.send(GatewayEvent {
@@ -374,7 +374,7 @@ async fn bulk_delete_messages(
         });
     }
 
-    let channel = channels::find_by_id(&state.db.pg, channel_id)
+    let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
         .ok_or(NexusError::NotFound {
             resource: "Channel".into(),
@@ -382,7 +382,7 @@ async fn bulk_delete_messages(
 
     // Must be server owner or have MANAGE_MESSAGES
     if let Some(server_id) = channel.server_id {
-        let server = nexus_db::repository::servers::find_by_id(&state.db.pg, server_id)
+        let server = nexus_db::repository::servers::find_by_id(&state.db.pool, server_id)
             .await?
             .ok_or(NexusError::NotFound { resource: "Server".into() })?;
         if server.owner_id != auth.user_id {
@@ -394,7 +394,7 @@ async fn bulk_delete_messages(
         return Err(NexusError::Forbidden);
     }
 
-    let deleted = messages::bulk_delete_messages(&state.db.pg, &body.messages).await?;
+    let deleted = messages::bulk_delete_messages(&state.db.pool, &body.messages).await?;
 
     // Emit MESSAGE_BULK_DELETE event
     let _ = state.gateway_tx.send(GatewayEvent {
@@ -422,7 +422,7 @@ async fn get_pinned_messages(
     State(state): State<Arc<AppState>>,
     Path(channel_id): Path<Uuid>,
 ) -> NexusResult<Json<Vec<serde_json::Value>>> {
-    let rows = messages::get_pinned_messages(&state.db.pg, channel_id).await?;
+    let rows = messages::get_pinned_messages(&state.db.pool, channel_id).await?;
     let result: Vec<serde_json::Value> = rows
         .iter()
         .map(|r| message_row_to_json(r, &[]))
@@ -436,7 +436,7 @@ async fn pin_message(
     State(state): State<Arc<AppState>>,
     Path((channel_id, message_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    let msg = messages::find_by_id(&state.db.pg, message_id)
+    let msg = messages::find_by_id(&state.db.pool, message_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "Message".into() })?;
 
@@ -444,13 +444,13 @@ async fn pin_message(
         return Err(NexusError::NotFound { resource: "Message".into() });
     }
 
-    let channel = channels::find_by_id(&state.db.pg, channel_id)
+    let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
 
     // Check permission — for now, any member can pin in DMs, owner in servers
     if let Some(server_id) = channel.server_id {
-        let server = nexus_db::repository::servers::find_by_id(&state.db.pg, server_id)
+        let server = nexus_db::repository::servers::find_by_id(&state.db.pool, server_id)
             .await?
             .ok_or(NexusError::NotFound { resource: "Server".into() })?;
         if server.owner_id != auth.user_id {
@@ -460,7 +460,7 @@ async fn pin_message(
         }
     }
 
-    let pinned = messages::pin_message(&state.db.pg, message_id).await?;
+    let pinned = messages::pin_message(&state.db.pool, message_id).await?;
     let response = message_row_to_json(&pinned, &[]);
 
     let _ = state.gateway_tx.send(GatewayEvent {
@@ -483,7 +483,7 @@ async fn unpin_message(
     State(state): State<Arc<AppState>>,
     Path((channel_id, message_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    let msg = messages::find_by_id(&state.db.pg, message_id)
+    let msg = messages::find_by_id(&state.db.pool, message_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "Message".into() })?;
 
@@ -491,9 +491,9 @@ async fn unpin_message(
         return Err(NexusError::NotFound { resource: "Message".into() });
     }
 
-    messages::unpin_message(&state.db.pg, message_id).await?;
+    messages::unpin_message(&state.db.pool, message_id).await?;
 
-    let channel = channels::find_by_id(&state.db.pg, channel_id)
+    let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
 
@@ -522,7 +522,7 @@ async fn add_reaction(
     Path((channel_id, message_id, emoji)): Path<(Uuid, Uuid, String)>,
 ) -> NexusResult<Json<serde_json::Value>> {
     // Verify message exists in channel
-    let msg = messages::find_by_id(&state.db.pg, message_id)
+    let msg = messages::find_by_id(&state.db.pool, message_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "Message".into() })?;
 
@@ -530,10 +530,10 @@ async fn add_reaction(
         return Err(NexusError::NotFound { resource: "Message".into() });
     }
 
-    let added = reactions::add_reaction(&state.db.pg, message_id, auth.user_id, &emoji).await?;
+    let added = reactions::add_reaction(&state.db.pool, message_id, auth.user_id, &emoji).await?;
 
     if added {
-        let channel = channels::find_by_id(&state.db.pg, channel_id)
+        let channel = channels::find_by_id(&state.db.pool, channel_id)
             .await?
             .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
 
@@ -560,10 +560,10 @@ async fn remove_reaction(
     State(state): State<Arc<AppState>>,
     Path((channel_id, message_id, emoji)): Path<(Uuid, Uuid, String)>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    let removed = reactions::remove_reaction(&state.db.pg, message_id, auth.user_id, &emoji).await?;
+    let removed = reactions::remove_reaction(&state.db.pool, message_id, auth.user_id, &emoji).await?;
 
     if removed {
-        let channel = channels::find_by_id(&state.db.pg, channel_id)
+        let channel = channels::find_by_id(&state.db.pool, channel_id)
             .await?
             .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
 
@@ -590,7 +590,7 @@ async fn get_reactors(
     State(state): State<Arc<AppState>>,
     Path((_channel_id, message_id, emoji)): Path<(Uuid, Uuid, String)>,
 ) -> NexusResult<Json<Vec<Uuid>>> {
-    let users = reactions::get_reactors(&state.db.pg, message_id, &emoji, 100).await?;
+    let users = reactions::get_reactors(&state.db.pool, message_id, &emoji, 100).await?;
     Ok(Json(users))
 }
 
@@ -601,12 +601,12 @@ async fn remove_all_emoji_reactions(
     Path((channel_id, message_id, emoji)): Path<(Uuid, Uuid, String)>,
 ) -> NexusResult<Json<serde_json::Value>> {
     // Only server owner / MANAGE_MESSAGES can bulk-remove reactions
-    let channel = channels::find_by_id(&state.db.pg, channel_id)
+    let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
 
     if let Some(server_id) = channel.server_id {
-        let server = nexus_db::repository::servers::find_by_id(&state.db.pg, server_id)
+        let server = nexus_db::repository::servers::find_by_id(&state.db.pool, server_id)
             .await?
             .ok_or(NexusError::NotFound { resource: "Server".into() })?;
         if server.owner_id != auth.user_id {
@@ -616,7 +616,7 @@ async fn remove_all_emoji_reactions(
         }
     }
 
-    let count = reactions::remove_all_reactions_for_emoji(&state.db.pg, message_id, &emoji).await?;
+    let count = reactions::remove_all_reactions_for_emoji(&state.db.pool, message_id, &emoji).await?;
     Ok(Json(serde_json::json!({ "removed": count })))
 }
 
@@ -626,12 +626,12 @@ async fn remove_all_reactions(
     State(state): State<Arc<AppState>>,
     Path((channel_id, message_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    let channel = channels::find_by_id(&state.db.pg, channel_id)
+    let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
 
     if let Some(server_id) = channel.server_id {
-        let server = nexus_db::repository::servers::find_by_id(&state.db.pg, server_id)
+        let server = nexus_db::repository::servers::find_by_id(&state.db.pool, server_id)
             .await?
             .ok_or(NexusError::NotFound { resource: "Server".into() })?;
         if server.owner_id != auth.user_id {
@@ -641,7 +641,7 @@ async fn remove_all_reactions(
         }
     }
 
-    let count = reactions::remove_all_reactions(&state.db.pg, message_id).await?;
+    let count = reactions::remove_all_reactions(&state.db.pool, message_id).await?;
     Ok(Json(serde_json::json!({ "removed": count })))
 }
 
@@ -655,7 +655,7 @@ async fn ack_message(
     State(state): State<Arc<AppState>>,
     Path((channel_id, message_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    let rs = read_states::ack_message(&state.db.pg, auth.user_id, channel_id, message_id).await?;
+    let rs = read_states::ack_message(&state.db.pool, auth.user_id, channel_id, message_id).await?;
 
     Ok(Json(serde_json::json!({
         "channel_id": rs.channel_id,
@@ -676,12 +676,12 @@ async fn search_messages(
     Query(params): Query<SearchParams>,
 ) -> NexusResult<Json<Vec<serde_json::Value>>> {
     // Verify access
-    let channel = channels::find_by_id(&state.db.pg, channel_id)
+    let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
 
     if let Some(server_id) = channel.server_id {
-        if !members::is_member(&state.db.pg, auth.user_id, server_id).await? {
+        if !members::is_member(&state.db.pool, auth.user_id, server_id).await? {
             return Err(NexusError::Forbidden);
         }
     }
@@ -690,7 +690,7 @@ async fn search_messages(
     let offset = params.offset.unwrap_or(0);
 
     let rows = messages::search_messages(
-        &state.db.pg,
+        &state.db.pool,
         Some(channel_id),
         &params.query,
         limit,
@@ -830,7 +830,7 @@ async fn get_user_reactions(
 ) -> Vec<String> {
     let mut my_reactions = Vec::new();
     for rc in reaction_counts {
-        if reactions::has_user_reacted(&state.db.pg, message_id, user_id, &rc.emoji)
+        if reactions::has_user_reacted(&state.db.pool, message_id, user_id, &rc.emoji)
             .await
             .unwrap_or(false)
         {

@@ -9,7 +9,7 @@ use uuid::Uuid;
 use validator::Validate;
 
 /// A Nexus server (community).
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Server {
     pub id: Uuid,
 
@@ -114,7 +114,7 @@ impl From<Server> for ServerResponse {
 }
 
 /// Server invite
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Invite {
     /// Short invite code (e.g., "abc123")
     pub code: String,

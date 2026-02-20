@@ -1,6 +1,6 @@
 import { useState, KeyboardEvent, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { useStore } from "../store";
+import { invoke } from "../invoke";
+import { useStore, Message } from "../store";
 import clsx from "clsx";
 
 interface Props {
@@ -11,13 +11,17 @@ interface Props {
 export default function MessageInput({ channelId, isE2ee }: Props) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
-  const { pttActive } = useStore();
+  const [sendError, setSendError] = useState<string | null>(null);
+  const { pttActive, appendMessage } = useStore();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // Throttle typing notifications to once every 3 s
+  const lastTypingSent = useRef<number>(0);
 
   const send = async () => {
     const content = text.trim();
     if (!content || sending) return;
     setSending(true);
+    setSendError(null);
     try {
       if (isE2ee) {
         // E2EE: encrypt per-recipient via Tauri command
@@ -29,12 +33,12 @@ export default function MessageInput({ channelId, isE2ee }: Props) {
           attachmentIds: [],
         });
       } else {
-        await invoke("send_message", {
+        const msg = await invoke<Message>("send_message", {
           channelId,
           content,
-          attachmentIds: [],
-          replyToId: null,
         });
+        // Immediately reflect the sent message in the UI without waiting on the WebSocket.
+        appendMessage(channelId, msg);
       }
       setText("");
       // Reset textarea height
@@ -43,6 +47,7 @@ export default function MessageInput({ channelId, isE2ee }: Props) {
       }
     } catch (e) {
       console.error("send error", e);
+      setSendError(String(e));
     } finally {
       setSending(false);
     }
@@ -60,6 +65,12 @@ export default function MessageInput({ channelId, isE2ee }: Props) {
     if (!el) return;
     el.style.height = "auto";
     el.style.height = Math.min(el.scrollHeight, 200) + "px";
+    // Fire typing indicator (throttled)
+    const now = Date.now();
+    if (now - lastTypingSent.current > 3000) {
+      lastTypingSent.current = now;
+      invoke("send_typing", { channelId }).catch(() => {});
+    }
   };
 
   return (
@@ -69,6 +80,14 @@ export default function MessageInput({ channelId, isE2ee }: Props) {
         <div className="flex items-center gap-2 text-xs text-green-400 mb-1">
           <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse inline-block" />
           Push-to-Talk active
+        </div>
+      )}
+
+      {/* Send error */}
+      {sendError && (
+        <div className="flex items-center justify-between gap-2 text-xs text-red-400 bg-red-950/40 border border-red-800/50 rounded px-3 py-1.5 mb-2">
+          <span>{sendError}</span>
+          <button onClick={() => setSendError(null)} className="shrink-0 hover:text-red-300 transition-colors">✕</button>
         </div>
       )}
 

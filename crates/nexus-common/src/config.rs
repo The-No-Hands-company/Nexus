@@ -35,6 +35,14 @@ pub fn init() -> Result<&'static AppConfig, config::ConfigError> {
         .set_default("database.min_connections", 5)?
         .set_default("auth.access_token_ttl_secs", 900)? // 15 min
         .set_default("auth.refresh_token_ttl_secs", 2_592_000)? // 30 days
+        .set_default("storage.endpoint", "")?
+        .set_default("storage.bucket", "nexus")?
+        .set_default("storage.access_key", "")?
+        .set_default("storage.secret_key", "")?
+        .set_default("storage.region", "us-east-1")?
+        .set_default("storage.data_dir", "./data/uploads")?
+        .set_default("search.url", "http://localhost:7700")?
+        .set_default("search.api_key", "")?
         .set_default("limits.max_servers_per_user", 200)?
         .set_default("limits.max_channels_per_server", 500)?
         .set_default("limits.max_roles_per_server", 250)?
@@ -93,8 +101,8 @@ pub struct DatabaseConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct RedisConfig {
-    /// Redis connection URL
-    pub url: String,
+    /// Redis connection URL — optional; omit for lite / in-process-only mode.
+    pub url: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -117,12 +125,15 @@ pub struct AuthConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct StorageConfig {
-    /// S3 endpoint URL (e.g., http://localhost:9000 for MinIO)
+    /// S3 endpoint URL (e.g., http://localhost:9000 for MinIO).
+    /// Leave empty / unset in lite mode — files go to `data_dir` instead.
     pub endpoint: String,
     pub bucket: String,
     pub access_key: String,
     pub secret_key: String,
     pub region: String,
+    /// Local directory for file storage in lite mode (default: ./data/uploads).
+    pub data_dir: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]

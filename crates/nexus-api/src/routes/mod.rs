@@ -4,6 +4,7 @@ pub mod auth;
 pub mod bots;
 pub mod channels;
 pub mod directory;
+pub mod files;
 pub mod dms;
 pub mod e2ee;
 pub mod emoji;

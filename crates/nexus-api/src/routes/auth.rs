@@ -45,7 +45,7 @@ async fn register(
     validate_request(&body)?;
 
     // Check username availability
-    if users::find_by_username(&state.db.pg, &body.username)
+    if users::find_by_username(&state.db.pool, &body.username)
         .await?
         .is_some()
     {
@@ -56,7 +56,7 @@ async fn register(
 
     // Check email availability (if provided)
     if let Some(ref email) = body.email {
-        if users::find_by_email(&state.db.pg, email).await?.is_some() {
+        if users::find_by_email(&state.db.pool, email).await?.is_some() {
             return Err(NexusError::AlreadyExists {
                 resource: "Email".into(),
             });
@@ -72,7 +72,7 @@ async fn register(
 
     // Create user
     let user = users::create_user(
-        &state.db.pg,
+        &state.db.pool,
         user_id,
         &body.username,
         body.email.as_deref(),
@@ -109,7 +109,7 @@ async fn login(
     validate_request(&body)?;
 
     // Find user
-    let user = users::find_by_username(&state.db.pg, &body.username)
+    let user = users::find_by_username(&state.db.pool, &body.username)
         .await?
         .ok_or(NexusError::InvalidCredentials)?;
 
@@ -171,7 +171,7 @@ async fn refresh_token(
         .map_err(|_| NexusError::InvalidToken)?;
 
     // Verify user still exists and isn't disabled
-    let user = users::find_by_id(&state.db.pg, user_id)
+    let user = users::find_by_id(&state.db.pool, user_id)
         .await?
         .ok_or(NexusError::InvalidToken)?;
 

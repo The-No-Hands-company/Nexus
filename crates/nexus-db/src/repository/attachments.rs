@@ -4,7 +4,7 @@
 //! (filename, size, content type, storage key, etc.).
 
 use nexus_common::models::rich::AttachmentRow;
-use sqlx::PgPool;
+
 use uuid::Uuid;
 
 // ============================================================
@@ -14,7 +14,7 @@ use uuid::Uuid;
 /// Insert a new pending attachment record.
 #[allow(clippy::too_many_arguments)]
 pub async fn create_attachment(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     id: Uuid,
     uploader_id: Uuid,
     server_id: Option<Uuid>,
@@ -39,19 +39,19 @@ pub async fn create_attachment(
             created_at, updated_at
         )
         VALUES (
-            $1, $2, $3, $4,
-            $5, $6, $7, $8,
-            $9, $10, $11,
-            $12, $13, 'pending',
-            NOW(), NOW()
+            ?, ?, ?, ?,
+            ?, ?, ?, ?,
+            ?, ?, ?,
+            ?, ?, 'pending',
+            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
         )
         RETURNING *
         "#,
     )
-    .bind(id)
-    .bind(uploader_id)
-    .bind(server_id)
-    .bind(channel_id)
+    .bind(id.to_string())
+    .bind(uploader_id.to_string())
+    .bind(server_id.map(|u| u.to_string()))
+    .bind(channel_id.map(|u| u.to_string()))
     .bind(filename)
     .bind(content_type)
     .bind(size)
@@ -70,29 +70,29 @@ pub async fn create_attachment(
 // ============================================================
 
 /// Find an attachment by ID.
-pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<AttachmentRow>, sqlx::Error> {
-    sqlx::query_as::<_, AttachmentRow>("SELECT * FROM attachments WHERE id = $1")
-        .bind(id)
+pub async fn find_by_id(pool: &sqlx::AnyPool, id: Uuid) -> Result<Option<AttachmentRow>, sqlx::Error> {
+    sqlx::query_as::<_, AttachmentRow>("SELECT * FROM attachments WHERE id = ?")
+        .bind(id.to_string())
         .fetch_optional(pool)
         .await
 }
 
 /// Find all attachments for a message.
 pub async fn list_for_message(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     message_id: Uuid,
 ) -> Result<Vec<AttachmentRow>, sqlx::Error> {
     sqlx::query_as::<_, AttachmentRow>(
-        "SELECT * FROM attachments WHERE message_id = $1 ORDER BY created_at",
+        "SELECT * FROM attachments WHERE message_id = ? ORDER BY created_at",
     )
-    .bind(message_id)
+    .bind(message_id.to_string())
     .fetch_all(pool)
     .await
 }
 
 /// Find all attachments uploaded by a user (paginated).
 pub async fn list_for_uploader(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     uploader_id: Uuid,
     limit: i64,
     before_id: Option<Uuid>,
@@ -101,14 +101,14 @@ pub async fn list_for_uploader(
         sqlx::query_as::<_, AttachmentRow>(
             r#"
             SELECT a.* FROM attachments a
-            WHERE a.uploader_id = $1
-              AND a.id < $2
+            WHERE a.uploader_id = ?
+              AND a.id < ?
             ORDER BY a.created_at DESC
-            LIMIT $3
+            LIMIT ?
             "#,
         )
-        .bind(uploader_id)
-        .bind(before)
+        .bind(uploader_id.to_string())
+        .bind(before.to_string())
         .bind(limit)
         .fetch_all(pool)
         .await
@@ -116,12 +116,12 @@ pub async fn list_for_uploader(
         sqlx::query_as::<_, AttachmentRow>(
             r#"
             SELECT * FROM attachments
-            WHERE uploader_id = $1
+            WHERE uploader_id = ?
             ORDER BY created_at DESC
-            LIMIT $2
+            LIMIT ?
             "#,
         )
-        .bind(uploader_id)
+        .bind(uploader_id.to_string())
         .bind(limit)
         .fetch_all(pool)
         .await
@@ -134,7 +134,7 @@ pub async fn list_for_uploader(
 
 /// Mark an attachment as ready and set its public URL.
 pub async fn mark_ready(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     id: Uuid,
     url: &str,
     blurhash: Option<&str>,
@@ -142,12 +142,12 @@ pub async fn mark_ready(
     sqlx::query_as::<_, AttachmentRow>(
         r#"
         UPDATE attachments
-        SET status = 'ready', url = $2, blurhash = $3, updated_at = NOW()
-        WHERE id = $1
+        SET status = 'ready', url = ?, blurhash = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
         RETURNING *
         "#,
     )
-    .bind(id)
+    .bind(id.to_string())
     .bind(url)
     .bind(blurhash)
     .fetch_one(pool)
@@ -156,26 +156,26 @@ pub async fn mark_ready(
 
 /// Link an attachment to a message after the message is created.
 pub async fn attach_to_message(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     attachment_id: Uuid,
     message_id: Uuid,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "UPDATE attachments SET message_id = $2, updated_at = NOW() WHERE id = $1",
+        "UPDATE attachments SET message_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
     )
-    .bind(attachment_id)
-    .bind(message_id)
+    .bind(attachment_id.to_string())
+    .bind(message_id.to_string())
     .execute(pool)
     .await?;
     Ok(())
 }
 
 /// Mark an attachment as failed.
-pub async fn mark_failed(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
+pub async fn mark_failed(pool: &sqlx::AnyPool, id: Uuid) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "UPDATE attachments SET status = 'failed', updated_at = NOW() WHERE id = $1",
+        "UPDATE attachments SET status = 'failed', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
     )
-    .bind(id)
+    .bind(id.to_string())
     .execute(pool)
     .await?;
     Ok(())
@@ -187,15 +187,15 @@ pub async fn mark_failed(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
 
 /// Delete an attachment record. Caller is responsible for deleting from storage.
 pub async fn delete_attachment(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     id: Uuid,
     uploader_id: Uuid,
 ) -> Result<bool, sqlx::Error> {
     let result = sqlx::query(
-        "DELETE FROM attachments WHERE id = $1 AND uploader_id = $2",
+        "DELETE FROM attachments WHERE id = ? AND uploader_id = ?",
     )
-    .bind(id)
-    .bind(uploader_id)
+    .bind(id.to_string())
+    .bind(uploader_id.to_string())
     .execute(pool)
     .await?;
     Ok(result.rows_affected() > 0)

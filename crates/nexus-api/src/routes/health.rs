@@ -20,7 +20,7 @@ pub fn router() -> Router<Arc<AppState>> {
 
 async fn health_check(State(state): State<Arc<AppState>>) -> Json<HealthResponse> {
     // Check database connectivity
-    let db_ok = nexus_db::postgres::health_check(&state.db.pg).await;
+    let db_ok = nexus_db::postgres::health_check(&state.db.pool).await;
 
     Json(HealthResponse {
         status: if db_ok {

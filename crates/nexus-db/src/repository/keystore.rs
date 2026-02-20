@@ -9,7 +9,7 @@ use nexus_common::models::crypto::{
     Device, DeviceVerification, E2eeChannel, E2eeSession, EncryptedMessage, KeyBundle, OneTimePreKey,
     OtpkPublic,
 };
-use sqlx::PgPool;
+
 use uuid::Uuid;
 
 // ============================================================
@@ -19,7 +19,7 @@ use uuid::Uuid;
 /// Register a new device for a user.
 #[allow(clippy::too_many_arguments)]
 pub async fn create_device(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     user_id: Uuid,
     name: &str,
     device_type: &str,
@@ -33,11 +33,11 @@ pub async fn create_device(
         INSERT INTO devices
             (user_id, name, device_type, identity_key,
              signed_pre_key, signed_pre_key_sig, signed_pre_key_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         RETURNING *
         "#,
     )
-    .bind(user_id)
+    .bind(user_id.to_string())
     .bind(name)
     .bind(device_type)
     .bind(identity_key)
@@ -50,20 +50,20 @@ pub async fn create_device(
 }
 
 /// List all devices for a user (public info only — no secret material stored server-side).
-pub async fn list_devices(pool: &PgPool, user_id: Uuid) -> Result<Vec<Device>> {
+pub async fn list_devices(pool: &sqlx::AnyPool, user_id: Uuid) -> Result<Vec<Device>> {
     let rows = sqlx::query_as::<_, Device>(
-        "SELECT * FROM devices WHERE user_id = $1 ORDER BY created_at ASC",
+        "SELECT * FROM devices WHERE user_id = ? ORDER BY created_at ASC",
     )
-    .bind(user_id)
+    .bind(user_id.to_string())
     .fetch_all(pool)
     .await?;
     Ok(rows)
 }
 
 /// Find a single device by ID.
-pub async fn find_device(pool: &PgPool, device_id: Uuid) -> Result<Option<Device>> {
-    let row = sqlx::query_as::<_, Device>("SELECT * FROM devices WHERE id = $1")
-        .bind(device_id)
+pub async fn find_device(pool: &sqlx::AnyPool, device_id: Uuid) -> Result<Option<Device>> {
+    let row = sqlx::query_as::<_, Device>("SELECT * FROM devices WHERE id = ?")
+        .bind(device_id.to_string())
         .fetch_optional(pool)
         .await?;
     Ok(row)
@@ -71,7 +71,7 @@ pub async fn find_device(pool: &PgPool, device_id: Uuid) -> Result<Option<Device
 
 /// Update the signed pre-key (rotation).
 pub async fn rotate_signed_pre_key(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     device_id: Uuid,
     signed_pre_key: &str,
     signed_pre_key_sig: &str,
@@ -80,35 +80,35 @@ pub async fn rotate_signed_pre_key(
     sqlx::query(
         r#"
         UPDATE devices
-        SET signed_pre_key = $2,
-            signed_pre_key_sig = $3,
-            signed_pre_key_id = $4,
-            updated_at = NOW()
-        WHERE id = $1
+        SET signed_pre_key = ?,
+            signed_pre_key_sig = ?,
+            signed_pre_key_id = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
         "#,
     )
-    .bind(device_id)
     .bind(signed_pre_key)
     .bind(signed_pre_key_sig)
     .bind(signed_pre_key_id)
+    .bind(device_id.to_string())
     .execute(pool)
     .await?;
     Ok(())
 }
 
 /// Touch last_seen_at for a device.
-pub async fn touch_device(pool: &PgPool, device_id: Uuid) -> Result<()> {
-    sqlx::query("UPDATE devices SET last_seen_at = NOW() WHERE id = $1")
-        .bind(device_id)
+pub async fn touch_device(pool: &sqlx::AnyPool, device_id: Uuid) -> Result<()> {
+    sqlx::query("UPDATE devices SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?")
+        .bind(device_id.to_string())
         .execute(pool)
         .await?;
     Ok(())
 }
 
 /// Delete a device and all associated key material.
-pub async fn delete_device(pool: &PgPool, device_id: Uuid) -> Result<()> {
-    sqlx::query("DELETE FROM devices WHERE id = $1")
-        .bind(device_id)
+pub async fn delete_device(pool: &sqlx::AnyPool, device_id: Uuid) -> Result<()> {
+    sqlx::query("DELETE FROM devices WHERE id = ?")
+        .bind(device_id.to_string())
         .execute(pool)
         .await?;
     Ok(())
@@ -120,7 +120,7 @@ pub async fn delete_device(pool: &PgPool, device_id: Uuid) -> Result<()> {
 
 /// Bulk-insert one-time pre-keys for a device.
 pub async fn insert_one_time_pre_keys(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     device_id: Uuid,
     keys: &[(i32, String)],
 ) -> Result<usize> {
@@ -129,11 +129,11 @@ pub async fn insert_one_time_pre_keys(
         sqlx::query(
             r#"
             INSERT INTO one_time_pre_keys (device_id, key_id, public_key)
-            VALUES ($1, $2, $3)
+            VALUES (?, ?, ?)
             ON CONFLICT (device_id, key_id) DO NOTHING
             "#,
         )
-        .bind(device_id)
+        .bind(device_id.to_string())
         .bind(key_id)
         .bind(public_key)
         .execute(pool)
@@ -146,7 +146,7 @@ pub async fn insert_one_time_pre_keys(
 /// Consume one one-time pre-key for a device (atomically marks it used and returns it).
 /// Returns `None` if the device has run out of one-time pre-keys.
 pub async fn consume_one_time_pre_key(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     device_id: Uuid,
 ) -> Result<Option<OtpkPublic>> {
     #[derive(sqlx::FromRow)]
@@ -161,15 +161,14 @@ pub async fn consume_one_time_pre_key(
         SET consumed = true
         WHERE id = (
             SELECT id FROM one_time_pre_keys
-            WHERE device_id = $1 AND NOT consumed
+            WHERE device_id = ? AND NOT consumed
             ORDER BY key_id ASC
             LIMIT 1
-            FOR UPDATE SKIP LOCKED
         )
         RETURNING key_id, public_key
         "#,
     )
-    .bind(device_id)
+    .bind(device_id.to_string())
     .fetch_optional(pool)
     .await?;
 
@@ -180,15 +179,15 @@ pub async fn consume_one_time_pre_key(
 }
 
 /// Count remaining (unconsumed) one-time pre-keys for a device.
-pub async fn count_one_time_pre_keys(pool: &PgPool, device_id: Uuid) -> Result<i64> {
+pub async fn count_one_time_pre_keys(pool: &sqlx::AnyPool, device_id: Uuid) -> Result<i64> {
     #[derive(sqlx::FromRow)]
     struct CountRow {
         count: i64,
     }
     let row = sqlx::query_as::<_, CountRow>(
-        "SELECT COUNT(*) AS count FROM one_time_pre_keys WHERE device_id = $1 AND NOT consumed",
+        "SELECT COUNT(*) AS count FROM one_time_pre_keys WHERE device_id = ? AND NOT consumed",
     )
-    .bind(device_id)
+    .bind(device_id.to_string())
     .fetch_one(pool)
     .await?;
     Ok(row.count)
@@ -200,7 +199,7 @@ pub async fn count_one_time_pre_keys(pool: &PgPool, device_id: Uuid) -> Result<i
 
 /// Fetch a full key bundle for a device (for X3DH initiators).
 /// Atomically consumes one OTPk.
-pub async fn get_key_bundle(pool: &PgPool, device_id: Uuid) -> Result<Option<KeyBundle>> {
+pub async fn get_key_bundle(pool: &sqlx::AnyPool, device_id: Uuid) -> Result<Option<KeyBundle>> {
     let device = match find_device(pool, device_id).await? {
         Some(d) => d,
         None => return Ok(None),
@@ -218,7 +217,7 @@ pub async fn get_key_bundle(pool: &PgPool, device_id: Uuid) -> Result<Option<Key
 }
 
 /// Fetch key bundles for ALL devices of a user (multi-device send).
-pub async fn get_all_key_bundles(pool: &PgPool, user_id: Uuid) -> Result<Vec<KeyBundle>> {
+pub async fn get_all_key_bundles(pool: &sqlx::AnyPool, user_id: Uuid) -> Result<Vec<KeyBundle>> {
     let devices = list_devices(pool, user_id).await?;
     let mut bundles = Vec::with_capacity(devices.len());
     for device in devices {
@@ -242,7 +241,7 @@ pub async fn get_all_key_bundles(pool: &PgPool, user_id: Uuid) -> Result<Vec<Key
 
 /// Upsert a session state blob (client ratchets and re-uploads).
 pub async fn upsert_session(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     owner_device_id: Uuid,
     remote_device_id: Uuid,
     session_state: &str,
@@ -252,16 +251,16 @@ pub async fn upsert_session(
         r#"
         INSERT INTO e2ee_sessions
             (owner_device_id, remote_device_id, session_state, ratchet_step)
-        VALUES ($1, $2, $3, $4)
+        VALUES (?, ?, ?, ?)
         ON CONFLICT (owner_device_id, remote_device_id) DO UPDATE
             SET session_state = EXCLUDED.session_state,
                 ratchet_step  = EXCLUDED.ratchet_step,
-                updated_at    = NOW()
+                updated_at    = CURRENT_TIMESTAMP
         RETURNING *
         "#,
     )
-    .bind(owner_device_id)
-    .bind(remote_device_id)
+    .bind(owner_device_id.to_string())
+    .bind(remote_device_id.to_string())
     .bind(session_state)
     .bind(ratchet_step)
     .fetch_one(pool)
@@ -271,15 +270,15 @@ pub async fn upsert_session(
 
 /// Fetch session state for a device pair.
 pub async fn get_session(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     owner_device_id: Uuid,
     remote_device_id: Uuid,
 ) -> Result<Option<E2eeSession>> {
     let row = sqlx::query_as::<_, E2eeSession>(
-        "SELECT * FROM e2ee_sessions WHERE owner_device_id = $1 AND remote_device_id = $2",
+        "SELECT * FROM e2ee_sessions WHERE owner_device_id = ? AND remote_device_id = ?",
     )
-    .bind(owner_device_id)
-    .bind(remote_device_id)
+    .bind(owner_device_id.to_string())
+    .bind(remote_device_id.to_string())
     .fetch_optional(pool)
     .await?;
     Ok(row)
@@ -291,7 +290,7 @@ pub async fn get_session(
 
 /// Store an encrypted message.
 pub async fn store_encrypted_message(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     channel_id: Uuid,
     sender_id: Uuid,
     sender_device_id: Uuid,
@@ -305,22 +304,23 @@ pub async fn store_encrypted_message(
             (channel_id, sender_id, sender_device_id, ciphertext_map,
              attachment_meta, sequence, client_ts)
         VALUES (
-            $1, $2, $3, $4, $5,
+            ?, ?, ?, ?, ?,
             COALESCE(
-                (SELECT MAX(sequence) + 1 FROM encrypted_messages WHERE channel_id = $1),
+                (SELECT MAX(sequence) + 1 FROM encrypted_messages WHERE channel_id = ?),
                 1
             ),
-            $6
+            ?
         )
         RETURNING *
         "#,
     )
-    .bind(channel_id)
-    .bind(sender_id)
-    .bind(sender_device_id)
-    .bind(ciphertext_map)
-    .bind(attachment_meta)
-    .bind(client_ts)
+    .bind(channel_id.to_string())
+    .bind(sender_id.to_string())
+    .bind(sender_device_id.to_string())
+    .bind(serde_json::to_string(ciphertext_map).unwrap_or_default())
+    .bind(attachment_meta.map(|v| serde_json::to_string(v).unwrap_or_default()))
+    .bind(channel_id.to_string())
+    .bind(client_ts.map(|d| d.to_rfc3339()))
     .fetch_one(pool)
     .await?;
     Ok(row)
@@ -328,7 +328,7 @@ pub async fn store_encrypted_message(
 
 /// List encrypted messages for a channel, paginated, newest-first.
 pub async fn list_encrypted_messages(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     channel_id: Uuid,
     before_sequence: Option<i64>,
     limit: i64,
@@ -337,12 +337,12 @@ pub async fn list_encrypted_messages(
         sqlx::query_as::<_, EncryptedMessage>(
             r#"
             SELECT * FROM encrypted_messages
-            WHERE channel_id = $1 AND sequence < $2
+            WHERE channel_id = ? AND sequence < ?
             ORDER BY sequence DESC
-            LIMIT $3
+            LIMIT ?
             "#,
         )
-        .bind(channel_id)
+        .bind(channel_id.to_string())
         .bind(before)
         .bind(limit)
         .fetch_all(pool)
@@ -351,12 +351,12 @@ pub async fn list_encrypted_messages(
         sqlx::query_as::<_, EncryptedMessage>(
             r#"
             SELECT * FROM encrypted_messages
-            WHERE channel_id = $1
+            WHERE channel_id = ?
             ORDER BY sequence DESC
-            LIMIT $2
+            LIMIT ?
             "#,
         )
-        .bind(channel_id)
+        .bind(channel_id.to_string())
         .bind(limit)
         .fetch_all(pool)
         .await?
@@ -370,7 +370,7 @@ pub async fn list_encrypted_messages(
 
 /// Mark a channel as E2EE.
 pub async fn enable_e2ee_channel(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     channel_id: Uuid,
     enabled_by: Uuid,
     rotation_interval_secs: i32,
@@ -378,15 +378,15 @@ pub async fn enable_e2ee_channel(
     let row = sqlx::query_as::<_, E2eeChannel>(
         r#"
         INSERT INTO e2ee_channels (channel_id, enabled_by, rotation_interval_secs)
-        VALUES ($1, $2, $3)
+        VALUES (?, ?, ?)
         ON CONFLICT (channel_id) DO UPDATE
             SET rotation_interval_secs = EXCLUDED.rotation_interval_secs,
-                last_rotated_at        = NOW()
+                last_rotated_at        = CURRENT_TIMESTAMP
         RETURNING *
         "#,
     )
-    .bind(channel_id)
-    .bind(enabled_by)
+    .bind(channel_id.to_string())
+    .bind(enabled_by.to_string())
     .bind(rotation_interval_secs)
     .fetch_one(pool)
     .await?;
@@ -394,22 +394,22 @@ pub async fn enable_e2ee_channel(
 }
 
 /// Get E2EE config for a channel (returns None if not E2EE).
-pub async fn get_e2ee_channel(pool: &PgPool, channel_id: Uuid) -> Result<Option<E2eeChannel>> {
+pub async fn get_e2ee_channel(pool: &sqlx::AnyPool, channel_id: Uuid) -> Result<Option<E2eeChannel>> {
     let row = sqlx::query_as::<_, E2eeChannel>(
-        "SELECT * FROM e2ee_channels WHERE channel_id = $1",
+        "SELECT * FROM e2ee_channels WHERE channel_id = ?",
     )
-    .bind(channel_id)
+    .bind(channel_id.to_string())
     .fetch_optional(pool)
     .await?;
     Ok(row)
 }
 
 /// Record a key rotation event.
-pub async fn record_key_rotation(pool: &PgPool, channel_id: Uuid) -> Result<()> {
+pub async fn record_key_rotation(pool: &sqlx::AnyPool, channel_id: Uuid) -> Result<()> {
     sqlx::query(
-        "UPDATE e2ee_channels SET last_rotated_at = NOW() WHERE channel_id = $1",
+        "UPDATE e2ee_channels SET last_rotated_at = CURRENT_TIMESTAMP WHERE channel_id = ?",
     )
-    .bind(channel_id)
+    .bind(channel_id.to_string())
     .execute(pool)
     .await?;
     Ok(())
@@ -421,7 +421,7 @@ pub async fn record_key_rotation(pool: &PgPool, channel_id: Uuid) -> Result<()> 
 
 /// Record that a user has verified a device.
 pub async fn verify_device(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     verifier_id: Uuid,
     target_device_id: Uuid,
     method: &str,
@@ -429,22 +429,22 @@ pub async fn verify_device(
     let row = sqlx::query_as::<_, DeviceVerification>(
         r#"
         INSERT INTO device_verifications (verifier_id, target_device_id, method)
-        VALUES ($1, $2, $3)
+        VALUES (?, ?, ?)
         ON CONFLICT (verifier_id, target_device_id) DO UPDATE
             SET method = EXCLUDED.method,
-                verified_at = NOW()
+                verified_at = CURRENT_TIMESTAMP
         RETURNING *
         "#,
     )
-    .bind(verifier_id)
-    .bind(target_device_id)
+    .bind(verifier_id.to_string())
+    .bind(target_device_id.to_string())
     .bind(method)
     .fetch_one(pool)
     .await?;
 
     // Also mark the device itself as verified
-    sqlx::query("UPDATE devices SET verified = true WHERE id = $1")
-        .bind(target_device_id)
+    sqlx::query("UPDATE devices SET verified = true WHERE id = ?")
+        .bind(target_device_id.to_string())
         .execute(pool)
         .await?;
 
@@ -453,38 +453,38 @@ pub async fn verify_device(
 
 /// Check whether a verifier has verified a target device.
 pub async fn is_device_verified(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     verifier_id: Uuid,
     target_device_id: Uuid,
 ) -> Result<bool> {
     #[derive(sqlx::FromRow)]
     struct ExistsRow {
-        exists: bool,
+        exists: i64,
     }
     let row = sqlx::query_as::<_, ExistsRow>(
         r#"
         SELECT EXISTS(
             SELECT 1 FROM device_verifications
-            WHERE verifier_id = $1 AND target_device_id = $2
+            WHERE verifier_id = ? AND target_device_id = ?
         ) AS exists
         "#,
     )
-    .bind(verifier_id)
-    .bind(target_device_id)
+    .bind(verifier_id.to_string())
+    .bind(target_device_id.to_string())
     .fetch_one(pool)
     .await?;
-    Ok(row.exists)
+    Ok(row.exists != 0)
 }
 
 /// List all verifications made by a user.
 pub async fn list_verifications(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     verifier_id: Uuid,
 ) -> Result<Vec<DeviceVerification>> {
     let rows = sqlx::query_as::<_, DeviceVerification>(
-        "SELECT * FROM device_verifications WHERE verifier_id = $1 ORDER BY verified_at DESC",
+        "SELECT * FROM device_verifications WHERE verifier_id = ? ORDER BY verified_at DESC",
     )
-    .bind(verifier_id)
+    .bind(verifier_id.to_string())
     .fetch_all(pool)
     .await?;
     Ok(rows)
@@ -492,14 +492,14 @@ pub async fn list_verifications(
 
 /// Fetch the one-time pre-key for a device by key_id (for debugging / admin purposes).
 pub async fn get_one_time_pre_key(
-    pool: &PgPool,
+    pool: &sqlx::AnyPool,
     device_id: Uuid,
     key_id: i32,
 ) -> Result<Option<OneTimePreKey>> {
     let row = sqlx::query_as::<_, OneTimePreKey>(
-        "SELECT * FROM one_time_pre_keys WHERE device_id = $1 AND key_id = $2",
+        "SELECT * FROM one_time_pre_keys WHERE device_id = ? AND key_id = ?",
     )
-    .bind(device_id)
+    .bind(device_id.to_string())
     .bind(key_id)
     .fetch_optional(pool)
     .await?;

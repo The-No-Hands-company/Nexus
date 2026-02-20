@@ -95,11 +95,11 @@ async fn update_presence(
             WHERE id = $1
             "#,
         )
-        .bind(auth.user_id)
+        .bind(auth.user_id.to_string())
         .bind(presence_str)
         .bind(body.status.as_deref())
         .bind(body.custom_status_emoji.as_deref())
-        .execute(&state.db.pg)
+        .execute(&state.db.pool)
         .await?;
     }
 
@@ -124,7 +124,7 @@ async fn update_presence(
                 updated_at = NOW()
             "#,
         )
-        .bind(auth.user_id)
+        .bind(auth.user_id.to_string())
         .bind(act.activity_type.as_deref())
         .bind(act.name.as_deref())
         .bind(act.details.as_deref())
@@ -132,7 +132,7 @@ async fn update_presence(
         .bind(act.url.as_deref())
         .bind(act.large_image.as_deref())
         .bind(act.small_image.as_deref())
-        .execute(&state.db.pg)
+        .execute(&state.db.pool)
         .await?;
 
         Some(ActivityResponse {
@@ -149,7 +149,7 @@ async fn update_presence(
     };
 
     // Fetch the updated user
-    let user = users::find_by_id(&state.db.pg, auth.user_id)
+    let user = users::find_by_id(&state.db.pool, auth.user_id)
         .await?
         .ok_or(NexusError::NotFound {
             resource: "User".into(),
@@ -158,8 +158,8 @@ async fn update_presence(
     let custom_emoji = sqlx::query_as::<_, UserCustomEmojiRow>(
         "SELECT custom_status_emoji FROM users WHERE id = $1",
     )
-    .bind(auth.user_id)
-    .fetch_optional(&state.db.pg)
+    .bind(auth.user_id.to_string())
+    .fetch_optional(&state.db.pool)
     .await?
     .and_then(|r| r.custom_status_emoji);
 
@@ -203,7 +203,7 @@ async fn get_user_presence(
 ) -> NexusResult<Json<PresenceResponse>> {
     let _ = auth;
 
-    let user = users::find_by_id(&state.db.pg, user_id)
+    let user = users::find_by_id(&state.db.pool, user_id)
         .await?
         .ok_or(NexusError::NotFound {
             resource: "User".into(),
@@ -212,8 +212,8 @@ async fn get_user_presence(
     let custom_emoji = sqlx::query_as::<_, UserCustomEmojiRow>(
         "SELECT custom_status_emoji FROM users WHERE id = $1",
     )
-    .bind(user_id)
-    .fetch_optional(&state.db.pg)
+    .bind(user_id.to_string())
+    .fetch_optional(&state.db.pool)
     .await?
     .and_then(|r| r.custom_status_emoji);
 
@@ -224,8 +224,8 @@ async fn get_user_presence(
         WHERE user_id = $1
         "#,
     )
-    .bind(user_id)
-    .fetch_optional(&state.db.pg)
+    .bind(user_id.to_string())
+    .fetch_optional(&state.db.pool)
     .await?
     .map(|r| ActivityResponse {
         activity_type: r.activity_type,

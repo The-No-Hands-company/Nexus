@@ -1,7 +1,4 @@
-//! MinIO / S3-compatible object storage client.
-//!
-//! Wraps `aws-sdk-s3` to provide upload, presigned URL generation,
-//! and deletion for attachments, avatars, and custom emoji.
+//! Object storage client — supports S3/MinIO (full mode) and local filesystem (lite mode).
 
 use anyhow::{Context, Result};
 use aws_sdk_s3::presigning::PresigningConfig;
@@ -10,12 +7,14 @@ use aws_sdk_s3::{
     primitives::ByteStream,
     Client,
 };
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Storage configuration (loaded from app config).
 #[derive(Debug, Clone)]
 pub struct StorageConfig {
-    /// MinIO / S3 endpoint URL (e.g. `http://localhost:9000`)
+    /// MinIO / S3 endpoint URL (e.g. `http://localhost:9000`). Empty = local mode.
     pub endpoint: String,
     /// Access key
     pub access_key: String,
@@ -26,172 +25,202 @@ pub struct StorageConfig {
     /// Region (use `us-east-1` for MinIO)
     pub region: String,
     /// Public CDN base URL for direct asset links (optional).
-    /// If set, public presigned URLs will be rewritten to this base.
     pub public_url: Option<String>,
 }
 
-/// S3/MinIO storage client — wraps the AWS SDK.
+// ── Backend ───────────────────────────────────────────────────────────────────
+
+enum StorageBackend {
+    S3(Client, String /* bucket */, Option<String> /* public_url */),
+    Local(PathBuf /* data_dir */, String /* public_base */),
+}
+
+/// Unified storage client — S3/MinIO or local filesystem.
 #[derive(Clone)]
 pub struct StorageClient {
-    inner: Client,
-    bucket: String,
-    public_url: Option<String>,
+    inner: Arc<StorageBackend>,
 }
 
 impl StorageClient {
-    /// Initialise client from config.
+    /// Initialise an S3/MinIO client.
     pub fn new(cfg: &StorageConfig) -> Result<Self> {
         let creds = Credentials::new(
             &cfg.access_key,
             &cfg.secret_key,
-            None, // session token
-            None, // expiry
+            None,
+            None,
             "nexus-storage",
         );
-
         let s3_cfg = S3Builder::new()
             .endpoint_url(&cfg.endpoint)
             .credentials_provider(creds)
             .region(Region::new(cfg.region.clone()))
-            // Force path-style URLs (required for MinIO)
             .force_path_style(true)
             .build();
 
         Ok(Self {
-            inner: Client::from_conf(s3_cfg),
-            bucket: cfg.bucket.clone(),
-            public_url: cfg.public_url.clone(),
+            inner: Arc::new(StorageBackend::S3(
+                Client::from_conf(s3_cfg),
+                cfg.bucket.clone(),
+                cfg.public_url.clone(),
+            )),
         })
     }
 
-    // ------------------------------------------------------------------
-    // Core upload
-    // ------------------------------------------------------------------
-
-    /// Upload bytes to the given key.
+    /// Initialise a local-filesystem client (lite mode).
     ///
-    /// Returns the storage key (same as `key` param) on success.
-    pub async fn put_object(
-        &self,
-        key: &str,
-        data: Vec<u8>,
-        content_type: &str,
-    ) -> Result<String> {
-        let stream = ByteStream::from(data);
-
-        self.inner
-            .put_object()
-            .bucket(&self.bucket)
-            .key(key)
-            .content_type(content_type)
-            .body(stream)
-            .send()
-            .await
-            .with_context(|| format!("Failed to upload {key} to object storage"))?;
-
-        Ok(key.to_string())
+    /// `data_dir`    — directory where uploaded files are written  
+    /// `public_base` — HTTP base URL served by the API  (e.g. `http://localhost:8080/files`)
+    pub fn new_local(data_dir: impl Into<PathBuf>, public_base: impl Into<String>) -> Result<Self> {
+        let dir: PathBuf = data_dir.into();
+        std::fs::create_dir_all(&dir)
+            .with_context(|| format!("Cannot create storage dir: {}", dir.display()))?;
+        Ok(Self {
+            inner: Arc::new(StorageBackend::Local(dir, public_base.into())),
+        })
     }
 
-    // ------------------------------------------------------------------
-    // URL generation
-    // ------------------------------------------------------------------
+    // ── Core upload ───────────────────────────────────────────────────────────
 
-    /// Generate a presigned GET URL valid for `expiry` seconds.
-    pub async fn presigned_get_url(&self, key: &str, expiry_secs: u64) -> Result<String> {
-        // If we have a public CDN URL, just concat — no presigning needed.
-        if let Some(ref base) = self.public_url {
-            return Ok(format!("{}/{}/{}", base.trim_end_matches('/'), &self.bucket, key));
-        }
-
-        let presigning_cfg = PresigningConfig::expires_in(Duration::from_secs(expiry_secs))
-            .context("Failed to build presigning config")?;
-
-        let req = self
-            .inner
-            .get_object()
-            .bucket(&self.bucket)
-            .key(key)
-            .presigned(presigning_cfg)
-            .await
-            .with_context(|| format!("Failed to create presigned URL for {key}"))?;
-
-        Ok(req.uri().to_string())
-    }
-
-    /// Build a permanent public URL (only use when bucket is public).
-    pub fn public_url(&self, key: &str) -> Option<String> {
-        self.public_url
-            .as_ref()
-            .map(|base| format!("{}/{}/{}", base.trim_end_matches('/'), &self.bucket, key))
-    }
-
-    // ------------------------------------------------------------------
-    // Deletion
-    // ------------------------------------------------------------------
-
-    /// Delete an object by its storage key.
-    pub async fn delete_object(&self, key: &str) -> Result<()> {
-        self.inner
-            .delete_object()
-            .bucket(&self.bucket)
-            .key(key)
-            .send()
-            .await
-            .with_context(|| format!("Failed to delete {key} from object storage"))?;
-
-        Ok(())
-    }
-
-    // ------------------------------------------------------------------
-    // Multipart helpers (for large files)
-    // ------------------------------------------------------------------
-
-    /// Upload a file in a single request (up to 5 GiB in one shot via SDK).
-    /// For files ≥ 100 MiB the SDK transparently uses multipart under the hood.
-    pub async fn upload_file(
-        &self,
-        key: &str,
-        path: &std::path::Path,
-        content_type: &str,
-    ) -> Result<String> {
-        let stream = ByteStream::from_path(path)
-            .await
-            .context("Failed to open file for upload")?;
-
-        self.inner
-            .put_object()
-            .bucket(&self.bucket)
-            .key(key)
-            .content_type(content_type)
-            .body(stream)
-            .send()
-            .await
-            .with_context(|| format!("Failed to upload file {key}"))?;
-
-        Ok(key.to_string())
-    }
-
-    // ------------------------------------------------------------------
-    // Bucket management (admin / startup helpers)
-    // ------------------------------------------------------------------
-
-    /// Ensure the bucket exists; create it if absent.
-    pub async fn ensure_bucket(&self) -> Result<()> {
-        match self.inner.head_bucket().bucket(&self.bucket).send().await {
-            Ok(_) => {
-                tracing::debug!(bucket = %self.bucket, "Bucket already exists");
-                Ok(())
-            }
-            Err(_) => {
-                tracing::info!(bucket = %self.bucket, "Bucket does not exist, creating");
-                self.inner
-                    .create_bucket()
-                    .bucket(&self.bucket)
+    pub async fn put_object(&self, key: &str, data: Vec<u8>, content_type: &str) -> Result<String> {
+        match self.inner.as_ref() {
+            StorageBackend::S3(client, bucket, _) => {
+                client
+                    .put_object()
+                    .bucket(bucket)
+                    .key(key)
+                    .content_type(content_type)
+                    .body(ByteStream::from(data))
                     .send()
                     .await
-                    .context("Failed to create object storage bucket")?;
+                    .with_context(|| format!("S3: failed to upload {key}"))?;
+                Ok(key.to_string())
+            }
+            StorageBackend::Local(dir, _) => {
+                let dest = dir.join(key.replace('/', std::path::MAIN_SEPARATOR_STR));
+                if let Some(parent) = dest.parent() {
+                    tokio::fs::create_dir_all(parent).await?;
+                }
+                tokio::fs::write(&dest, &data).await
+                    .with_context(|| format!("Local: failed to write {key}"))?;
+                Ok(key.to_string())
+            }
+        }
+    }
+
+    // ── URL generation ────────────────────────────────────────────────────────
+
+    pub async fn presigned_get_url(&self, key: &str, expiry_secs: u64) -> Result<String> {
+        match self.inner.as_ref() {
+            StorageBackend::S3(client, bucket, public_url) => {
+                if let Some(base) = public_url {
+                    return Ok(format!("{}/{}/{}", base.trim_end_matches('/'), bucket, key));
+                }
+                let cfg = PresigningConfig::expires_in(Duration::from_secs(expiry_secs))
+                    .context("Failed to build presigning config")?;
+                let req = client
+                    .get_object()
+                    .bucket(bucket)
+                    .key(key)
+                    .presigned(cfg)
+                    .await
+                    .with_context(|| format!("S3: failed to presign {key}"))?;
+                Ok(req.uri().to_string())
+            }
+            StorageBackend::Local(_, base) => {
+                Ok(format!("{}/{}", base.trim_end_matches('/'), key))
+            }
+        }
+    }
+
+    pub fn public_url(&self, key: &str) -> Option<String> {
+        match self.inner.as_ref() {
+            StorageBackend::S3(_, bucket, Some(base)) => {
+                Some(format!("{}/{}/{}", base.trim_end_matches('/'), bucket, key))
+            }
+            StorageBackend::S3(_, _, None) => None,
+            StorageBackend::Local(_, base) => {
+                Some(format!("{}/{}", base.trim_end_matches('/'), key))
+            }
+        }
+    }
+
+    // ── Deletion ──────────────────────────────────────────────────────────────
+
+    pub async fn delete_object(&self, key: &str) -> Result<()> {
+        match self.inner.as_ref() {
+            StorageBackend::S3(client, bucket, _) => {
+                client
+                    .delete_object()
+                    .bucket(bucket)
+                    .key(key)
+                    .send()
+                    .await
+                    .with_context(|| format!("S3: failed to delete {key}"))?;
+                Ok(())
+            }
+            StorageBackend::Local(dir, _) => {
+                let path = dir.join(key.replace('/', std::path::MAIN_SEPARATOR_STR));
+                if path.exists() {
+                    tokio::fs::remove_file(&path).await
+                        .with_context(|| format!("Local: failed to delete {key}"))?;
+                }
+                Ok(())
+            }
+        }
+    }
+
+    /// Read a file from local storage and return its bytes + content-type.
+    /// Returns `Ok(None)` for files that don't exist, `Ok(None)` for S3 backends
+    /// (caller should redirect to presigned URL instead).
+    pub async fn read_local_file(&self, key: &str) -> Result<Option<(Vec<u8>, String)>> {
+        match self.inner.as_ref() {
+            StorageBackend::S3(_, _, _) => Ok(None),
+            StorageBackend::Local(dir, _) => {
+                let safe_key = key.trim_start_matches('/');
+                // Prevent path traversal
+                if safe_key.contains("../") || safe_key.starts_with('/') {
+                    return Ok(None);
+                }
+                let path = dir.join(safe_key.replace('/', std::path::MAIN_SEPARATOR_STR));
+                if !path.exists() {
+                    return Ok(None);
+                }
+                let bytes = tokio::fs::read(&path).await
+                    .with_context(|| format!("Local: failed to read {key}"))?;
+                let ct = mime_guess::from_path(&path)
+                    .first_raw()
+                    .unwrap_or("application/octet-stream")
+                    .to_owned();
+                Ok(Some((bytes, ct)))
+            }
+        }
+    }
+
+    pub async fn upload_file(&self, key: &str, path: &std::path::Path, content_type: &str) -> Result<String> {
+        let data = tokio::fs::read(path).await
+            .with_context(|| format!("Failed to read {}", path.display()))?;
+        self.put_object(key, data, content_type).await
+    }
+
+    // ── Bucket bootstrap ──────────────────────────────────────────────────────
+
+    pub async fn ensure_bucket(&self) -> Result<()> {
+        match self.inner.as_ref() {
+            StorageBackend::S3(client, bucket, _) => {
+                if client.head_bucket().bucket(bucket).send().await.is_err() {
+                    tracing::info!(bucket = %bucket, "Creating S3 bucket");
+                    client.create_bucket().bucket(bucket).send().await
+                        .context("Failed to create S3 bucket")?;
+                }
+                Ok(())
+            }
+            StorageBackend::Local(dir, _) => {
+                tokio::fs::create_dir_all(dir).await
+                    .with_context(|| format!("Failed to create data dir: {}", dir.display()))?;
                 Ok(())
             }
         }
     }
 }
+
