@@ -448,11 +448,11 @@ async fn build_ready_payload(
         r#"
         SELECT c.* FROM channels c
         INNER JOIN dm_participants dp ON dp.channel_id = c.id
-        WHERE dp.user_id = $1 AND c.channel_type IN ('dm', 'group_dm')
+        WHERE dp.user_id = ? AND c.channel_type IN ('dm', 'group_dm')
         ORDER BY c.updated_at DESC
         "#,
     )
-    .bind(uid)
+    .bind(uid.to_string())
     .fetch_all(&state.db.pool)
     .await
     .unwrap_or_default();

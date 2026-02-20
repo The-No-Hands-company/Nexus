@@ -119,7 +119,7 @@ async fn receive_transaction(
     // ── 2. Idempotency: skip already-processed transactions ───────────────────
     match sqlx::query(
         "SELECT 1 FROM federation_txn_log \
-         WHERE txn_id = ? AND origin_server = ? \
+         WHERE txn_id = $1 AND origin_server = $2 \
          LIMIT 1",
     )
     .bind(&txn_id)
@@ -138,7 +138,7 @@ async fn receive_transaction(
     // ── 3. Upsert origin server in federated_servers ──────────────────────────
     if let Err(e) = sqlx::query(
         "INSERT INTO federated_servers (server_name, last_seen_at) \
-         VALUES (?, NOW()) \
+         VALUES ($1, NOW()) \
          ON CONFLICT (server_name) DO UPDATE SET last_seen_at = NOW()",
     )
     .bind(&origin)
@@ -208,7 +208,7 @@ async fn receive_transaction(
 ///
 /// Returns `Ok(true)` if newly persisted, `Ok(false)` if duplicate, `Err` if rejected.
 async fn process_pdu(
-    pool: &sqlx::PgPool,
+    pool: &sqlx::AnyPool,
     origin: &str,
     txn_id: &str,
     verify_keys: &serde_json::Map<String, Value>,
@@ -259,8 +259,8 @@ async fn process_pdu(
     .bind(sender)
     .bind(origin)
     .bind(origin_server_ts)
-    .bind(&content)
-    .bind(&signatures)
+    .bind(serde_json::to_string(&content).unwrap_or_default())
+    .bind(serde_json::to_string(&signatures).unwrap_or_default())
     .bind(txn_id.to_string())
     .execute(pool)
     .await?;
@@ -320,7 +320,7 @@ fn verify_pdu_signature(
 /// Load the cached verify keys (`key_id → base64_pubkey`) for a remote server
 /// from the `federated_servers` table.
 async fn load_server_verify_keys(
-    pool: &sqlx::PgPool,
+    pool: &sqlx::AnyPool,
     server_name: &str,
 ) -> serde_json::Map<String, Value> {
     let row = sqlx::query(
@@ -333,9 +333,10 @@ async fn load_server_verify_keys(
     .flatten();
 
     if let Some(row) = row {
-        let val: Value = row.try_get("verify_keys").unwrap_or_default();
-        if let Value::Object(m) = val {
-            return m;
+        if let Ok(s) = row.try_get::<String, _>("verify_keys") {
+            if let Ok(Value::Object(m)) = serde_json::from_str::<Value>(&s) {
+                return m;
+            }
         }
     }
     Default::default()
@@ -372,8 +373,8 @@ async fn get_event(
                 "sender":          r.try_get::<String, _>("sender").unwrap_or_default(),
                 "origin":          r.try_get::<String, _>("origin_server").unwrap_or_default(),
                 "origin_server_ts":r.try_get::<i64, _>("origin_server_ts").unwrap_or(0),
-                "content":         r.try_get::<Value, _>("content").unwrap_or_default(),
-                "signatures":      r.try_get::<Value, _>("signatures").unwrap_or_default(),
+                "content":         r.try_get::<String,_>("content").ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(json!({})),
+                "signatures":      r.try_get::<String,_>("signatures").ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(json!({})),
             });
             (StatusCode::OK, Json(json!({ "pdu": pdu }))).into_response()
         }
@@ -425,8 +426,8 @@ async fn get_room_state(
                 "room_id":   &room_id,
                 "sender":    row.try_get::<String, _>("sender").unwrap_or_default(),
                 "origin":    row.try_get::<String, _>("origin_server").unwrap_or_default(),
-                "content":   row.try_get::<Value, _>("content").unwrap_or(json!({})),
-                "signatures": row.try_get::<Value, _>("signatures").unwrap_or(json!({})),
+                "content":   row.try_get::<String,_>("content").ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(json!({})),
+                "signatures": row.try_get::<String,_>("signatures").ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(json!({})),
                 "origin_server_ts": row.try_get::<i64, _>("origin_server_ts").unwrap_or(0),
             })
         })
@@ -507,7 +508,7 @@ async fn send_join(
         .to_owned();
     let _ = sqlx::query(
         "INSERT INTO federated_rooms (room_id, origin_server, room_name, join_rule, member_count) \
-         VALUES (?, ?, ?, 'public', 1) \
+         VALUES ($1, $2, $3, 'public', 1) \
          ON CONFLICT (room_id) DO UPDATE \
          SET member_count = federated_rooms.member_count + 1, updated_at = NOW()",
     )
@@ -535,8 +536,8 @@ async fn send_join(
     .bind(&sender)
     .bind(&origin)
     .bind(ts)
-    .bind(&content)
-    .bind(&sigs)
+    .bind(serde_json::to_string(&content).unwrap_or_default())
+    .bind(serde_json::to_string(&sigs).unwrap_or_default())
     .execute(pool)
     .await;
 
@@ -569,7 +570,7 @@ async fn send_join(
                 "room_id":   &room_id,
                 "sender":    row.try_get::<String, _>("sender").unwrap_or_default(),
                 "origin":    row.try_get::<String, _>("origin_server").unwrap_or_default(),
-                "content":   row.try_get::<Value, _>("content").unwrap_or(json!({})),
+                "content":   row.try_get::<String,_>("content").ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(json!({})),
                 "origin_server_ts": row.try_get::<i64, _>("origin_server_ts").unwrap_or(0),
             })
         })
@@ -639,8 +640,8 @@ async fn backfill(
                 "room_id":   &room_id,
                 "sender":    row.try_get::<String, _>("sender").unwrap_or_default(),
                 "origin":    row.try_get::<String, _>("origin_server").unwrap_or_default(),
-                "content":   row.try_get::<Value, _>("content").unwrap_or(json!({})),
-                "signatures": row.try_get::<Value, _>("signatures").unwrap_or(json!({})),
+                "content":   row.try_get::<String,_>("content").ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(json!({})),
+                "signatures": row.try_get::<String,_>("signatures").ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(json!({})),
                 "origin_server_ts": row.try_get::<i64, _>("origin_server_ts").unwrap_or(0),
             })
         })
@@ -817,7 +818,7 @@ fn parse_mxid(mxid: &str) -> Option<(String, String)> {
 /// up-to-date. For membership events the display name and avatar in the
 /// event content are used; for other event types only the MXID is stored.
 async fn upsert_federated_user(
-    pool: &sqlx::PgPool,
+    pool: &sqlx::AnyPool,
     _local_server_name: &str,
     sender: &str,
     pdu: &Value,
@@ -837,8 +838,8 @@ async fn upsert_federated_user(
     .bind(&server)
     .fetch_optional(pool)
     .await?
-    .map(|r| r.try_get::<uuid::Uuid, _>("id").ok())
-    .flatten();
+    .and_then(|r| r.try_get::<String, _>("id").ok())
+    .and_then(|s| uuid::Uuid::parse_str(&s).ok());
 
     let server_id = match server_id {
         Some(id) => id,
@@ -846,13 +847,13 @@ async fn upsert_federated_user(
             // Auto-register the server if we haven't seen it yet.
             let row = sqlx::query(
                 "INSERT INTO federated_servers (server_name) VALUES (?) \
-                 ON CONFLICT (server_name) DO UPDATE SET last_seen_at = NOW() \
+                 ON CONFLICT (server_name) DO UPDATE SET last_seen_at = CURRENT_TIMESTAMP \
                  RETURNING id",
             )
             .bind(&server)
             .fetch_one(pool)
             .await?;
-            row.try_get::<uuid::Uuid, _>("id")?
+            uuid::Uuid::parse_str(&row.try_get::<String, _>("id")?).map_err(|e| sqlx::Error::Decode(Box::new(e) as _))?
         }
     };
 
@@ -884,8 +885,8 @@ async fn upsert_federated_user(
          (mxid, localpart, server_id, display_name, avatar_url) \
          VALUES (?, ?, ?, ?, ?) \
          ON CONFLICT (mxid) DO UPDATE SET \
-         display_name = COALESCE(?, federated_users.display_name), \
-         avatar_url   = COALESCE(?, federated_users.avatar_url)",
+         display_name = COALESCE(excluded.display_name, federated_users.display_name), \
+         avatar_url   = COALESCE(excluded.avatar_url, federated_users.avatar_url)",
     )
     .bind(sender)
     .bind(&localpart)

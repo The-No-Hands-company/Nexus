@@ -12,7 +12,6 @@ use axum::{
     routing::get,
     Router,
 };
-use nexus_db::storage::StorageClient;
 use std::sync::Arc;
 
 use crate::AppState;
