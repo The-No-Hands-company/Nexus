@@ -8,8 +8,8 @@ The UX should feel immediately familiar. Servers, channels, voice, bots, rich em
 
 - **Privacy is a guarantee, not a setting.** No ID, no phone, no face scan. Ever.
 - **Your data stays yours.** Self-hostable. Exportable. No surveillance.
-- **Its own protocol.** Not Discord-compatible. Not Matrix-compatible at the core. Bridges exist to help users *migrate away* from other platforms — not to maintain permanent compatibility.
-- **IRC interop as an optional feature.** Users who want to connect via IRC can. It is not the core, it is a bridge.
+- **Its own everything.** Nexus has its own protocol, its own bot API, its own federation model. The concepts — servers, channels, DMs, bots, presence — feel familiar because they are good ideas, not because we copied anyone. We reinvent them properly.
+- **No bridges, no adapters.** Nexus does not try to stay compatible with Discord, IRC, or Matrix. Users feel at home because the design is good, not because we kept a compatibility shim alive.
 - **Phantom as the long-term privacy backbone.** The [Phantom](https://github.com/The-No-Hands-company/Phantom) anonymous networking protocol will eventually be integrated to make privacy guarantees mathematical, not just policy.
 
 ---
@@ -106,9 +106,8 @@ The UX should feel immediately familiar. Servers, channels, voice, bots, rich em
 
 ## Phase 7: Extensibility (v0.7) ✅ Complete
 
-- ✅ Bot API (REST + WebSocket — native Nexus protocol, not Discord-compatible by design)
+- ✅ Nexus Bot API (REST + WebSocket — native Nexus protocol)
 - ✅ Bot SDK (TypeScript, Python, Rust)
-- ✅ Migration adapters (tooling to help Discord bots port to the Nexus API)
 - ✅ Client plugin system (sandboxed)
 - ✅ Custom themes (CSS + theme API)
 - ✅ Webhooks
@@ -135,7 +134,7 @@ The UX should feel immediately familiar. Servers, channels, voice, bots, rich em
 
 - ✅ federated_servers table + server trust list
 - ✅ federated_users table (remote user profiles)
-- ✅ `@user:server.tld` MXIDs for cross-server mentions
+- ✅ `@user:server.tld` address format for cross-server mentions
 - ✅ Remote user avatar/display-name resolution
 
 ### 08-04: Discovery & Directory
@@ -144,14 +143,11 @@ The UX should feel immediately familiar. Servers, channels, voice, bots, rich em
 - ✅ Cross-server join flow via directory
 - ✅ Server search by name/topic
 
-### 08-05: Migration Bridges
+### 08-05: Federation Tooling
 
-> These are **one-way migration tools** to help communities move *to* Nexus from other platforms. They are not permanent compatibility layers and will never drive Nexus protocol decisions.
-
-- ✅ Matrix Application Service bridge stub (read Matrix channels into Nexus during migration)
-- ✅ Discord webhook bridge — incoming only (receive messages from Discord while migrating)
-- ✅ Message relay (Nexus ↔ Matrix, for gradual community migration)
-- ✅ IRC bridge stub (optional — allows IRC users to participate in Nexus channels)
+- ✅ Server-to-server rate limiting and trust scoring
+- ✅ Admin federation management UI (trust, block, inspect remote servers)
+- ✅ Federation event audit log
 
 ## Phase 9: Launch (v0.9) ✅ Complete
 
@@ -193,7 +189,7 @@ The UX should feel immediately familiar. Servers, channels, voice, bots, rich em
 
 ## Phase 9.5: Lite / Zero-Infra Mode (v0.9.5) 🔲 Planned
 
-> **Goal:** A single `nexus` binary you can download and run with zero external dependencies — no Postgres, no Redis, no Docker required. Install it, run it, invite friends to your server. The IRC model applied to Nexus.
+> **Goal:** A single `nexus` binary you can download and run with zero external dependencies — no Postgres, no Redis, no Docker required. Install it, run it, invite friends to your server. The simplest possible path from download to running community.
 
 ### 09.5-01: Embedded Storage Backend
 

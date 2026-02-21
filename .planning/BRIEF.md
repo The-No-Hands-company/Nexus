@@ -22,11 +22,10 @@ Long-term, Nexus will integrate with **Phantom** — a post-quantum anonymous ne
 
 1. **Privacy by Default** — Zero ID requirements. No phone number, no government ID, no face scan, no "age assurance." E2EE for DMs and voice. No telemetry without explicit opt-in.
 2. **User Sovereignty** — Self-hostable, federated. Your data is YOUR data. Export everything, any time, in open formats.
-3. **Familiar but Better** — The UX should feel comfortable to any Discord user from day one. Servers, channels, roles, voice, bots, embeds. But built right, built completely — not Discord's half-measures.
-4. **Community-Driven** — Open source (AGPL-3.0), community governance, transparent roadmap. No corporate capture.
-5. **Its Own Protocol** — Nexus is not Discord-compatible and does not intend to be. It has its own gateway protocol, its own bot API, its own federation model. Migration bridges exist to help users **leave** other platforms, not to stay compatible with them.
-6. **Migration Path** — Import Discord history, Matrix bridges, IRC interop — all as optional tools to help communities migrate, not as permanent dependencies.
-7. **Sustainable Monetization** — Optional cosmetics, managed hosting, no ads, no data selling. Ever.
+3. **Familiar but Better** — Servers, channels, voice, bots, presence, rich messages. These are good ideas that IRC invented, Discord popularised, and Nexus reinvents properly. The familiarity is a side-effect of good design — not a compatibility goal.
+4. **Its Own Everything** — Nexus has its own protocol, its own bot API, its own federation model, its own client SDK. Nothing is borrowed from or compatible with Discord or IRC by intention. We reinvent the wheel where reinventing it gets us something better.
+5. **Community-Driven** — Open source (AGPL-3.0), community governance, transparent roadmap. No corporate capture.
+6. **Sustainable Monetization** — Optional cosmetics, managed hosting, no ads, no data selling. Ever.
 
 ## What Users Want (That Discord Never Delivered)
 
@@ -61,8 +60,8 @@ Long-term, Nexus will integrate with **Phantom** — a post-quantum anonymous ne
 | Frontend Web | **React + TypeScript (Vite)** | Shared codebase with desktop |
 | Frontend Mobile | **React Native** | Code sharing with web, native feel |
 | E2E Encryption | **Signal Protocol (libsignal)** | Gold standard, double ratchet, forward secrecy |
-| Federation | **Native Nexus protocol** | Own open federation; Matrix/IRC/Discord bridges as optional migration adapters |
-| Bot API | **REST + WebSocket + SDK (TS/Python/Rust)** | Native Nexus API — not Discord-compatible by design; migration adapters available for Discord bots |
+| Federation | **Native Nexus federation protocol** | Nexus servers federate with other Nexus servers — a clean, open protocol built for this purpose |
+| Bot API | **REST + WebSocket + SDK (TS/Python/Rust)** | Native Nexus Bot API — Nexus bots are Nexus bots, built for Nexus from the ground up |
 | Anonymous Layer | **Phantom** *(future)* | Post-quantum anonymous networking protocol; makes surveillance architecturally impossible |
 
 ## Architecture Overview
@@ -112,6 +111,6 @@ Long-term, Nexus will integrate with **Phantom** — a post-quantum anonymous ne
 - **v0.5 — E2EE** ✅: Signal protocol integration for DMs, opt-in for channels
 - **v0.6 — Desktop Client** ✅: Tauri 2 app with full feature parity
 - **v0.7 — Extensibility** ✅: Bot API, TypeScript/Python/Rust SDKs, sandboxed plugin system, custom theme engine
-- **v0.8 — Federation** 🟡 (Current): Matrix-compatible federation protocol, S2S communication, federated identity, Matrix/Discord bridge
+- **v0.8 — Federation** 🟡 (Current): Native Nexus S2S federation protocol, server-to-server event routing, federated identity
 - **v0.9 — Mobile**: React Native client
 - **v1.0 — Public Launch**: Self-hosted + managed hosting options
