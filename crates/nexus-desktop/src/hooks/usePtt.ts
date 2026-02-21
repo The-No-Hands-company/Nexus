@@ -1,14 +1,17 @@
 /**
  * Listen for PTT start/stop events emitted by the Tauri hotkeys module.
+ * No-ops when running in a plain browser (Tauri not present).
  */
 import { useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useStore } from "../store";
+import { isTauri } from "../invoke";
 
 export function usePtt() {
   const { setPttActive } = useStore();
 
   useEffect(() => {
+    if (!isTauri()) return;
     const unlistenStart = listen("ptt-start", () => setPttActive(true));
     const unlistenStop = listen("ptt-stop", () => setPttActive(false));
 

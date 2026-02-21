@@ -7,7 +7,7 @@
  * HTTP call and normalising snake_case → camelCase to match Tauri's output.
  */
 
-const isTauri = (): boolean =>
+export const isTauri = (): boolean =>
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 // ── Browser-mode session ─────────────────────────────────────────────────────

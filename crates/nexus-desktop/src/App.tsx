@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import { useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useStore } from "./store";
+import { isTauri } from "./invoke";
 import LoginPage from "./pages/Login";
 import RegisterPage from "./pages/Register";
 import MainLayout from "./pages/MainLayout";
@@ -13,8 +14,9 @@ import PluginLoader from "./plugins/PluginLoader";
 export default function App() {
   const { session, setUpdateAvailable } = useStore();
 
-  // Listen for update-available event from the Tauri updater plugin
+  // Listen for update-available event from the Tauri updater plugin (Tauri only)
   useEffect(() => {
+    if (!isTauri()) return;
     const unlisten = listen<{ version: string; body: string }>(
       "update-available",
       (e) => {
