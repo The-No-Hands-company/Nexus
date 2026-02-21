@@ -1,5 +1,19 @@
 # Nexus — Development Roadmap
 
+## What Nexus Is
+
+Nexus is not a Discord clone. It is the platform that comes **after** Discord — built for the moment people are finally ready to leave.
+
+The UX should feel immediately familiar. Servers, channels, voice, bots, rich embeds. But Nexus is architecturally and philosophically a completely different thing:
+
+- **Privacy is a guarantee, not a setting.** No ID, no phone, no face scan. Ever.
+- **Your data stays yours.** Self-hostable. Exportable. No surveillance.
+- **Its own protocol.** Not Discord-compatible. Not Matrix-compatible at the core. Bridges exist to help users *migrate away* from other platforms — not to maintain permanent compatibility.
+- **IRC interop as an optional feature.** Users who want to connect via IRC can. It is not the core, it is a bridge.
+- **Phantom as the long-term privacy backbone.** The [Phantom](https://github.com/The-No-Hands-company/Phantom) anonymous networking protocol will eventually be integrated to make privacy guarantees mathematical, not just policy.
+
+---
+
 ## Phase 1: Foundation (v0.1) ✅ Complete
 
 ### 01-01: Project Scaffold & Configuration
@@ -92,8 +106,9 @@
 
 ## Phase 7: Extensibility (v0.7) ✅ Complete
 
-- ✅ Bot API (REST + WebSocket, Discord-compatible shape)
+- ✅ Bot API (REST + WebSocket — native Nexus protocol, not Discord-compatible by design)
 - ✅ Bot SDK (TypeScript, Python, Rust)
+- ✅ Migration adapters (tooling to help Discord bots port to the Nexus API)
 - ✅ Client plugin system (sandboxed)
 - ✅ Custom themes (CSS + theme API)
 - ✅ Webhooks
@@ -129,11 +144,14 @@
 - ✅ Cross-server join flow via directory
 - ✅ Server search by name/topic
 
-### 08-05: Bridge
+### 08-05: Migration Bridges
 
-- ✅ Matrix Application Service bridge stub
-- ✅ Discord webhook bridge (incoming)
-- ✅ Message relay (Nexus ↔ Matrix)
+> These are **one-way migration tools** to help communities move *to* Nexus from other platforms. They are not permanent compatibility layers and will never drive Nexus protocol decisions.
+
+- ✅ Matrix Application Service bridge stub (read Matrix channels into Nexus during migration)
+- ✅ Discord webhook bridge — incoming only (receive messages from Discord while migrating)
+- ✅ Message relay (Nexus ↔ Matrix, for gradual community migration)
+- ✅ IRC bridge stub (optional — allows IRC users to participate in Nexus channels)
 
 ## Phase 9: Launch (v0.9) ✅ Complete
 
@@ -208,6 +226,34 @@
 ## Phase 10: Mobile (v1.0)
 
 - React Native iOS + Android
-- Push notifications (FCM/APNs, self-hosted option via UnifiedPush)
+- Push notifications (FCM/APNs, self-hosted option via UnifiedPush — no Google dependency required)
 - Voice/video on mobile
-- Offline message queue
+- Offline message queue (local store-and-forward, send on reconnect)
+
+## Phase 11: Phantom Privacy Layer (v1.x — depends on Phantom maturity)
+
+> **Depends on:** [Phantom](https://github.com/The-No-Hands-company/Phantom) reaching production readiness
+> — a post-quantum anonymous networking protocol being developed in parallel.
+
+This phase integrates Phantom into Nexus to make privacy guarantees **mathematical rather than policy-based**. Nodes routing traffic between Nexus servers will be unable to determine who is talking to whom, where messages originate, or which users are online — by cryptographic construction, not by trust in the operator.
+
+Phantom is an infant today. This phase will happen when it is ready, not before.
+
+### 11-01: Transport Integration
+
+- [ ] Phantom as an optional transport layer for server-to-server federation traffic
+- [ ] FHE-based oblivious routing so relay nodes learn nothing about the path
+- [ ] Post-quantum key exchange on all Nexus connections (Kyber-1024 / X25519 hybrid)
+- [ ] Phantom node embedded in the `nexus` binary (opt-in, can run as relay)
+
+### 11-02: Anonymous Identity Layer
+
+- [ ] Proof-of-personhood Sybil resistance (no government ID — cryptographic uniqueness)
+- [ ] Anonymous account creation: accounts that are mathematically unlinkable to IP addresses
+- [ ] Zero-knowledge login: authenticate without revealing which account you have
+
+### 11-03: User-Facing Privacy Guarantees
+
+- [ ] "Phantom mode" toggle per-server (routes traffic through the anonymous network)
+- [ ] Verifiable privacy: users can independently verify that traffic is being handled correctly
+- [ ] Threat model documentation that users can actually read and understand

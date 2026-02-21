@@ -4,7 +4,11 @@
 
 ## Vision
 
-A privacy-first, community-owned communication platform that carries all of Discord's strengths (servers, channels, voice/video, bots, rich UX) and none of its weaknesses (surveillance, mandatory ID, data harvesting, enshittification). Built for the 2026 exodus.
+Nexus is not a Discord clone. It is what comes **after** Discord — built for the moment people are finally ready to leave.
+
+It should feel immediately familiar to anyone who has used Discord: servers, channels, voice, bots, rich embeds. But underneath it is a completely different platform — privacy-first, user-sovereign, and architecturally incapable of the surveillance and exploitation Discord has chosen. We take what Discord did well and make it genuinely great. We give users everything they have been asking for and never got. We never sell data. We never demand identity. We never enshittify.
+
+Long-term, Nexus will integrate with **Phantom** — a post-quantum anonymous networking protocol being built alongside it — so that the privacy guarantees are not just policy, but mathematics.
 
 ## Why Now
 
@@ -16,12 +20,13 @@ A privacy-first, community-owned communication platform that carries all of Disc
 
 ## Core Principles
 
-1. **Privacy by Default** — Zero ID requirements, E2EE for DMs/voice, minimal data collection, no telemetry without explicit opt-in
-2. **User Sovereignty** — Self-hostable, federated, your data is YOUR data, export everything anytime
-3. **Discord-Grade UX** — Not "almost as good" — actually good. Servers, channels, roles, bots, rich embeds, screen share, low-latency voice
-4. **Community-Driven** — Open source (AGPL-3.0), community governance, transparent roadmap
-5. **Migration-First** — Import Discord history/channels/roles, Matrix bridges, gradual transition path
-6. **Sustainable Monetization** — Optional cosmetics, hosting services, no ads, no data selling, ever
+1. **Privacy by Default** — Zero ID requirements. No phone number, no government ID, no face scan, no "age assurance." E2EE for DMs and voice. No telemetry without explicit opt-in.
+2. **User Sovereignty** — Self-hostable, federated. Your data is YOUR data. Export everything, any time, in open formats.
+3. **Familiar but Better** — The UX should feel comfortable to any Discord user from day one. Servers, channels, roles, voice, bots, embeds. But built right, built completely — not Discord's half-measures.
+4. **Community-Driven** — Open source (AGPL-3.0), community governance, transparent roadmap. No corporate capture.
+5. **Its Own Protocol** — Nexus is not Discord-compatible and does not intend to be. It has its own gateway protocol, its own bot API, its own federation model. Migration bridges exist to help users **leave** other platforms, not to stay compatible with them.
+6. **Migration Path** — Import Discord history, Matrix bridges, IRC interop — all as optional tools to help communities migrate, not as permanent dependencies.
+7. **Sustainable Monetization** — Optional cosmetics, managed hosting, no ads, no data selling. Ever.
 
 ## What Users Want (That Discord Never Delivered)
 
@@ -56,8 +61,9 @@ A privacy-first, community-owned communication platform that carries all of Disc
 | Frontend Web | **React + TypeScript (Vite)** | Shared codebase with desktop |
 | Frontend Mobile | **React Native** | Code sharing with web, native feel |
 | E2E Encryption | **Signal Protocol (libsignal)** | Gold standard, double ratchet, forward secrecy |
-| Federation | **Matrix-compatible protocol** | Interop with existing Matrix ecosystem |
-| Bot API | **REST + WebSocket + SDK (TS/Python/Rust)** | Discord-compatible API shape for easy bot migration |
+| Federation | **Native Nexus protocol** | Own open federation; Matrix/IRC/Discord bridges as optional migration adapters |
+| Bot API | **REST + WebSocket + SDK (TS/Python/Rust)** | Native Nexus API — not Discord-compatible by design; migration adapters available for Discord bots |
+| Anonymous Layer | **Phantom** *(future)* | Post-quantum anonymous networking protocol; makes surveillance architecturally impossible |
 
 ## Architecture Overview
 
