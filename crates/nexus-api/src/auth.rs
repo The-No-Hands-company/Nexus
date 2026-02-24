@@ -7,6 +7,8 @@ use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
 };
+#[cfg(debug_assertions)]
+use argon2::{Algorithm, Params, Version};
 use chrono::{Duration, Utc};
 use jsonwebtoken::{encode, EncodingKey, Header};
 use serde::Serialize;
@@ -24,18 +26,36 @@ pub struct TokenPair {
     pub token_type: String,
 }
 
+/// Returns the Argon2 instance appropriate for the current build profile.
+///
+/// Debug builds use minimal parameters (8 MB, 1 iteration) so that
+/// login/register complete in ~50 ms instead of 15+ seconds.
+/// Release builds use the production-strength defaults.
+fn argon2_instance() -> Argon2<'static> {
+    #[cfg(debug_assertions)]
+    {
+        // m_cost = 8 * 1024 KiB, t_cost = 1 iteration, p_cost = 1 lane
+        let params = Params::new(8 * 1024, 1, 1, None)
+            .expect("valid argon2 debug params");
+        Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        Argon2::default()
+    }
+}
+
 /// Hash a password using Argon2id (the gold standard for password hashing).
 pub fn hash_password(password: &str) -> Result<String, argon2::password_hash::Error> {
     let salt = SaltString::generate(&mut OsRng);
-    let argon2 = Argon2::default();
-    let hash = argon2.hash_password(password.as_bytes(), &salt)?;
+    let hash = argon2_instance().hash_password(password.as_bytes(), &salt)?;
     Ok(hash.to_string())
 }
 
 /// Verify a password against an Argon2id hash.
 pub fn verify_password(password: &str, hash: &str) -> Result<bool, argon2::password_hash::Error> {
     let parsed_hash = PasswordHash::new(hash)?;
-    Ok(Argon2::default()
+    Ok(argon2_instance()
         .verify_password(password.as_bytes(), &parsed_hash)
         .is_ok())
 }

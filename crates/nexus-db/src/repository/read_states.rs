@@ -38,9 +38,9 @@ pub async fn ack_message(
     sqlx::query_as::<_, ReadStateRow>(
         r#"
         INSERT INTO read_states (user_id, channel_id, last_read_message_id, mention_count, last_read_at)
-        VALUES (?, ?, ?, 0, CURRENT_TIMESTAMP)
+        VALUES ($1, $2, $3, 0, CURRENT_TIMESTAMP)
         ON CONFLICT (user_id, channel_id) DO UPDATE SET
-            last_read_message_id = ?,
+            last_read_message_id = $4,
             mention_count = 0,
             last_read_at = CURRENT_TIMESTAMP
         RETURNING *
@@ -63,7 +63,7 @@ pub async fn increment_mention_count(
     sqlx::query(
         r#"
         INSERT INTO read_states (user_id, channel_id, mention_count, last_read_at)
-        VALUES (?, ?, 1, CURRENT_TIMESTAMP)
+        VALUES ($1, $2, 1, CURRENT_TIMESTAMP)
         ON CONFLICT (user_id, channel_id) DO UPDATE SET
             mention_count = read_states.mention_count + 1
         "#,
@@ -82,7 +82,7 @@ pub async fn get_read_state(
     channel_id: Uuid,
 ) -> Result<Option<ReadStateRow>, sqlx::Error> {
     sqlx::query_as::<_, ReadStateRow>(
-        "SELECT * FROM read_states WHERE user_id = ? AND channel_id = ?",
+        "SELECT * FROM read_states WHERE user_id = $1 AND channel_id = $2",
     )
     .bind(user_id.to_string())
     .bind(channel_id.to_string())
@@ -96,7 +96,7 @@ pub async fn get_all_read_states(
     user_id: Uuid,
 ) -> Result<Vec<ReadStateRow>, sqlx::Error> {
     sqlx::query_as::<_, ReadStateRow>(
-        "SELECT * FROM read_states WHERE user_id = ?",
+        "SELECT * FROM read_states WHERE user_id = $1",
     )
     .bind(user_id.to_string())
     .fetch_all(pool)
@@ -116,12 +116,12 @@ pub async fn get_unread_channels(
             rs.last_read_message_id,
             COALESCE(rs.mention_count, 0) as mention_count
         FROM channels c
-        LEFT JOIN read_states rs ON rs.channel_id = c.id AND rs.user_id = ?
+        LEFT JOIN read_states rs ON rs.channel_id = c.id AND rs.user_id = $1
         WHERE (
             -- User is in a server that has this channel
-            c.server_id IN (SELECT server_id FROM members WHERE user_id = ?)
+            c.server_id IN (SELECT server_id FROM members WHERE user_id = $2)
             -- OR user is a DM participant
-            OR c.id IN (SELECT channel_id FROM dm_participants WHERE user_id = ?)
+            OR c.id IN (SELECT channel_id FROM dm_participants WHERE user_id = $3)
         )
         AND c.last_message_id IS NOT NULL
         AND (rs.last_read_message_id IS NULL OR rs.last_read_message_id < c.last_message_id)
@@ -164,8 +164,8 @@ pub async fn delete_server_read_states(
     sqlx::query(
         r#"
         DELETE FROM read_states
-        WHERE user_id = ?
-        AND channel_id IN (SELECT id FROM channels WHERE server_id = ?)
+        WHERE user_id = $1
+        AND channel_id IN (SELECT id FROM channels WHERE server_id = $2)
         "#,
     )
     .bind(user_id.to_string())

@@ -7,7 +7,7 @@ import InviteModal from "./InviteModal";
 import JoinServerModal from "./JoinServerModal";
 
 export default function ServerList() {
-  const { servers, activeServerId, setActiveServer, logout, session } =
+  const { servers, activeServerId, setActiveServer, logout, session, isHomeMode, setHomeMode, loadRelationships, loadDmChannels } =
     useStore();
   const navigate = useNavigate();
   const [showCreate, setShowCreate] = useState(false);
@@ -15,8 +15,17 @@ export default function ServerList() {
   const [inviteServer, setInviteServer] = useState<Server | null>(null);
 
   const handleSelectServer = (id: string) => {
+    setHomeMode(false);
     setActiveServer(id);
     navigate("/");
+  };
+
+  const handleHome = () => {
+    setActiveServer(null);
+    setHomeMode(true);
+    loadRelationships();
+    loadDmChannels();
+    navigate("/home");
   };
 
   return (
@@ -25,9 +34,9 @@ export default function ServerList() {
 
         {/* Nexus home */}
         <SpaceButton
-          active={!activeServerId}
-          onClick={() => { setActiveServer(null); navigate("/"); }}
-          title="Home"
+          active={isHomeMode}
+          onClick={handleHome}
+          title="Home / Friends"
         >
           <span className="text-xs font-bold tracking-tight">NX</span>
         </SpaceButton>

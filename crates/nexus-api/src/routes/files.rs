@@ -1,6 +1,6 @@
 //! Static local file serving (lite mode).
 //!
-//! `GET /files/*key` — serves uploaded files from the local filesystem when
+//! `GET /files/{*key}` — serves uploaded files from the local filesystem when
 //! running without S3/MinIO.  In full mode these are served directly from
 //! MinIO, so this route is a no-op (returns 404 for every request).
 
@@ -17,7 +17,7 @@ use std::sync::Arc;
 use crate::AppState;
 
 pub fn router() -> Router<Arc<AppState>> {
-    Router::new().route("/files/*key", get(serve_file))
+    Router::new().route("/files/{*key}", get(serve_file))
 }
 
 async fn serve_file(

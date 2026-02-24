@@ -81,7 +81,7 @@ fn row_to_user_theme(row: &sqlx::any::AnyRow) -> UserThemeInstall {
 
 pub async fn list_plugins(pool: &sqlx::AnyPool, limit: i64, offset: i64) -> Result<Vec<ClientPlugin>> {
     let rows = sqlx::query(
-        "SELECT * FROM client_plugins WHERE verified = true ORDER BY install_count DESC LIMIT ? OFFSET ?",
+        "SELECT * FROM client_plugins WHERE verified = true ORDER BY install_count DESC LIMIT $1 OFFSET $2",
     )
     .bind(limit)
     .bind(offset)
@@ -91,7 +91,7 @@ pub async fn list_plugins(pool: &sqlx::AnyPool, limit: i64, offset: i64) -> Resu
 }
 
 pub async fn get_plugin_by_id(pool: &sqlx::AnyPool, plugin_id: Uuid) -> Result<Option<ClientPlugin>> {
-    let row = sqlx::query("SELECT * FROM client_plugins WHERE id = ?")
+    let row = sqlx::query("SELECT * FROM client_plugins WHERE id = $1")
         .bind(plugin_id.to_string())
         .fetch_optional(pool)
         .await?;
@@ -99,7 +99,7 @@ pub async fn get_plugin_by_id(pool: &sqlx::AnyPool, plugin_id: Uuid) -> Result<O
 }
 
 pub async fn get_plugin_by_slug(pool: &sqlx::AnyPool, slug: &str) -> Result<Option<ClientPlugin>> {
-    let row = sqlx::query("SELECT * FROM client_plugins WHERE slug = ?")
+    let row = sqlx::query("SELECT * FROM client_plugins WHERE slug = $1")
         .bind(slug)
         .fetch_optional(pool)
         .await?;
@@ -122,7 +122,7 @@ pub async fn create_plugin(
     let row = sqlx::query(
         r#"INSERT INTO client_plugins
                (id, author_id, name, slug, description, version, bundle_url, bundle_hash, permissions)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
            RETURNING *"#,
     )
     .bind(id.to_string())
@@ -145,7 +145,7 @@ pub async fn create_plugin(
 
 pub async fn get_user_plugins(pool: &sqlx::AnyPool, user_id: Uuid) -> Result<Vec<UserPluginInstall>> {
     let rows = sqlx::query(
-        "SELECT * FROM user_plugin_installs WHERE user_id = ? ORDER BY installed_at DESC",
+        "SELECT * FROM user_plugin_installs WHERE user_id = $1 ORDER BY installed_at DESC",
     )
     .bind(user_id.to_string())
     .fetch_all(pool)
@@ -158,13 +158,13 @@ pub async fn install_plugin(
     user_id: Uuid,
     plugin_id: Uuid,
 ) -> Result<UserPluginInstall> {
-    sqlx::query("UPDATE client_plugins SET install_count = install_count + 1 WHERE id = ?")
+    sqlx::query("UPDATE client_plugins SET install_count = install_count + 1 WHERE id = $1")
         .bind(plugin_id.to_string())
         .execute(pool)
         .await?;
     let row = sqlx::query(
         r#"INSERT INTO user_plugin_installs (user_id, plugin_id)
-           VALUES (?, ?)
+           VALUES ($1, $2)
            ON CONFLICT (user_id, plugin_id) DO UPDATE SET enabled = user_plugin_installs.enabled
            RETURNING *"#,
     )
@@ -185,9 +185,9 @@ pub async fn update_plugin_install(
     let settings_str = settings.as_ref().map(|v| serde_json::to_string(v).unwrap_or_default());
     let row = sqlx::query(
         r#"UPDATE user_plugin_installs SET
-               enabled  = COALESCE(?, enabled),
-               settings = COALESCE(?, settings)
-           WHERE user_id = ? AND plugin_id = ?
+               enabled  = COALESCE($1, enabled),
+               settings = COALESCE($2, settings)
+           WHERE user_id = $3 AND plugin_id = $4
            RETURNING *"#,
     )
     .bind(enabled)
@@ -201,7 +201,7 @@ pub async fn update_plugin_install(
 
 pub async fn uninstall_plugin(pool: &sqlx::AnyPool, user_id: Uuid, plugin_id: Uuid) -> Result<bool> {
     let result = sqlx::query(
-        "DELETE FROM user_plugin_installs WHERE user_id = ? AND plugin_id = ?",
+        "DELETE FROM user_plugin_installs WHERE user_id = $1 AND plugin_id = $2",
     )
     .bind(user_id.to_string())
     .bind(plugin_id.to_string())
@@ -216,7 +216,7 @@ pub async fn uninstall_plugin(pool: &sqlx::AnyPool, user_id: Uuid, plugin_id: Uu
 
 pub async fn list_themes(pool: &sqlx::AnyPool, limit: i64, offset: i64) -> Result<Vec<Theme>> {
     let rows = sqlx::query(
-        "SELECT * FROM themes WHERE verified = true ORDER BY install_count DESC LIMIT ? OFFSET ?",
+        "SELECT * FROM themes WHERE verified = true ORDER BY install_count DESC LIMIT $1 OFFSET $2",
     )
     .bind(limit)
     .bind(offset)
@@ -226,7 +226,7 @@ pub async fn list_themes(pool: &sqlx::AnyPool, limit: i64, offset: i64) -> Resul
 }
 
 pub async fn get_theme_by_id(pool: &sqlx::AnyPool, theme_id: Uuid) -> Result<Option<Theme>> {
-    let row = sqlx::query("SELECT * FROM themes WHERE id = ?")
+    let row = sqlx::query("SELECT * FROM themes WHERE id = $1")
         .bind(theme_id.to_string())
         .fetch_optional(pool)
         .await?;
@@ -234,7 +234,7 @@ pub async fn get_theme_by_id(pool: &sqlx::AnyPool, theme_id: Uuid) -> Result<Opt
 }
 
 pub async fn get_theme_by_slug(pool: &sqlx::AnyPool, slug: &str) -> Result<Option<Theme>> {
-    let row = sqlx::query("SELECT * FROM themes WHERE slug = ?")
+    let row = sqlx::query("SELECT * FROM themes WHERE slug = $1")
         .bind(slug)
         .fetch_optional(pool)
         .await?;
@@ -256,7 +256,7 @@ pub async fn create_theme(
     let row = sqlx::query(
         r#"INSERT INTO themes
                (id, author_id, name, slug, description, version, preview_url, css, variables)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
            RETURNING *"#,
     )
     .bind(id.to_string())
@@ -279,7 +279,7 @@ pub async fn create_theme(
 
 pub async fn get_user_themes(pool: &sqlx::AnyPool, user_id: Uuid) -> Result<Vec<UserThemeInstall>> {
     let rows = sqlx::query(
-        "SELECT * FROM user_theme_installs WHERE user_id = ? ORDER BY installed_at DESC",
+        "SELECT * FROM user_theme_installs WHERE user_id = $1 ORDER BY installed_at DESC",
     )
     .bind(user_id.to_string())
     .fetch_all(pool)
@@ -292,13 +292,13 @@ pub async fn install_theme(
     user_id: Uuid,
     theme_id: Uuid,
 ) -> Result<UserThemeInstall> {
-    sqlx::query("UPDATE themes SET install_count = install_count + 1 WHERE id = ?")
+    sqlx::query("UPDATE themes SET install_count = install_count + 1 WHERE id = $1")
         .bind(theme_id.to_string())
         .execute(pool)
         .await?;
     let row = sqlx::query(
         r#"INSERT INTO user_theme_installs (user_id, theme_id)
-           VALUES (?, ?)
+           VALUES ($1, $2)
            ON CONFLICT (user_id, theme_id) DO UPDATE SET active = user_theme_installs.active
            RETURNING *"#,
     )
@@ -311,13 +311,13 @@ pub async fn install_theme(
 
 pub async fn activate_theme(pool: &sqlx::AnyPool, user_id: Uuid, theme_id: Uuid) -> Result<bool> {
     sqlx::query(
-        "UPDATE user_theme_installs SET active = false WHERE user_id = ?",
+        "UPDATE user_theme_installs SET active = false WHERE user_id = $1",
     )
     .bind(user_id.to_string())
     .execute(pool)
     .await?;
     let result = sqlx::query(
-        "UPDATE user_theme_installs SET active = true WHERE user_id = ? AND theme_id = ?",
+        "UPDATE user_theme_installs SET active = true WHERE user_id = $1 AND theme_id = $2",
     )
     .bind(user_id.to_string())
     .bind(theme_id.to_string())
@@ -328,7 +328,7 @@ pub async fn activate_theme(pool: &sqlx::AnyPool, user_id: Uuid, theme_id: Uuid)
 
 pub async fn uninstall_theme(pool: &sqlx::AnyPool, user_id: Uuid, theme_id: Uuid) -> Result<bool> {
     let result =
-        sqlx::query("DELETE FROM user_theme_installs WHERE user_id = ? AND theme_id = ?")
+        sqlx::query("DELETE FROM user_theme_installs WHERE user_id = $1 AND theme_id = $2")
             .bind(user_id.to_string())
             .bind(theme_id.to_string())
             .execute(pool)

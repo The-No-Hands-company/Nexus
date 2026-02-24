@@ -17,11 +17,36 @@ export const isTauri = (): boolean =>
 let _serverUrl: string =
   localStorage.getItem("nexus:dev:serverUrl") ?? "http://localhost:8080";
 let _token: string | null = localStorage.getItem("nexus:dev:token");
+let _refreshToken: string | null = localStorage.getItem("nexus:dev:refreshToken");
 
 function authHeaders(): Record<string, string> {
   const h: Record<string, string> = { "Content-Type": "application/json" };
   if (_token) h["Authorization"] = `Bearer ${_token}`;
   return h;
+}
+
+/** Try to exchange the stored refresh token for a new access token. */
+async function tryRefreshToken(): Promise<boolean> {
+  if (!_refreshToken) return false;
+  try {
+    const r = await fetch(`${_serverUrl}/api/v1/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: _refreshToken }),
+    });
+    if (!r.ok) return false;
+    const data = await r.json() as Record<string, unknown>;
+    if (typeof data.access_token !== "string") return false;
+    _token = data.access_token;
+    localStorage.setItem("nexus:dev:token", _token);
+    if (typeof data.refresh_token === "string") {
+      _refreshToken = data.refresh_token;
+      localStorage.setItem("nexus:dev:refreshToken", _refreshToken);
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function apiFetch<T>(
@@ -34,6 +59,28 @@ async function apiFetch<T>(
     headers: authHeaders(),
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
+
+  // Auto-refresh on 401 and retry once
+  if (r.status === 401) {
+    const refreshed = await tryRefreshToken();
+    if (refreshed) {
+      const r2 = await fetch(`${_serverUrl}${path}`, {
+        method,
+        headers: authHeaders(),
+        body: body !== undefined ? JSON.stringify(body) : undefined,
+      });
+      if (r2.ok) return r2.json() as Promise<T>;
+      // Refresh didn't help — clear session
+    }
+    // Token dead and refresh failed → wipe stored credentials
+    _token = null;
+    _refreshToken = null;
+    localStorage.removeItem("nexus:dev:token");
+    localStorage.removeItem("nexus:dev:refreshToken");
+    const text = await r.text();
+    throw new Error(`401: ${text}`);
+  }
+
   if (!r.ok) {
     const text = await r.text();
     throw new Error(`${r.status}: ${text}`);
@@ -99,6 +146,10 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
       });
       _token = resp.access_token as string;
       localStorage.setItem("nexus:dev:token", _token);
+      if (typeof resp.refresh_token === "string") {
+        _refreshToken = resp.refresh_token;
+        localStorage.setItem("nexus:dev:refreshToken", _refreshToken);
+      }
       return resp as T;
     }
 
@@ -110,12 +161,18 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
       });
       _token = resp.access_token as string;
       localStorage.setItem("nexus:dev:token", _token);
+      if (typeof resp.refresh_token === "string") {
+        _refreshToken = resp.refresh_token;
+        localStorage.setItem("nexus:dev:refreshToken", _refreshToken);
+      }
       return resp as T;
     }
 
     case "logout": {
       _token = null;
+      _refreshToken = null;
       localStorage.removeItem("nexus:dev:token");
+      localStorage.removeItem("nexus:dev:refreshToken");
       return undefined as unknown as T;
     }
 
@@ -193,6 +250,111 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
         display_name: args.displayName ?? undefined,
         avatar_url: args.avatarUrl ?? undefined,
       });
+    }
+
+    // ── Friends & Relationships ───────────────────────────────────────
+    case "list_relationships": {
+      const raw = await apiFetch<Raw[]>("GET", "/api/v1/users/@me/relationships");
+      return raw.map((r) => ({
+        id: r.id as string,
+        direction: r.direction as string,
+        status: r.status as string,
+        user: {
+          id: (r.user as Raw).id as string,
+          username: (r.user as Raw).username as string,
+          displayName: ((r.user as Raw).display_name as string | undefined) ?? undefined,
+          avatar: ((r.user as Raw).avatar as string | undefined) ?? undefined,
+        },
+      })) as unknown as T;
+    }
+
+    case "send_friend_request": {
+      const raw = await apiFetch<Raw>("POST", "/api/v1/users/@me/relationships", {
+        username: args.username,
+      });
+      return {
+        id: raw.id as string,
+        direction: raw.direction as string,
+        status: raw.status as string,
+        user: {
+          id: (raw.user as Raw).id as string,
+          username: (raw.user as Raw).username as string,
+          displayName: ((raw.user as Raw).display_name as string | undefined) ?? undefined,
+          avatar: ((raw.user as Raw).avatar as string | undefined) ?? undefined,
+        },
+      } as unknown as T;
+    }
+
+    case "update_relationship": {
+      return apiFetch<T>(
+        "PATCH",
+        `/api/v1/users/@me/relationships/${String(args.userId)}`,
+        { action: args.action }
+      );
+    }
+
+    case "delete_relationship": {
+      return apiFetch<T>(
+        "DELETE",
+        `/api/v1/users/@me/relationships/${String(args.userId)}`
+      );
+    }
+
+    case "search_users": {
+      const raw = await apiFetch<Raw[]>(
+        "GET",
+        `/api/v1/users/search?q=${encodeURIComponent(String(args.q))}`
+      );
+      return raw.map((u) => ({
+        id: u.id as string,
+        username: u.username as string,
+        displayName: (u.display_name as string | undefined) ?? undefined,
+        avatar: (u.avatar as string | undefined) ?? undefined,
+      })) as unknown as T;
+    }
+
+    // ── DM Channels ───────────────────────────────────────────────────
+    case "list_dm_channels": {
+      const raw = await apiFetch<Raw[]>("GET", "/api/v1/users/@me/channels");
+      return raw.map((d) => ({
+        id: d.id as string,
+        channelType: (d.channel_type as string) as "dm" | "group_dm",
+        name: (d.name as string | undefined) ?? undefined,
+        lastMessageId: (d.last_message_id as string | undefined) ?? undefined,
+        recipients: ((d.recipients as Raw[]) ?? []).map((r) => ({
+          id: r.id as string,
+          username: r.username as string,
+          displayName: (r.display_name as string | undefined) ?? undefined,
+          avatar: (r.avatar as string | undefined) ?? undefined,
+        })),
+      })) as unknown as T;
+    }
+
+    case "create_dm": {
+      const raw = await apiFetch<Raw>("POST", "/api/v1/users/@me/channels", {
+        recipient_id: args.recipientId,
+      });
+      return {
+        id: raw.id as string,
+        channelType: (raw.channel_type as string) as "dm" | "group_dm",
+        name: (raw.name as string | undefined) ?? undefined,
+        lastMessageId: (raw.last_message_id as string | undefined) ?? undefined,
+        recipients: ((raw.recipients as Raw[]) ?? []).map((r) => ({
+          id: r.id as string,
+          username: r.username as string,
+          displayName: (r.display_name as string | undefined) ?? undefined,
+          avatar: (r.avatar as string | undefined) ?? undefined,
+        })),
+      } as unknown as T;
+    }
+
+    case "list_members": {
+      const rows = await apiFetch<Raw[]>("GET", `/api/v1/servers/${args.serverId}/members`);
+      return rows as unknown as T;
+    }
+
+    case "get_user_profile": {
+      return apiFetch<T>("GET", `/api/v1/users/${args.userId}/profile`);
     }
 
     // ── Desktop-only commands (no-ops in browser) ─────────────────────────

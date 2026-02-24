@@ -14,7 +14,7 @@ use nexus_common::{
     models::channel::Channel,
     snowflake,
 };
-use nexus_db::repository::channels;
+use nexus_db::{repository::channels, select_cols::CHANNEL_COLS_C};
 use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -37,11 +37,8 @@ pub fn router() -> Router<Arc<AppState>> {
 
 #[derive(Debug, Deserialize)]
 struct CreateDmRequest {
-    /// User ID to open a DM with (1:1 DM)
     recipient_id: Option<Uuid>,
-    /// Multiple user IDs for group DM
     recipient_ids: Option<Vec<Uuid>>,
-    /// Group DM name (optional, only for group DMs)
     name: Option<String>,
 }
 
@@ -50,34 +47,39 @@ async fn list_dm_channels(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
 ) -> NexusResult<Json<Vec<serde_json::Value>>> {
-    let dms = sqlx::query_as::<_, Channel>(
-        r#"
-        SELECT c.* FROM channels c
-        INNER JOIN dm_participants dp ON dp.channel_id = c.id
-        WHERE dp.user_id = ? AND c.channel_type IN ('dm', 'group_dm')
-        ORDER BY c.updated_at DESC
-        "#,
-    )
-    .bind(auth.user_id.to_string())
-    .fetch_all(&state.db.pool)
-    .await?;
+    let q = format!(
+        "SELECT {CHANNEL_COLS_C} FROM channels c \
+         INNER JOIN dm_participants dp ON dp.channel_id = c.id \
+         WHERE dp.user_id = $1::uuid AND c.channel_type IN ('dm', 'group_dm') \
+         ORDER BY c.updated_at DESC"
+    );
+    let dms = sqlx::query_as::<_, Channel>(&q)
+        .bind(auth.user_id.to_string())
+        .fetch_all(&state.db.pool)
+        .await?;
 
-    // For each DM, fetch the other participants
     let mut results = Vec::with_capacity(dms.len());
     for dm in &dms {
         let participants: Vec<(String,)> = sqlx::query_as(
-            "SELECT user_id FROM dm_participants WHERE channel_id = ?",
+            "SELECT user_id::text FROM dm_participants WHERE channel_id = $1::uuid",
         )
         .bind(dm.id.to_string())
         .fetch_all(&state.db.pool)
         .await?;
 
-        let participant_ids: Vec<Uuid> = participants.into_iter().filter_map(|p| p.0.parse().ok()).collect();
+        let participant_ids: Vec<Uuid> = participants
+            .into_iter()
+            .filter_map(|p| p.0.parse().ok())
+            .collect();
 
-        // Fetch participant user info
         let mut users = Vec::new();
         for &uid in &participant_ids {
-            if let Some(user) = nexus_db::repository::users::find_by_id(&state.db.pool, uid).await? {
+            if uid == auth.user_id {
+                continue;
+            }
+            if let Some(user) =
+                nexus_db::repository::users::find_by_id(&state.db.pool, uid).await?
+            {
                 users.push(serde_json::json!({
                     "id": user.id,
                     "username": user.username,
@@ -107,28 +109,25 @@ async fn create_dm(
     Json(body): Json<CreateDmRequest>,
 ) -> NexusResult<Json<serde_json::Value>> {
     if let Some(recipient_id) = body.recipient_id {
-        // 1:1 DM — find or create
         if recipient_id == auth.user_id {
             return Err(NexusError::Validation {
                 message: "Cannot DM yourself".into(),
             });
         }
 
-        // Verify recipient exists
         nexus_db::repository::users::find_by_id(&state.db.pool, recipient_id)
             .await?
-            .ok_or(NexusError::NotFound {
-                resource: "User".into(),
-            })?;
+            .ok_or(NexusError::NotFound { resource: "User".into() })?;
 
         let dm_id = snowflake::generate_id();
-        let dm = channels::find_or_create_dm(&state.db.pool, dm_id, auth.user_id, recipient_id)
-            .await?;
+        let dm =
+            channels::find_or_create_dm(&state.db.pool, dm_id, auth.user_id, recipient_id)
+                .await?;
 
-        // Fetch recipient info
-        let recipient = nexus_db::repository::users::find_by_id(&state.db.pool, recipient_id)
-            .await?
-            .ok_or(NexusError::NotFound { resource: "User".into() })?;
+        let recipient =
+            nexus_db::repository::users::find_by_id(&state.db.pool, recipient_id)
+                .await?
+                .ok_or(NexusError::NotFound { resource: "User".into() })?;
 
         Ok(Json(serde_json::json!({
             "id": dm.id,
@@ -142,7 +141,6 @@ async fn create_dm(
             "last_message_id": dm.last_message_id,
         })))
     } else if let Some(recipient_ids) = body.recipient_ids {
-        // Group DM
         if recipient_ids.len() < 2 {
             return Err(NexusError::Validation {
                 message: "Group DM requires at least 2 other users".into(),
@@ -162,7 +160,6 @@ async fn create_dm(
         let channel_id = snowflake::generate_id();
         let name = body.name.as_deref();
 
-        // Create group DM channel
         let channel = channels::create_channel(
             &state.db.pool,
             channel_id,
@@ -175,22 +172,25 @@ async fn create_dm(
         )
         .await?;
 
-        // Add all participants (including creator)
         let mut all_participants = recipient_ids.clone();
         all_participants.push(auth.user_id);
 
         for &uid in &all_participants {
-            sqlx::query("INSERT INTO dm_participants (channel_id, user_id) VALUES (?, ?) ON CONFLICT DO NOTHING")
-                .bind(channel_id.to_string())
-                .bind(uid.to_string())
-                .execute(&state.db.pool)
-                .await?;
+            sqlx::query(
+                "INSERT INTO dm_participants (channel_id, user_id) \
+                 VALUES ($1::uuid, $2::uuid) ON CONFLICT DO NOTHING",
+            )
+            .bind(channel_id.to_string())
+            .bind(uid.to_string())
+            .execute(&state.db.pool)
+            .await?;
         }
 
-        // Fetch participant info
         let mut users = Vec::new();
         for &uid in &all_participants {
-            if let Some(user) = nexus_db::repository::users::find_by_id(&state.db.pool, uid).await? {
+            if let Some(user) =
+                nexus_db::repository::users::find_by_id(&state.db.pool, uid).await?
+            {
                 users.push(serde_json::json!({
                     "id": user.id,
                     "username": user.username,
@@ -220,19 +220,17 @@ async fn get_dm_channel(
     State(state): State<Arc<AppState>>,
     Path(channel_id): Path<Uuid>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    // Verify user is a participant
-    let is_participant: (bool,) = sqlx::query_as(
-        "SELECT EXISTS(SELECT 1 FROM dm_participants WHERE channel_id = ? AND user_id = ?)",
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT channel_id::text FROM dm_participants \
+         WHERE channel_id = $1::uuid AND user_id = $2::uuid LIMIT 1",
     )
     .bind(channel_id.to_string())
     .bind(auth.user_id.to_string())
-    .fetch_one(&state.db.pool)
+    .fetch_optional(&state.db.pool)
     .await?;
 
-    if !is_participant.0 {
-        return Err(NexusError::NotFound {
-            resource: "Channel".into(),
-        });
+    if row.is_none() {
+        return Err(NexusError::NotFound { resource: "Channel".into() });
     }
 
     let channel = channels::find_by_id(&state.db.pool, channel_id)
@@ -240,7 +238,7 @@ async fn get_dm_channel(
         .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
 
     let participants: Vec<(String,)> = sqlx::query_as(
-        "SELECT user_id FROM dm_participants WHERE channel_id = ?",
+        "SELECT user_id::text FROM dm_participants WHERE channel_id = $1::uuid",
     )
     .bind(channel_id.to_string())
     .fetch_all(&state.db.pool)
@@ -252,7 +250,12 @@ async fn get_dm_channel(
             Ok(u) => u,
             Err(_) => continue,
         };
-        if let Some(user) = nexus_db::repository::users::find_by_id(&state.db.pool, uid).await? {
+        if uid == auth.user_id {
+            continue;
+        }
+        if let Some(user) =
+            nexus_db::repository::users::find_by_id(&state.db.pool, uid).await?
+        {
             users.push(serde_json::json!({
                 "id": user.id,
                 "username": user.username,

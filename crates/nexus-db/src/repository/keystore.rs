@@ -33,7 +33,7 @@ pub async fn create_device(
         INSERT INTO devices
             (user_id, name, device_type, identity_key,
              signed_pre_key, signed_pre_key_sig, signed_pre_key_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING *
         "#,
     )
@@ -52,7 +52,7 @@ pub async fn create_device(
 /// List all devices for a user (public info only — no secret material stored server-side).
 pub async fn list_devices(pool: &sqlx::AnyPool, user_id: Uuid) -> Result<Vec<Device>> {
     let rows = sqlx::query_as::<_, Device>(
-        "SELECT * FROM devices WHERE user_id = ? ORDER BY created_at ASC",
+        "SELECT * FROM devices WHERE user_id = $1 ORDER BY created_at ASC",
     )
     .bind(user_id.to_string())
     .fetch_all(pool)
@@ -62,7 +62,7 @@ pub async fn list_devices(pool: &sqlx::AnyPool, user_id: Uuid) -> Result<Vec<Dev
 
 /// Find a single device by ID.
 pub async fn find_device(pool: &sqlx::AnyPool, device_id: Uuid) -> Result<Option<Device>> {
-    let row = sqlx::query_as::<_, Device>("SELECT * FROM devices WHERE id = ?")
+    let row = sqlx::query_as::<_, Device>("SELECT * FROM devices WHERE id = $1")
         .bind(device_id.to_string())
         .fetch_optional(pool)
         .await?;
@@ -80,11 +80,11 @@ pub async fn rotate_signed_pre_key(
     sqlx::query(
         r#"
         UPDATE devices
-        SET signed_pre_key = ?,
-            signed_pre_key_sig = ?,
-            signed_pre_key_id = ?,
+        SET signed_pre_key = $1,
+            signed_pre_key_sig = $2,
+            signed_pre_key_id = $3,
             updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
+        WHERE id = $4
         "#,
     )
     .bind(signed_pre_key)
@@ -98,7 +98,7 @@ pub async fn rotate_signed_pre_key(
 
 /// Touch last_seen_at for a device.
 pub async fn touch_device(pool: &sqlx::AnyPool, device_id: Uuid) -> Result<()> {
-    sqlx::query("UPDATE devices SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?")
+    sqlx::query("UPDATE devices SET last_seen_at = CURRENT_TIMESTAMP WHERE id = $1")
         .bind(device_id.to_string())
         .execute(pool)
         .await?;
@@ -107,7 +107,7 @@ pub async fn touch_device(pool: &sqlx::AnyPool, device_id: Uuid) -> Result<()> {
 
 /// Delete a device and all associated key material.
 pub async fn delete_device(pool: &sqlx::AnyPool, device_id: Uuid) -> Result<()> {
-    sqlx::query("DELETE FROM devices WHERE id = ?")
+    sqlx::query("DELETE FROM devices WHERE id = $1")
         .bind(device_id.to_string())
         .execute(pool)
         .await?;
@@ -129,7 +129,7 @@ pub async fn insert_one_time_pre_keys(
         sqlx::query(
             r#"
             INSERT INTO one_time_pre_keys (device_id, key_id, public_key)
-            VALUES (?, ?, ?)
+            VALUES ($1, $2, $3)
             ON CONFLICT (device_id, key_id) DO NOTHING
             "#,
         )
@@ -161,7 +161,7 @@ pub async fn consume_one_time_pre_key(
         SET consumed = true
         WHERE id = (
             SELECT id FROM one_time_pre_keys
-            WHERE device_id = ? AND NOT consumed
+            WHERE device_id = $1 AND NOT consumed
             ORDER BY key_id ASC
             LIMIT 1
         )
@@ -185,7 +185,7 @@ pub async fn count_one_time_pre_keys(pool: &sqlx::AnyPool, device_id: Uuid) -> R
         count: i64,
     }
     let row = sqlx::query_as::<_, CountRow>(
-        "SELECT COUNT(*) AS count FROM one_time_pre_keys WHERE device_id = ? AND NOT consumed",
+        "SELECT COUNT(*) AS count FROM one_time_pre_keys WHERE device_id = $1 AND NOT consumed",
     )
     .bind(device_id.to_string())
     .fetch_one(pool)
@@ -251,7 +251,7 @@ pub async fn upsert_session(
         r#"
         INSERT INTO e2ee_sessions
             (owner_device_id, remote_device_id, session_state, ratchet_step)
-        VALUES (?, ?, ?, ?)
+        VALUES ($1, $2, $3, $4)
         ON CONFLICT (owner_device_id, remote_device_id) DO UPDATE
             SET session_state = EXCLUDED.session_state,
                 ratchet_step  = EXCLUDED.ratchet_step,
@@ -275,7 +275,7 @@ pub async fn get_session(
     remote_device_id: Uuid,
 ) -> Result<Option<E2eeSession>> {
     let row = sqlx::query_as::<_, E2eeSession>(
-        "SELECT * FROM e2ee_sessions WHERE owner_device_id = ? AND remote_device_id = ?",
+        "SELECT * FROM e2ee_sessions WHERE owner_device_id = $1 AND remote_device_id = $2",
     )
     .bind(owner_device_id.to_string())
     .bind(remote_device_id.to_string())
@@ -304,12 +304,12 @@ pub async fn store_encrypted_message(
             (channel_id, sender_id, sender_device_id, ciphertext_map,
              attachment_meta, sequence, client_ts)
         VALUES (
-            ?, ?, ?, ?, ?,
+            $1, $2, $3, $4, $5,
             COALESCE(
-                (SELECT MAX(sequence) + 1 FROM encrypted_messages WHERE channel_id = ?),
+                (SELECT MAX(sequence) + 1 FROM encrypted_messages WHERE channel_id = $6),
                 1
             ),
-            ?
+            $7
         )
         RETURNING *
         "#,
@@ -337,9 +337,9 @@ pub async fn list_encrypted_messages(
         sqlx::query_as::<_, EncryptedMessage>(
             r#"
             SELECT * FROM encrypted_messages
-            WHERE channel_id = ? AND sequence < ?
+            WHERE channel_id = $1 AND sequence < $2
             ORDER BY sequence DESC
-            LIMIT ?
+            LIMIT $3
             "#,
         )
         .bind(channel_id.to_string())
@@ -351,9 +351,9 @@ pub async fn list_encrypted_messages(
         sqlx::query_as::<_, EncryptedMessage>(
             r#"
             SELECT * FROM encrypted_messages
-            WHERE channel_id = ?
+            WHERE channel_id = $1
             ORDER BY sequence DESC
-            LIMIT ?
+            LIMIT $2
             "#,
         )
         .bind(channel_id.to_string())
@@ -378,7 +378,7 @@ pub async fn enable_e2ee_channel(
     let row = sqlx::query_as::<_, E2eeChannel>(
         r#"
         INSERT INTO e2ee_channels (channel_id, enabled_by, rotation_interval_secs)
-        VALUES (?, ?, ?)
+        VALUES ($1, $2, $3)
         ON CONFLICT (channel_id) DO UPDATE
             SET rotation_interval_secs = EXCLUDED.rotation_interval_secs,
                 last_rotated_at        = CURRENT_TIMESTAMP
@@ -396,7 +396,7 @@ pub async fn enable_e2ee_channel(
 /// Get E2EE config for a channel (returns None if not E2EE).
 pub async fn get_e2ee_channel(pool: &sqlx::AnyPool, channel_id: Uuid) -> Result<Option<E2eeChannel>> {
     let row = sqlx::query_as::<_, E2eeChannel>(
-        "SELECT * FROM e2ee_channels WHERE channel_id = ?",
+        "SELECT * FROM e2ee_channels WHERE channel_id = $1",
     )
     .bind(channel_id.to_string())
     .fetch_optional(pool)
@@ -407,7 +407,7 @@ pub async fn get_e2ee_channel(pool: &sqlx::AnyPool, channel_id: Uuid) -> Result<
 /// Record a key rotation event.
 pub async fn record_key_rotation(pool: &sqlx::AnyPool, channel_id: Uuid) -> Result<()> {
     sqlx::query(
-        "UPDATE e2ee_channels SET last_rotated_at = CURRENT_TIMESTAMP WHERE channel_id = ?",
+        "UPDATE e2ee_channels SET last_rotated_at = CURRENT_TIMESTAMP WHERE channel_id = $1",
     )
     .bind(channel_id.to_string())
     .execute(pool)
@@ -429,7 +429,7 @@ pub async fn verify_device(
     let row = sqlx::query_as::<_, DeviceVerification>(
         r#"
         INSERT INTO device_verifications (verifier_id, target_device_id, method)
-        VALUES (?, ?, ?)
+        VALUES ($1, $2, $3)
         ON CONFLICT (verifier_id, target_device_id) DO UPDATE
             SET method = EXCLUDED.method,
                 verified_at = CURRENT_TIMESTAMP
@@ -443,7 +443,7 @@ pub async fn verify_device(
     .await?;
 
     // Also mark the device itself as verified
-    sqlx::query("UPDATE devices SET verified = true WHERE id = ?")
+    sqlx::query("UPDATE devices SET verified = true WHERE id = $1")
         .bind(target_device_id.to_string())
         .execute(pool)
         .await?;
@@ -465,7 +465,7 @@ pub async fn is_device_verified(
         r#"
         SELECT EXISTS(
             SELECT 1 FROM device_verifications
-            WHERE verifier_id = ? AND target_device_id = ?
+            WHERE verifier_id = $1 AND target_device_id = $2
         ) AS exists
         "#,
     )
@@ -482,7 +482,7 @@ pub async fn list_verifications(
     verifier_id: Uuid,
 ) -> Result<Vec<DeviceVerification>> {
     let rows = sqlx::query_as::<_, DeviceVerification>(
-        "SELECT * FROM device_verifications WHERE verifier_id = ? ORDER BY verified_at DESC",
+        "SELECT * FROM device_verifications WHERE verifier_id = $1 ORDER BY verified_at DESC",
     )
     .bind(verifier_id.to_string())
     .fetch_all(pool)
@@ -497,7 +497,7 @@ pub async fn get_one_time_pre_key(
     key_id: i32,
 ) -> Result<Option<OneTimePreKey>> {
     let row = sqlx::query_as::<_, OneTimePreKey>(
-        "SELECT * FROM one_time_pre_keys WHERE device_id = ? AND key_id = ?",
+        "SELECT * FROM one_time_pre_keys WHERE device_id = $1 AND key_id = $2",
     )
     .bind(device_id.to_string())
     .bind(key_id)

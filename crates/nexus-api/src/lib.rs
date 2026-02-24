@@ -56,6 +56,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::emoji::router())
         .merge(routes::search::router())
         .merge(routes::presence::router())
+        .merge(routes::relationships::router())
         // v0.5 Encryption
         .merge(routes::keys::router())
         .merge(routes::e2ee::router())

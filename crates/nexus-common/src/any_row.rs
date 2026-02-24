@@ -22,6 +22,7 @@ use crate::models::{
     channel::{Channel, ChannelType},
     crypto::{Device, DeviceType, DeviceVerification, E2eeChannel, E2eeSession, EncryptedMessage, OneTimePreKey, VerificationMethod},
     member::Member,
+    relationship::{Relationship, RelationshipStatus},
     rich::{AttachmentRow, ServerEmojiRow, ThreadRow},
     role::Role,
     server::{Invite, Server},
@@ -58,12 +59,36 @@ fn parse_dt(
     DateTime<Utc>,
     Box<dyn std::error::Error + Send + Sync + 'static>,
 > {
+    // RFC 3339 / ISO 8601 (e.g. "2024-01-15T10:30:00+00:00")
     if let Ok(d) = DateTime::parse_from_rfc3339(s) {
         return Ok(d.with_timezone(&Utc));
     }
+    // Normalize Postgres TIMESTAMPTZ::text: "2026-02-22 13:04:47.779907+00"
+    // Replace first space with T, then pad short tz offset "+HH" → "+HH:00".
+    let iso = s.replacen(' ', "T", 1);
+    let iso = {
+        let len = iso.len();
+        if len >= 3 {
+            let last3 = &iso[len - 3..];
+            if (last3.starts_with('+') || last3.starts_with('-'))
+                && last3[1..].chars().all(|c| c.is_ascii_digit())
+            {
+                format!("{}:00", iso)
+            } else {
+                iso
+            }
+        } else {
+            iso
+        }
+    };
+    if let Ok(d) = DateTime::parse_from_rfc3339(&iso) {
+        return Ok(d.with_timezone(&Utc));
+    }
+    // SQLite CURRENT_TIMESTAMP: "2024-01-15 10:30:00"
     if let Ok(d) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
         return Ok(d.and_utc());
     }
+    // SQLite with fractional seconds: "2024-01-15 10:30:00.123456"
     if let Ok(d) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f") {
         return Ok(d.and_utc());
     }
@@ -445,6 +470,26 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for Invite {
             uses: row.try_get("uses")?,
             expires_at: opt_dt(row, "expires_at")?,
             created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── Relationship ──────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for Relationship {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(Relationship {
+            id: uuid(row, "id")?,
+            requester_id: uuid(row, "requester_id")?,
+            addressee_id: uuid(row, "addressee_id")?,
+            status: parse_enum(row, "status", |s| match s {
+                "pending" => Some(RelationshipStatus::Pending),
+                "accepted" => Some(RelationshipStatus::Accepted),
+                "blocked" => Some(RelationshipStatus::Blocked),
+                _ => None,
+            })?,
+            created_at: dt(row, "created_at")?,
+            updated_at: dt(row, "updated_at")?,
         })
     }
 }

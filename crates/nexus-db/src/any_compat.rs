@@ -46,20 +46,38 @@ pub fn get_opt_datetime(
 fn parse_datetime(
     s: &str,
 ) -> Result<DateTime<Utc>, Box<dyn std::error::Error + Send + Sync + 'static>> {
-    // Try RFC 3339 first (Postgres output: "2024-01-15T10:30:00+00:00")
+    // Try RFC 3339 first (e.g. "2024-01-15T10:30:00+00:00")
     if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
         return Ok(dt.with_timezone(&Utc));
     }
-    // Try SQLite CURRENT_TIMESTAMP format: "2024-01-15 10:30:00"
-    if let Ok(dt) =
-        chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
-    {
+    // Normalize Postgres TIMESTAMPTZ::text output: "2026-02-22 13:04:47.779907+00"
+    // Step 1: Replace first space with 'T' to approach ISO 8601.
+    // Step 2: A short timezone suffix like "+00" has no minutes — append ":00".
+    let iso = s.replacen(' ', "T", 1);
+    let iso = {
+        let len = iso.len();
+        if len >= 3 {
+            let last3 = &iso[len - 3..];
+            if (last3.starts_with('+') || last3.starts_with('-'))
+                && last3[1..].chars().all(|c| c.is_ascii_digit())
+            {
+                format!("{}:00", iso)
+            } else {
+                iso
+            }
+        } else {
+            iso
+        }
+    };
+    if let Ok(dt) = DateTime::parse_from_rfc3339(&iso) {
+        return Ok(dt.with_timezone(&Utc));
+    }
+    // SQLite CURRENT_TIMESTAMP: "2024-01-15 10:30:00"
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
         return Ok(dt.and_utc());
     }
-    // Try with fractional seconds: "2024-01-15 10:30:00.123456"
-    if let Ok(dt) =
-        chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f")
-    {
+    // SQLite with fractional seconds: "2024-01-15 10:30:00.123456"
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f") {
         return Ok(dt.and_utc());
     }
     Err(format!("cannot parse timestamp: {s}").into())

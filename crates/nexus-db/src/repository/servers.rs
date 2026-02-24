@@ -4,6 +4,8 @@ use nexus_common::models::server::{Invite, Server};
 
 use uuid::Uuid;
 
+use crate::select_cols::{INVITE_COLS, SERVER_COLS, SERVER_COLS_S};
+
 /// Create a new server.
 pub async fn create_server(
     pool: &sqlx::AnyPool,
@@ -12,13 +14,12 @@ pub async fn create_server(
     owner_id: Uuid,
     is_public: bool,
 ) -> Result<Server, sqlx::Error> {
-    sqlx::query_as::<_, Server>(
-        r#"
-        INSERT INTO servers (id, name, owner_id, is_public, features, settings, member_count, created_at, updated_at)
-        VALUES (?, ?, ?, ?, '{}', '{}', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        RETURNING *
-        "#,
-    )
+    let q = format!(
+        "INSERT INTO servers (id, name, owner_id, is_public, features, settings, member_count, created_at, updated_at) \
+         VALUES ($1::uuid, $2, $3::uuid, $4, '{{}}', '{{}}', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) \
+         RETURNING {SERVER_COLS}"
+    );
+    sqlx::query_as::<_, Server>(&q)
     .bind(id.to_string())
     .bind(name)
     .bind(owner_id.to_string())
@@ -29,7 +30,8 @@ pub async fn create_server(
 
 /// Find a server by ID.
 pub async fn find_by_id(pool: &sqlx::AnyPool, id: Uuid) -> Result<Option<Server>, sqlx::Error> {
-    sqlx::query_as::<_, Server>("SELECT * FROM servers WHERE id = ?")
+    let q = format!("SELECT {SERVER_COLS} FROM servers WHERE id = $1::uuid");
+    sqlx::query_as::<_, Server>(&q)
         .bind(id.to_string())
         .fetch_optional(pool)
         .await
@@ -37,14 +39,13 @@ pub async fn find_by_id(pool: &sqlx::AnyPool, id: Uuid) -> Result<Option<Server>
 
 /// List servers a user is a member of.
 pub async fn list_user_servers(pool: &sqlx::AnyPool, user_id: Uuid) -> Result<Vec<Server>, sqlx::Error> {
-    sqlx::query_as::<_, Server>(
-        r#"
-        SELECT s.* FROM servers s
-        INNER JOIN members m ON m.server_id = s.id
-        WHERE m.user_id = ?
-        ORDER BY s.name
-        "#,
-    )
+    let q = format!(
+        "SELECT {SERVER_COLS_S} FROM servers s \
+         INNER JOIN members m ON m.server_id = s.id \
+         WHERE m.user_id = $1::uuid \
+         ORDER BY s.name"
+    );
+    sqlx::query_as::<_, Server>(&q)
     .bind(user_id.to_string())
     .fetch_all(pool)
     .await
@@ -58,17 +59,16 @@ pub async fn update_server(
     description: Option<&str>,
     is_public: Option<bool>,
 ) -> Result<Server, sqlx::Error> {
-    sqlx::query_as::<_, Server>(
-        r#"
-        UPDATE servers SET
-            name = COALESCE(?, name),
-            description = COALESCE(?, description),
-            is_public = COALESCE(?, is_public),
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-        RETURNING *
-        "#,
-    )
+    let q = format!(
+        "UPDATE servers SET \
+             name = COALESCE($1, name), \
+             description = COALESCE($2, description), \
+             is_public = COALESCE($3, is_public), \
+             updated_at = CURRENT_TIMESTAMP \
+         WHERE id = $4::uuid \
+         RETURNING {SERVER_COLS}"
+    );
+    sqlx::query_as::<_, Server>(&q)
     .bind(id.to_string())
     .bind(name)
     .bind(description)
@@ -80,7 +80,7 @@ pub async fn update_server(
 /// Delete a server and all associated data.
 pub async fn delete_server(pool: &sqlx::AnyPool, id: Uuid) -> Result<(), sqlx::Error> {
     // Cascading deletes handled by foreign keys
-    sqlx::query("DELETE FROM servers WHERE id = ?")
+    sqlx::query("DELETE FROM servers WHERE id = $1::uuid")
         .bind(id.to_string())
         .execute(pool)
         .await?;
@@ -89,7 +89,7 @@ pub async fn delete_server(pool: &sqlx::AnyPool, id: Uuid) -> Result<(), sqlx::E
 
 /// Increment server member count.
 pub async fn increment_member_count(pool: &sqlx::AnyPool, server_id: Uuid) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE servers SET member_count = member_count + 1 WHERE id = ?")
+    sqlx::query("UPDATE servers SET member_count = member_count + 1 WHERE id = $1::uuid")
         .bind(server_id.to_string())
         .execute(pool)
         .await?;
@@ -98,7 +98,7 @@ pub async fn increment_member_count(pool: &sqlx::AnyPool, server_id: Uuid) -> Re
 
 /// Decrement server member count.
 pub async fn decrement_member_count(pool: &sqlx::AnyPool, server_id: Uuid) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE servers SET member_count = max(member_count - 1, 0) WHERE id = ?")
+    sqlx::query("UPDATE servers SET member_count = max(member_count - 1, 0) WHERE id = $1::uuid")
         .bind(server_id.to_string())
         .execute(pool)
         .await?;
@@ -115,13 +115,12 @@ pub async fn create_invite(
     max_uses: Option<i32>,
     expires_at: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Result<Invite, sqlx::Error> {
-    sqlx::query_as::<_, Invite>(
-        r#"
-        INSERT INTO invites (code, server_id, channel_id, inviter_id, max_uses, uses, expires_at, created_at)
-        VALUES (?, ?, ?, ?, ?, 0, ?, CURRENT_TIMESTAMP)
-        RETURNING *
-        "#,
-    )
+    let q = format!(
+        "INSERT INTO invites (code, server_id, channel_id, inviter_id, max_uses, uses, expires_at, created_at) \
+         VALUES ($1, $2::uuid, $3::uuid, $4::uuid, $5, 0, $6::timestamptz, CURRENT_TIMESTAMP) \
+         RETURNING {INVITE_COLS}"
+    );
+    sqlx::query_as::<_, Invite>(&q)
     .bind(code)
     .bind(server_id.to_string())
     .bind(channel_id.map(|u| u.to_string()))
@@ -134,7 +133,8 @@ pub async fn create_invite(
 
 /// Find an invite by code.
 pub async fn find_invite(pool: &sqlx::AnyPool, code: &str) -> Result<Option<Invite>, sqlx::Error> {
-    sqlx::query_as::<_, Invite>("SELECT * FROM invites WHERE code = ?")
+    let q = format!("SELECT {INVITE_COLS} FROM invites WHERE code = $1");
+    sqlx::query_as::<_, Invite>(&q)
         .bind(code)
         .fetch_optional(pool)
         .await
@@ -142,7 +142,7 @@ pub async fn find_invite(pool: &sqlx::AnyPool, code: &str) -> Result<Option<Invi
 
 /// Consume an invite (increment use count).
 pub async fn use_invite(pool: &sqlx::AnyPool, code: &str) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE invites SET uses = uses + 1 WHERE code = ?")
+    sqlx::query("UPDATE invites SET uses = uses + 1 WHERE code = $1")
         .bind(code)
         .execute(pool)
         .await?;
@@ -155,14 +155,13 @@ pub async fn list_public_servers(
     limit: i64,
     offset: i64,
 ) -> Result<Vec<Server>, sqlx::Error> {
-    sqlx::query_as::<_, Server>(
-        r#"
-        SELECT * FROM servers
-        WHERE is_public = true
-        ORDER BY member_count DESC
-        LIMIT ? OFFSET ?
-        "#,
-    )
+    let q = format!(
+        "SELECT {SERVER_COLS} FROM servers \
+         WHERE is_public = true \
+         ORDER BY member_count DESC \
+         LIMIT $1 OFFSET $2"
+    );
+    sqlx::query_as::<_, Server>(&q)
     .bind(limit)
     .bind(offset)
     .fetch_all(pool)

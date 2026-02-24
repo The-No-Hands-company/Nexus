@@ -52,7 +52,7 @@ fn row_to_interaction(row: &sqlx::any::AnyRow) -> Interaction {
 // ============================================================================
 
 pub async fn get_command(pool: &sqlx::AnyPool, command_id: Uuid) -> Result<Option<SlashCommand>> {
-    let row = sqlx::query("SELECT * FROM slash_commands WHERE id = ?")
+    let row = sqlx::query("SELECT * FROM slash_commands WHERE id = $1")
         .bind(command_id.to_string())
         .fetch_optional(pool)
         .await?;
@@ -61,7 +61,7 @@ pub async fn get_command(pool: &sqlx::AnyPool, command_id: Uuid) -> Result<Optio
 
 pub async fn get_global_commands(pool: &sqlx::AnyPool, application_id: Uuid) -> Result<Vec<SlashCommand>> {
     let rows = sqlx::query(
-        "SELECT * FROM slash_commands WHERE application_id = ? AND server_id IS NULL AND enabled = true ORDER BY name",
+        "SELECT * FROM slash_commands WHERE application_id = $1 AND server_id IS NULL AND enabled = true ORDER BY name",
     )
     .bind(application_id.to_string())
     .fetch_all(pool)
@@ -75,7 +75,7 @@ pub async fn get_server_commands(
     server_id: Uuid,
 ) -> Result<Vec<SlashCommand>> {
     let rows = sqlx::query(
-        "SELECT * FROM slash_commands WHERE application_id = ? AND server_id = ? AND enabled = true ORDER BY name",
+        "SELECT * FROM slash_commands WHERE application_id = $1 AND server_id = $2 AND enabled = true ORDER BY name",
     )
     .bind(application_id.to_string())
     .bind(server_id.to_string())
@@ -86,7 +86,7 @@ pub async fn get_server_commands(
 
 pub async fn get_all_server_commands(pool: &sqlx::AnyPool, server_id: Uuid) -> Result<Vec<SlashCommand>> {
     let rows = sqlx::query(
-        "SELECT * FROM slash_commands WHERE server_id = ? AND enabled = true ORDER BY name",
+        "SELECT * FROM slash_commands WHERE server_id = $1 AND enabled = true ORDER BY name",
     )
     .bind(server_id.to_string())
     .fetch_all(pool)
@@ -111,7 +111,7 @@ pub async fn upsert_command(
         r#"INSERT INTO slash_commands
                (id, application_id, server_id, name, description, options,
                 command_type, default_member_permissions, dm_permission)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
            ON CONFLICT (application_id, name)
            DO UPDATE SET
                description = EXCLUDED.description,
@@ -137,7 +137,7 @@ pub async fn upsert_command(
 }
 
 pub async fn delete_command(pool: &sqlx::AnyPool, command_id: Uuid) -> Result<bool> {
-    let result = sqlx::query("DELETE FROM slash_commands WHERE id = ?")
+    let result = sqlx::query("DELETE FROM slash_commands WHERE id = $1")
         .bind(command_id.to_string())
         .execute(pool)
         .await?;
@@ -149,7 +149,7 @@ pub async fn bulk_overwrite_global_commands(
     application_id: Uuid,
     commands: &[(Uuid, String, String, serde_json::Value, i32)],
 ) -> Result<Vec<SlashCommand>> {
-    sqlx::query("DELETE FROM slash_commands WHERE application_id = ? AND server_id IS NULL")
+    sqlx::query("DELETE FROM slash_commands WHERE application_id = $1 AND server_id IS NULL")
         .bind(application_id.to_string())
         .execute(pool)
         .await?;
@@ -159,7 +159,7 @@ pub async fn bulk_overwrite_global_commands(
         let row = sqlx::query(
             r#"INSERT INTO slash_commands
                    (id, application_id, name, description, options, command_type)
-               VALUES (?, ?, ?, ?, ?, ?)
+               VALUES ($1, $2, $3, $4, $5, $6)
                RETURNING *"#,
         )
         .bind(id.to_string())
@@ -193,7 +193,7 @@ pub async fn create_interaction(
     let row = sqlx::query(
         r#"INSERT INTO interactions
                (id, application_id, interaction_type, data, server_id, channel_id, user_id, token)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
            RETURNING *"#,
     )
     .bind(id.to_string())
@@ -210,7 +210,7 @@ pub async fn create_interaction(
 }
 
 pub async fn get_interaction(pool: &sqlx::AnyPool, interaction_id: Uuid) -> Result<Option<Interaction>> {
-    let row = sqlx::query("SELECT * FROM interactions WHERE id = ?")
+    let row = sqlx::query("SELECT * FROM interactions WHERE id = $1")
         .bind(interaction_id.to_string())
         .fetch_optional(pool)
         .await?;
@@ -226,7 +226,7 @@ pub async fn bulk_overwrite_server_commands(
     commands: &[(Uuid, String, String, serde_json::Value, i32)],
 ) -> Result<Vec<SlashCommand>> {
     sqlx::query(
-        "DELETE FROM slash_commands WHERE application_id = ? AND server_id = ?",
+        "DELETE FROM slash_commands WHERE application_id = $1 AND server_id = $2",
     )
     .bind(application_id.to_string())
     .bind(server_id.to_string())
@@ -238,7 +238,7 @@ pub async fn bulk_overwrite_server_commands(
         let row = sqlx::query(
             r#"INSERT INTO slash_commands
                    (id, application_id, server_id, name, description, options, command_type)
-               VALUES (?, ?, ?, ?, ?, ?, ?)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)
                RETURNING *"#,
         )
         .bind(id.to_string())

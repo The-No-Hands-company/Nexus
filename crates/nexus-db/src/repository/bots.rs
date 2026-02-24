@@ -46,7 +46,7 @@ fn row_to_server_install(row: &sqlx::any::AnyRow) -> BotServerInstall {
 // ============================================================================
 
 pub async fn get_bot(pool: &sqlx::AnyPool, bot_id: Uuid) -> Result<Option<BotApplication>> {
-    let row = sqlx::query("SELECT * FROM bot_applications WHERE id = ?")
+    let row = sqlx::query("SELECT * FROM bot_applications WHERE id = $1")
         .bind(bot_id.to_string())
         .fetch_optional(pool)
         .await?;
@@ -55,7 +55,7 @@ pub async fn get_bot(pool: &sqlx::AnyPool, bot_id: Uuid) -> Result<Option<BotApp
 
 pub async fn get_bots_by_owner(pool: &sqlx::AnyPool, owner_id: Uuid) -> Result<Vec<BotApplication>> {
     let rows = sqlx::query(
-        "SELECT * FROM bot_applications WHERE owner_id = ? ORDER BY created_at DESC",
+        "SELECT * FROM bot_applications WHERE owner_id = $1 ORDER BY created_at DESC",
     )
     .bind(owner_id.to_string())
     .fetch_all(pool)
@@ -67,7 +67,7 @@ pub async fn get_bot_by_token_hash(
     pool: &sqlx::AnyPool,
     token_hash: &str,
 ) -> Result<Option<BotApplication>> {
-    let row = sqlx::query("SELECT * FROM bot_applications WHERE token_hash = ?")
+    let row = sqlx::query("SELECT * FROM bot_applications WHERE token_hash = $1")
         .bind(token_hash)
         .fetch_optional(pool)
         .await?;
@@ -91,7 +91,7 @@ pub async fn create_bot(
         r#"INSERT INTO bot_applications
                (id, owner_id, name, description, token_hash, public_key, is_public,
                 redirect_uris, interactions_endpoint_url)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
            RETURNING *"#,
     )
     .bind(id.to_string())
@@ -121,14 +121,14 @@ pub async fn update_bot(
     let uris = redirect_uris.map(|r| serde_json::to_string(r)).transpose()?;
     let row = sqlx::query(
         r#"UPDATE bot_applications SET
-               name        = COALESCE(?, name),
-               description = COALESCE(?, description),
-               avatar      = COALESCE(?, avatar),
-               is_public   = COALESCE(?, is_public),
-               redirect_uris = COALESCE(?, redirect_uris),
-               interactions_endpoint_url = COALESCE(?, interactions_endpoint_url),
+               name        = COALESCE($1, name),
+               description = COALESCE($2, description),
+               avatar      = COALESCE($3, avatar),
+               is_public   = COALESCE($4, is_public),
+               redirect_uris = COALESCE($5, redirect_uris),
+               interactions_endpoint_url = COALESCE($6, interactions_endpoint_url),
                updated_at  = CURRENT_TIMESTAMP
-           WHERE id = ?
+           WHERE id = $7
            RETURNING *"#,
     )
     .bind(name)
@@ -145,7 +145,7 @@ pub async fn update_bot(
 
 pub async fn update_bot_token(pool: &sqlx::AnyPool, bot_id: Uuid, new_token_hash: &str) -> Result<bool> {
     let result = sqlx::query(
-        "UPDATE bot_applications SET token_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        "UPDATE bot_applications SET token_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
     )
     .bind(new_token_hash)
     .bind(bot_id.to_string())
@@ -155,7 +155,7 @@ pub async fn update_bot_token(pool: &sqlx::AnyPool, bot_id: Uuid, new_token_hash
 }
 
 pub async fn delete_bot(pool: &sqlx::AnyPool, bot_id: Uuid) -> Result<bool> {
-    let result = sqlx::query("DELETE FROM bot_applications WHERE id = ?")
+    let result = sqlx::query("DELETE FROM bot_applications WHERE id = $1")
         .bind(bot_id.to_string())
         .execute(pool)
         .await?;
@@ -177,7 +177,7 @@ pub async fn install_bot_to_server(
     let scopes_json = serde_json::to_string(scopes)?;
     let row = sqlx::query(
         r#"INSERT INTO bot_server_installs (bot_id, server_id, installed_by, scopes, permissions)
-           VALUES (?, ?, ?, ?, ?)
+           VALUES ($1, $2, $3, $4, $5)
            ON CONFLICT (bot_id, server_id) DO UPDATE
                SET scopes = EXCLUDED.scopes,
                    permissions = EXCLUDED.permissions
@@ -195,7 +195,7 @@ pub async fn install_bot_to_server(
 
 pub async fn get_server_bots(pool: &sqlx::AnyPool, server_id: Uuid) -> Result<Vec<BotServerInstall>> {
     let rows = sqlx::query(
-        "SELECT * FROM bot_server_installs WHERE server_id = ? ORDER BY installed_at DESC",
+        "SELECT * FROM bot_server_installs WHERE server_id = $1 ORDER BY installed_at DESC",
     )
     .bind(server_id.to_string())
     .fetch_all(pool)
@@ -209,7 +209,7 @@ pub async fn uninstall_bot_from_server(
     server_id: Uuid,
 ) -> Result<bool> {
     let result = sqlx::query(
-        "DELETE FROM bot_server_installs WHERE bot_id = ? AND server_id = ?",
+        "DELETE FROM bot_server_installs WHERE bot_id = $1 AND server_id = $2",
     )
     .bind(bot_id.to_string())
     .bind(server_id.to_string())
@@ -220,7 +220,7 @@ pub async fn uninstall_bot_from_server(
 
 pub async fn is_bot_in_server(pool: &sqlx::AnyPool, bot_id: Uuid, server_id: Uuid) -> Result<bool> {
     let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM bot_server_installs WHERE bot_id = ? AND server_id = ?",
+        "SELECT COUNT(*) FROM bot_server_installs WHERE bot_id = $1 AND server_id = $2",
     )
     .bind(bot_id.to_string())
     .bind(server_id.to_string())

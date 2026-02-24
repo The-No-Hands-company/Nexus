@@ -39,10 +39,10 @@ pub async fn create_attachment(
             created_at, updated_at
         )
         VALUES (
-            ?, ?, ?, ?,
-            ?, ?, ?, ?,
-            ?, ?, ?,
-            ?, ?, 'pending',
+            $1, $2, $3, $4,
+            $5, $6, $7, $8,
+            $9, $10, $11,
+            $12, $13, 'pending',
             CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
         )
         RETURNING *
@@ -71,7 +71,7 @@ pub async fn create_attachment(
 
 /// Find an attachment by ID.
 pub async fn find_by_id(pool: &sqlx::AnyPool, id: Uuid) -> Result<Option<AttachmentRow>, sqlx::Error> {
-    sqlx::query_as::<_, AttachmentRow>("SELECT * FROM attachments WHERE id = ?")
+    sqlx::query_as::<_, AttachmentRow>("SELECT * FROM attachments WHERE id = $1")
         .bind(id.to_string())
         .fetch_optional(pool)
         .await
@@ -83,7 +83,7 @@ pub async fn list_for_message(
     message_id: Uuid,
 ) -> Result<Vec<AttachmentRow>, sqlx::Error> {
     sqlx::query_as::<_, AttachmentRow>(
-        "SELECT * FROM attachments WHERE message_id = ? ORDER BY created_at",
+        "SELECT * FROM attachments WHERE message_id = $1 ORDER BY created_at",
     )
     .bind(message_id.to_string())
     .fetch_all(pool)
@@ -101,10 +101,10 @@ pub async fn list_for_uploader(
         sqlx::query_as::<_, AttachmentRow>(
             r#"
             SELECT a.* FROM attachments a
-            WHERE a.uploader_id = ?
-              AND a.id < ?
+            WHERE a.uploader_id = $1
+              AND a.id < $2
             ORDER BY a.created_at DESC
-            LIMIT ?
+            LIMIT $3
             "#,
         )
         .bind(uploader_id.to_string())
@@ -116,9 +116,9 @@ pub async fn list_for_uploader(
         sqlx::query_as::<_, AttachmentRow>(
             r#"
             SELECT * FROM attachments
-            WHERE uploader_id = ?
+            WHERE uploader_id = $1
             ORDER BY created_at DESC
-            LIMIT ?
+            LIMIT $2
             "#,
         )
         .bind(uploader_id.to_string())
@@ -142,8 +142,8 @@ pub async fn mark_ready(
     sqlx::query_as::<_, AttachmentRow>(
         r#"
         UPDATE attachments
-        SET status = 'ready', url = ?, blurhash = ?, updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
+        SET status = 'ready', url = $1, blurhash = $2, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $3
         RETURNING *
         "#,
     )
@@ -161,7 +161,7 @@ pub async fn attach_to_message(
     message_id: Uuid,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "UPDATE attachments SET message_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        "UPDATE attachments SET message_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2",
     )
     .bind(attachment_id.to_string())
     .bind(message_id.to_string())
@@ -173,7 +173,7 @@ pub async fn attach_to_message(
 /// Mark an attachment as failed.
 pub async fn mark_failed(pool: &sqlx::AnyPool, id: Uuid) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "UPDATE attachments SET status = 'failed', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        "UPDATE attachments SET status = 'failed', updated_at = CURRENT_TIMESTAMP WHERE id = $1",
     )
     .bind(id.to_string())
     .execute(pool)
@@ -192,7 +192,7 @@ pub async fn delete_attachment(
     uploader_id: Uuid,
 ) -> Result<bool, sqlx::Error> {
     let result = sqlx::query(
-        "DELETE FROM attachments WHERE id = ? AND uploader_id = ?",
+        "DELETE FROM attachments WHERE id = $1 AND uploader_id = $2",
     )
     .bind(id.to_string())
     .bind(uploader_id.to_string())

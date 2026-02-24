@@ -14,6 +14,7 @@ pub mod health;
 pub mod keys;
 pub mod messages;
 pub mod presence;
+pub mod relationships;
 pub mod search;
 pub mod servers;
 pub mod slash_commands;

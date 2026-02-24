@@ -7,6 +7,8 @@ use chrono::{DateTime, Utc};
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::select_cols::{MESSAGE_COLS, MESSAGE_COLS_M};
+
 /// Row type for messages.
 /// Implements FromRow manually to handle AnyPool (Uuid/DateTime as strings).
 #[derive(Debug)]
@@ -73,41 +75,33 @@ pub async fn create_message(
     mention_roles: &[Uuid],
     mention_everyone: bool,
 ) -> Result<MessageRow, sqlx::Error> {
-    let mentions_json = serde_json::to_string(
-        &mentions.iter().map(|x| x.to_string()).collect::<Vec<_>>(),
-    )
-    .unwrap_or_else(|_| "[]".to_string());
-    let mention_roles_json = serde_json::to_string(
-        &mention_roles.iter().map(|x| x.to_string()).collect::<Vec<_>>(),
-    )
-    .unwrap_or_else(|_| "[]".to_string());
+    // Build Postgres array literals: '{}' for empty, '{uuid1,uuid2}' for populated.
+    let mentions_arr = format!("{{{}}}", mentions.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","));
+    let mention_roles_arr = format!("{{{}}}", mention_roles.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","));
 
-    sqlx::query_as::<_, MessageRow>(
-        r#"
-        INSERT INTO messages (
-            id, channel_id, author_id, content, message_type,
-            edited, pinned, embeds, attachments,
-            mentions, mention_roles, mention_everyone,
-            reference_message_id, reference_channel_id,
-            flags, created_at, updated_at
-        )
-        VALUES (
-            ?, ?, ?, ?, ?,
-            false, false, '[]', '[]',
-            ?, ?, ?,
-            ?, ?,
-            0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-        )
-        RETURNING *
-        "#,
-    )
+    let q = format!(
+        "INSERT INTO messages ( \
+             id, channel_id, author_id, content, message_type, \
+             edited, pinned, embeds, attachments, \
+             mentions, mention_roles, mention_everyone, \
+             reference_message_id, reference_channel_id, \
+             flags, created_at, updated_at \
+         ) VALUES ( \
+             $1::uuid, $2::uuid, $3::uuid, $4, $5, \
+             false, false, '[]'::jsonb, '[]'::jsonb, \
+             $6::uuid[], $7::uuid[], $8, \
+             $9::uuid, $10::uuid, \
+             0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP \
+         ) RETURNING {MESSAGE_COLS}"
+    );
+    sqlx::query_as::<_, MessageRow>(&q)
     .bind(id.to_string())
     .bind(channel_id.to_string())
     .bind(author_id.to_string())
     .bind(content)
     .bind(message_type)
-    .bind(&mentions_json)
-    .bind(&mention_roles_json)
+    .bind(&mentions_arr)
+    .bind(&mention_roles_arr)
     .bind(mention_everyone)
     .bind(reference_message_id.map(|x| x.to_string()))
     .bind(reference_channel_id.map(|x| x.to_string()))
@@ -117,7 +111,8 @@ pub async fn create_message(
 
 /// Find a message by ID.
 pub async fn find_by_id(pool: &sqlx::AnyPool, id: Uuid) -> Result<Option<MessageRow>, sqlx::Error> {
-    sqlx::query_as::<_, MessageRow>("SELECT * FROM messages WHERE id = ?")
+    let q = format!("SELECT {MESSAGE_COLS} FROM messages WHERE id = $1::uuid");
+    sqlx::query_as::<_, MessageRow>(&q)
         .bind(id.to_string())
         .fetch_optional(pool)
         .await
@@ -140,46 +135,43 @@ pub async fn list_channel_messages(
     let limit = limit.min(100).max(1);
 
     if let Some(before_id) = before {
-        sqlx::query_as::<_, MessageRow>(
-            r#"
-            SELECT m.* FROM messages m
-            WHERE m.channel_id = ?
-              AND m.created_at < (SELECT created_at FROM messages WHERE id = ?)
-            ORDER BY m.created_at DESC
-            LIMIT ?
-            "#,
-        )
+        let q = format!(
+            "SELECT {MESSAGE_COLS_M} FROM messages m \
+             WHERE m.channel_id = $1::uuid \
+               AND m.created_at < (SELECT created_at FROM messages WHERE id = $2::uuid) \
+             ORDER BY m.created_at DESC \
+             LIMIT $3"
+        );
+        sqlx::query_as::<_, MessageRow>(&q)
         .bind(channel_id.to_string())
         .bind(before_id.to_string())
         .bind(limit)
         .fetch_all(pool)
         .await
     } else if let Some(after_id) = after {
-        sqlx::query_as::<_, MessageRow>(
-            r#"
-            SELECT * FROM (
-                SELECT m.* FROM messages m
-                WHERE m.channel_id = ?
-                  AND m.created_at > (SELECT created_at FROM messages WHERE id = ?)
-                ORDER BY m.created_at ASC
-                LIMIT ?
-            ) sub ORDER BY created_at DESC
-            "#,
-        )
+        let q = format!(
+            "SELECT * FROM ( \
+                 SELECT {MESSAGE_COLS_M} FROM messages m \
+                 WHERE m.channel_id = $1::uuid \
+                   AND m.created_at > (SELECT created_at FROM messages WHERE id = $2::uuid) \
+                 ORDER BY m.created_at ASC \
+                 LIMIT $3 \
+             ) sub ORDER BY created_at DESC"
+        );
+        sqlx::query_as::<_, MessageRow>(&q)
         .bind(channel_id.to_string())
         .bind(after_id.to_string())
         .bind(limit)
         .fetch_all(pool)
         .await
     } else {
-        sqlx::query_as::<_, MessageRow>(
-            r#"
-            SELECT * FROM messages
-            WHERE channel_id = ?
-            ORDER BY created_at DESC
-            LIMIT ?
-            "#,
-        )
+        let q = format!(
+            "SELECT {MESSAGE_COLS} FROM messages \
+             WHERE channel_id = $1::uuid \
+             ORDER BY created_at DESC \
+             LIMIT $2"
+        );
+        sqlx::query_as::<_, MessageRow>(&q)
         .bind(channel_id.to_string())
         .bind(limit)
         .fetch_all(pool)
@@ -250,52 +242,49 @@ pub async fn list_channel_messages_with_author(
 ) -> Result<Vec<MessageWithAuthor>, sqlx::Error> {
     let limit = limit.min(100).max(1);
     if let Some(before_id) = before {
-        sqlx::query_as::<_, MessageWithAuthor>(
-            r#"
-            SELECT m.*, u.username AS author_username
-            FROM messages m
-            JOIN users u ON u.id = m.author_id
-            WHERE m.channel_id = ?
-              AND m.created_at < (SELECT created_at FROM messages WHERE id = ?)
-            ORDER BY m.created_at DESC
-            LIMIT ?
-            "#,
-        )
+        let q = format!(
+            "SELECT {MESSAGE_COLS_M}, u.username AS author_username \
+             FROM messages m \
+             JOIN users u ON u.id = m.author_id \
+             WHERE m.channel_id = $1::uuid \
+               AND m.created_at < (SELECT created_at FROM messages WHERE id = $2::uuid) \
+             ORDER BY m.created_at DESC \
+             LIMIT $3"
+        );
+        sqlx::query_as::<_, MessageWithAuthor>(&q)
         .bind(channel_id.to_string())
         .bind(before_id.to_string())
         .bind(limit)
         .fetch_all(pool)
         .await
     } else if let Some(after_id) = after {
-        sqlx::query_as::<_, MessageWithAuthor>(
-            r#"
-            SELECT * FROM (
-                SELECT m.*, u.username AS author_username
-                FROM messages m
-                JOIN users u ON u.id = m.author_id
-                WHERE m.channel_id = ?
-                  AND m.created_at > (SELECT created_at FROM messages WHERE id = ?)
-                ORDER BY m.created_at ASC
-                LIMIT ?
-            ) sub ORDER BY created_at DESC
-            "#,
-        )
+        let q = format!(
+            "SELECT * FROM ( \
+                 SELECT {MESSAGE_COLS_M}, u.username AS author_username \
+                 FROM messages m \
+                 JOIN users u ON u.id = m.author_id \
+                 WHERE m.channel_id = $1::uuid \
+                   AND m.created_at > (SELECT created_at FROM messages WHERE id = $2::uuid) \
+                 ORDER BY m.created_at ASC \
+                 LIMIT $3 \
+             ) sub ORDER BY created_at DESC"
+        );
+        sqlx::query_as::<_, MessageWithAuthor>(&q)
         .bind(channel_id.to_string())
         .bind(after_id.to_string())
         .bind(limit)
         .fetch_all(pool)
         .await
     } else {
-        sqlx::query_as::<_, MessageWithAuthor>(
-            r#"
-            SELECT m.*, u.username AS author_username
-            FROM messages m
-            JOIN users u ON u.id = m.author_id
-            WHERE m.channel_id = ?
-            ORDER BY m.created_at DESC
-            LIMIT ?
-            "#,
-        )
+        let q = format!(
+            "SELECT {MESSAGE_COLS_M}, u.username AS author_username \
+             FROM messages m \
+             JOIN users u ON u.id = m.author_id \
+             WHERE m.channel_id = $1::uuid \
+             ORDER BY m.created_at DESC \
+             LIMIT $2"
+        );
+        sqlx::query_as::<_, MessageWithAuthor>(&q)
         .bind(channel_id.to_string())
         .bind(limit)
         .fetch_all(pool)
@@ -309,17 +298,14 @@ pub async fn update_message(
     id: Uuid,
     content: &str,
 ) -> Result<MessageRow, sqlx::Error> {
-    sqlx::query_as::<_, MessageRow>(
-        r#"
-        UPDATE messages SET
-            content = ?,
-            edited = true,
-            edited_at = CURRENT_TIMESTAMP,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-        RETURNING *
-        "#,
-    )
+    let q = format!(
+        "UPDATE messages SET \
+             content = $1, edited = true, \
+             edited_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP \
+         WHERE id = $2::uuid \
+         RETURNING {MESSAGE_COLS}"
+    );
+    sqlx::query_as::<_, MessageRow>(&q)
     .bind(content)
     .bind(id.to_string())
     .fetch_one(pool)
@@ -328,7 +314,7 @@ pub async fn update_message(
 
 /// Delete a single message.
 pub async fn delete_message(pool: &sqlx::AnyPool, id: Uuid) -> Result<bool, sqlx::Error> {
-    let result = sqlx::query("DELETE FROM messages WHERE id = ?")
+    let result = sqlx::query("DELETE FROM messages WHERE id = $1::uuid")
         .bind(id.to_string())
         .execute(pool)
         .await?;
@@ -339,7 +325,7 @@ pub async fn delete_message(pool: &sqlx::AnyPool, id: Uuid) -> Result<bool, sqlx
 pub async fn bulk_delete_messages(pool: &sqlx::AnyPool, ids: &[Uuid]) -> Result<u64, sqlx::Error> {
     let mut total: u64 = 0;
     for id in ids {
-        let result = sqlx::query("DELETE FROM messages WHERE id = ?")
+        let result = sqlx::query("DELETE FROM messages WHERE id = $1::uuid")
             .bind(id.to_string())
             .execute(pool)
             .await?;
@@ -350,9 +336,8 @@ pub async fn bulk_delete_messages(pool: &sqlx::AnyPool, ids: &[Uuid]) -> Result<
 
 /// Pin a message.
 pub async fn pin_message(pool: &sqlx::AnyPool, id: Uuid) -> Result<MessageRow, sqlx::Error> {
-    sqlx::query_as::<_, MessageRow>(
-        "UPDATE messages SET pinned = true, updated_at = CURRENT_TIMESTAMP WHERE id = ? RETURNING *",
-    )
+    let q = format!("UPDATE messages SET pinned = true, updated_at = CURRENT_TIMESTAMP WHERE id = $1::uuid RETURNING {MESSAGE_COLS}");
+    sqlx::query_as::<_, MessageRow>(&q)
     .bind(id.to_string())
     .fetch_one(pool)
     .await
@@ -360,9 +345,8 @@ pub async fn pin_message(pool: &sqlx::AnyPool, id: Uuid) -> Result<MessageRow, s
 
 /// Unpin a message.
 pub async fn unpin_message(pool: &sqlx::AnyPool, id: Uuid) -> Result<MessageRow, sqlx::Error> {
-    sqlx::query_as::<_, MessageRow>(
-        "UPDATE messages SET pinned = false, updated_at = CURRENT_TIMESTAMP WHERE id = ? RETURNING *",
-    )
+    let q = format!("UPDATE messages SET pinned = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1::uuid RETURNING {MESSAGE_COLS}");
+    sqlx::query_as::<_, MessageRow>(&q)
     .bind(id.to_string())
     .fetch_one(pool)
     .await
@@ -373,9 +357,8 @@ pub async fn get_pinned_messages(
     pool: &sqlx::AnyPool,
     channel_id: Uuid,
 ) -> Result<Vec<MessageRow>, sqlx::Error> {
-    sqlx::query_as::<_, MessageRow>(
-        "SELECT * FROM messages WHERE channel_id = ? AND pinned = true ORDER BY created_at DESC",
-    )
+    let q = format!("SELECT {MESSAGE_COLS} FROM messages WHERE channel_id = $1::uuid AND pinned = true ORDER BY created_at DESC");
+    sqlx::query_as::<_, MessageRow>(&q)
     .bind(channel_id.to_string())
     .fetch_all(pool)
     .await
@@ -392,15 +375,14 @@ pub async fn search_messages(
     let limit = limit.min(50).max(1);
 
     if let Some(cid) = channel_id {
-        sqlx::query_as::<_, MessageRow>(
-            r#"
-            SELECT * FROM messages
-            WHERE channel_id = ?
-              AND search_vector @@ plainto_tsquery('english', ?)
-            ORDER BY ts_rank(search_vector, plainto_tsquery('english', ?)) DESC, created_at DESC
-            LIMIT ? OFFSET ?
-            "#,
-        )
+        let q = format!(
+            "SELECT {MESSAGE_COLS} FROM messages \
+             WHERE channel_id = $1::uuid \
+               AND search_vector @@ plainto_tsquery('english', $2) \
+             ORDER BY ts_rank(search_vector, plainto_tsquery('english', $3)) DESC, created_at DESC \
+             LIMIT $4 OFFSET $5"
+        );
+        sqlx::query_as::<_, MessageRow>(&q)
         .bind(cid.to_string())
         .bind(query)
         .bind(query)
@@ -409,14 +391,13 @@ pub async fn search_messages(
         .fetch_all(pool)
         .await
     } else {
-        sqlx::query_as::<_, MessageRow>(
-            r#"
-            SELECT * FROM messages
-            WHERE search_vector @@ plainto_tsquery('english', ?)
-            ORDER BY ts_rank(search_vector, plainto_tsquery('english', ?)) DESC, created_at DESC
-            LIMIT ? OFFSET ?
-            "#,
-        )
+        let q = format!(
+            "SELECT {MESSAGE_COLS} FROM messages \
+             WHERE search_vector @@ plainto_tsquery('english', $1) \
+             ORDER BY ts_rank(search_vector, plainto_tsquery('english', $2)) DESC, created_at DESC \
+             LIMIT $3 OFFSET $4"
+        );
+        sqlx::query_as::<_, MessageRow>(&q)
         .bind(query)
         .bind(query)
         .bind(limit)
@@ -431,7 +412,7 @@ pub async fn count_channel_messages(
     pool: &sqlx::AnyPool,
     channel_id: Uuid,
 ) -> Result<i64, sqlx::Error> {
-    let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM messages WHERE channel_id = ?")
+    let row: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM messages WHERE channel_id = $1::uuid")
         .bind(channel_id.to_string())
         .fetch_one(pool)
         .await?;

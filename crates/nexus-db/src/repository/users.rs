@@ -4,6 +4,8 @@ use nexus_common::models::user::User;
 
 use uuid::Uuid;
 
+use crate::select_cols::USER_COLS;
+
 /// Create a new user account.
 pub async fn create_user(
     pool: &sqlx::AnyPool,
@@ -12,13 +14,12 @@ pub async fn create_user(
     email: Option<&str>,
     password_hash: &str,
 ) -> Result<User, sqlx::Error> {
-    sqlx::query_as::<_, User>(
-        r#"
-        INSERT INTO users (id, username, email, password_hash, presence, flags, created_at, updated_at)
-        VALUES (?, ?, ?, ?, 'offline', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        RETURNING *
-        "#,
-    )
+    let q = format!(
+        "INSERT INTO users (id, username, email, password_hash, presence, flags, created_at, updated_at) \
+         VALUES ($1::uuid, $2, $3, $4, 'offline', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) \
+         RETURNING {USER_COLS}"
+    );
+    sqlx::query_as::<_, User>(&q)
     .bind(id.to_string())
     .bind(username)
     .bind(email)
@@ -29,7 +30,8 @@ pub async fn create_user(
 
 /// Find a user by their unique ID.
 pub async fn find_by_id(pool: &sqlx::AnyPool, id: Uuid) -> Result<Option<User>, sqlx::Error> {
-    sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
+    let q = format!("SELECT {USER_COLS} FROM users WHERE id = $1::uuid");
+    sqlx::query_as::<_, User>(&q)
         .bind(id.to_string())
         .fetch_optional(pool)
         .await
@@ -37,7 +39,8 @@ pub async fn find_by_id(pool: &sqlx::AnyPool, id: Uuid) -> Result<Option<User>, 
 
 /// Find a user by username (case-insensitive).
 pub async fn find_by_username(pool: &sqlx::AnyPool, username: &str) -> Result<Option<User>, sqlx::Error> {
-    sqlx::query_as::<_, User>("SELECT * FROM users WHERE LOWER(username) = LOWER(?)")
+    let q = format!("SELECT {USER_COLS} FROM users WHERE LOWER(username) = LOWER($1)");
+    sqlx::query_as::<_, User>(&q)
         .bind(username)
         .fetch_optional(pool)
         .await
@@ -45,7 +48,8 @@ pub async fn find_by_username(pool: &sqlx::AnyPool, username: &str) -> Result<Op
 
 /// Find a user by email.
 pub async fn find_by_email(pool: &sqlx::AnyPool, email: &str) -> Result<Option<User>, sqlx::Error> {
-    sqlx::query_as::<_, User>("SELECT * FROM users WHERE LOWER(email) = LOWER(?)")
+    let q = format!("SELECT {USER_COLS} FROM users WHERE LOWER(email) = LOWER($1)");
+    sqlx::query_as::<_, User>(&q)
         .bind(email)
         .fetch_optional(pool)
         .await
@@ -60,23 +64,22 @@ pub async fn update_user(
     bio: Option<&str>,
     status: Option<&str>,
 ) -> Result<User, sqlx::Error> {
-    sqlx::query_as::<_, User>(
-        r#"
-        UPDATE users SET
-            username = COALESCE(?, username),
-            display_name = COALESCE(?, display_name),
-            bio = COALESCE(?, bio),
-            status = COALESCE(?, status),
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-        RETURNING *
-        "#,
-    )
-    .bind(id.to_string())
+    let q = format!(
+        "UPDATE users SET \
+             username = COALESCE($1, username), \
+             display_name = COALESCE($2, display_name), \
+             bio = COALESCE($3, bio), \
+             status = COALESCE($4, status), \
+             updated_at = CURRENT_TIMESTAMP \
+           WHERE id = $5::uuid \
+           RETURNING {USER_COLS}"
+    );
+    sqlx::query_as::<_, User>(&q)
     .bind(username)
     .bind(display_name)
     .bind(bio)
     .bind(status)
+    .bind(id.to_string())
     .fetch_one(pool)
     .await
 }
@@ -87,9 +90,9 @@ pub async fn update_presence(
     id: Uuid,
     presence: &str,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE users SET presence = ?::user_presence WHERE id = ?")
-        .bind(id.to_string())
+    sqlx::query("UPDATE users SET presence = $1::user_presence WHERE id = $2::uuid")
         .bind(presence)
+        .bind(id.to_string())
         .execute(pool)
         .await?;
     Ok(())
@@ -103,7 +106,7 @@ pub async fn soft_delete_user(pool: &sqlx::AnyPool, id: Uuid) -> Result<(), sqlx
             flags = flags | (1 << 5),
             email = NULL,
             updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
+        WHERE id = $1::uuid
         "#,
     )
     .bind(id.to_string())

@@ -12,6 +12,7 @@ pub mod postgres;
 pub mod redis_pool;
 pub mod repository;
 pub mod search;
+pub mod select_cols;
 pub mod storage;
 
 use anyhow::Result;

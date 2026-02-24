@@ -268,6 +268,21 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
                                     server_ids,
                                 ).await;
 
+                                // Mark user online now that the session is registered
+                                let _ = nexus_db::repository::users::update_presence(
+                                    &state.db.pool, uid, "online",
+                                ).await;
+                                let _ = state.broadcast.send(GatewayEvent {
+                                    event_type: "PRESENCE_UPDATE".into(),
+                                    data: serde_json::json!({
+                                        "user_id": uid,
+                                        "status": "online",
+                                    }),
+                                    server_id: None,
+                                    channel_id: None,
+                                    user_id: Some(uid),
+                                });
+
                                 // Send READY directly (not via broadcast)
                                 let _ = direct_tx.send(serde_json::json!({
                                     "op": "Ready",

@@ -33,7 +33,7 @@ fn row_to_webhook(row: &sqlx::any::AnyRow) -> Webhook {
 }
 
 pub async fn get_webhook(pool: &sqlx::AnyPool, webhook_id: Uuid) -> Result<Option<Webhook>> {
-    let row = sqlx::query("SELECT * FROM webhooks WHERE id = ?")
+    let row = sqlx::query("SELECT * FROM webhooks WHERE id = $1")
         .bind(webhook_id.to_string())
         .fetch_optional(pool)
         .await?;
@@ -45,7 +45,7 @@ pub async fn get_webhook_by_token(
     webhook_id: Uuid,
     token: &str,
 ) -> Result<Option<Webhook>> {
-    let row = sqlx::query("SELECT * FROM webhooks WHERE id = ? AND token = ?")
+    let row = sqlx::query("SELECT * FROM webhooks WHERE id = $1 AND token = $2")
         .bind(webhook_id.to_string())
         .bind(token)
         .fetch_optional(pool)
@@ -55,7 +55,7 @@ pub async fn get_webhook_by_token(
 
 pub async fn get_channel_webhooks(pool: &sqlx::AnyPool, channel_id: Uuid) -> Result<Vec<Webhook>> {
     let rows = sqlx::query(
-        "SELECT * FROM webhooks WHERE channel_id = ? ORDER BY created_at DESC",
+        "SELECT * FROM webhooks WHERE channel_id = $1 ORDER BY created_at DESC",
     )
     .bind(channel_id.to_string())
     .fetch_all(pool)
@@ -65,7 +65,7 @@ pub async fn get_channel_webhooks(pool: &sqlx::AnyPool, channel_id: Uuid) -> Res
 
 pub async fn get_server_webhooks(pool: &sqlx::AnyPool, server_id: Uuid) -> Result<Vec<Webhook>> {
     let rows = sqlx::query(
-        "SELECT * FROM webhooks WHERE server_id = ? ORDER BY created_at DESC",
+        "SELECT * FROM webhooks WHERE server_id = $1 ORDER BY created_at DESC",
     )
     .bind(server_id.to_string())
     .fetch_all(pool)
@@ -86,7 +86,7 @@ pub async fn create_incoming_webhook(
     let row = sqlx::query(
         r#"INSERT INTO webhooks
                (id, server_id, channel_id, creator_id, name, avatar, token, webhook_type)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'incoming')
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'incoming')
            RETURNING *"#,
     )
     .bind(id.to_string())
@@ -115,7 +115,7 @@ pub async fn create_outgoing_webhook(
     let row = sqlx::query(
         r#"INSERT INTO webhooks
                (id, server_id, creator_id, name, url, events, avatar, webhook_type)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'outgoing')
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'outgoing')
            RETURNING *"#,
     )
     .bind(id.to_string())
@@ -143,14 +143,14 @@ pub async fn update_webhook(
     let events_json = events.map(|e| serde_json::to_string(e).unwrap_or_default());
     let row = sqlx::query(
         r#"UPDATE webhooks SET
-               name       = COALESCE(?, name),
-               avatar     = COALESCE(?, avatar),
-               channel_id = COALESCE(?, channel_id),
-               url        = COALESCE(?, url),
-               events     = COALESCE(?, events),
-               active     = COALESCE(?, active),
+               name       = COALESCE($1, name),
+               avatar     = COALESCE($2, avatar),
+               channel_id = COALESCE($3, channel_id),
+               url        = COALESCE($4, url),
+               events     = COALESCE($5, events),
+               active     = COALESCE($6, active),
                updated_at = CURRENT_TIMESTAMP
-           WHERE id = ?
+           WHERE id = $7
            RETURNING *"#,
     )
     .bind(name)
@@ -166,7 +166,7 @@ pub async fn update_webhook(
 }
 
 pub async fn delete_webhook(pool: &sqlx::AnyPool, webhook_id: Uuid) -> Result<bool> {
-    let result = sqlx::query("DELETE FROM webhooks WHERE id = ?")
+    let result = sqlx::query("DELETE FROM webhooks WHERE id = $1")
         .bind(webhook_id.to_string())
         .execute(pool)
         .await?;

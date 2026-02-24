@@ -1,12 +1,14 @@
 import { useState, KeyboardEvent } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { useStore } from "../store";
 import clsx from "clsx";
 
 export default function ChannelList() {
-  const { channels, activeChannelId, setActiveChannel, activeServerId, servers, createChannel, unreadChannels } =
+  const { channels, activeChannelId, setActiveChannel, activeServerId, servers, createChannel, unreadChannels,
+    isHomeMode, dmChannels } =
     useStore();
   const navigate = useNavigate();
+  const location = useLocation();
   const { channelId } = useParams();
 
   const [creatingType, setCreatingType] = useState<"text" | "voice" | null>(null);
@@ -60,6 +62,76 @@ export default function ChannelList() {
     if (e.key === "Enter") confirmCreate();
     if (e.key === "Escape") cancelCreate();
   };
+
+  if (isHomeMode) {
+    return (
+      <div className="w-56 bg-bg-800 flex flex-col shrink-0 overflow-hidden border-r border-bg-600/40">
+        {/* Header */}
+        <div className="px-3 py-3 font-semibold text-sm text-fg no-select shrink-0 flex items-center gap-2">
+          <div className="w-5 h-5 rounded bg-accent-500/20 flex items-center justify-center shrink-0">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" className="text-accent-400">
+              <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+            </svg>
+          </div>
+          <span className="truncate">Friends</span>
+        </div>
+
+        <div className="h-px bg-bg-600/40 mx-3 shrink-0" />
+
+        <div className="flex-1 overflow-y-auto px-2 py-2 flex flex-col gap-px">
+          {/* Friends nav item */}
+          <button
+            onClick={() => navigate("/home")}
+            className={clsx(
+              "channel-item w-full text-left",
+              location.pathname === "/home" && "active"
+            )}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className="shrink-0 opacity-60">
+              <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+            </svg>
+            <span className="truncate text-sm flex-1">Friends</span>
+          </button>
+
+          {/* DM channels */}
+          {dmChannels.length > 0 && (
+            <>
+              <div className="h-px bg-bg-600/40 mx-2 my-1.5" />
+              <p className="text-[10px] text-muted/60 uppercase tracking-widest font-medium px-2 py-1 select-none">
+                Direct Messages
+              </p>
+              {dmChannels.map((dm) => {
+                const name =
+                  dm.name ??
+                  (dm.recipients.length > 0
+                    ? dm.recipients.map((r) => r.username).join(", ")
+                    : "Direct Message");
+                const initials = name.slice(0, 2).toUpperCase();
+                return (
+                  <button
+                    key={dm.id}
+                    onClick={() => {
+                      setActiveChannel(dm.id);
+                      navigate(`/channel/${dm.id}`);
+                    }}
+                    className={clsx(
+                      "channel-item w-full text-left",
+                      activeChannelId === dm.id && "active"
+                    )}
+                  >
+                    <div className="w-5 h-5 rounded-full bg-accent-500/30 flex items-center justify-center text-[9px] font-bold text-accent-300 shrink-0">
+                      {initials}
+                    </div>
+                    <span className="truncate text-sm flex-1">{name}</span>
+                  </button>
+                );
+              })}
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (!activeServerId) {
     return (

@@ -96,19 +96,24 @@ async fn run_server(
     if lite {
         // SQLite database in current directory
         if std::env::var("DATABASE_URL").is_err() {
-            std::env::set_var("DATABASE_URL", "sqlite://nexus.db?mode=rwc");
+            // SAFETY: single-threaded startup; no other threads are reading env yet.
+            unsafe { std::env::set_var("DATABASE_URL", "sqlite://nexus.db?mode=rwc") };
         }
         // Auto-generate JWT secret on first run and store in NEXUS_JWT_SECRET
         if std::env::var("JWT_SECRET").is_err() {
             let secret = generate_or_load_lite_secret("nexus.toml")?;
-            std::env::set_var("JWT_SECRET", secret);
+            // SAFETY: single-threaded startup; no other threads are reading env yet.
+            unsafe { std::env::set_var("JWT_SECRET", secret) };
         }
         // Public file URL for local uploads
         if std::env::var("NEXUS_PUBLIC_URL").is_err() {
-            std::env::set_var(
-                "NEXUS_PUBLIC_URL",
-                format!("http://127.0.0.1:{port}"),
-            );
+            // SAFETY: single-threaded startup; no other threads are reading env yet.
+            unsafe {
+                std::env::set_var(
+                    "NEXUS_PUBLIC_URL",
+                    format!("http://127.0.0.1:{port}"),
+                )
+            };
         }
     }
 

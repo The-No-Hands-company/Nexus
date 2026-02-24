@@ -27,7 +27,11 @@ export function useGateway() {
   useEffect(() => {
     if (!session) return;
 
+    // Prevents onclose from scheduling a reconnect after intentional cleanup
+    let destroyed = false;
+
     const connect = () => {
+      if (destroyed) return;
       // Gateway runs on port 8081 with path /gateway.
       // Replace port 8080 (API) with 8081, or append :8081 if no port present.
       const wsBase = session.serverUrl
@@ -96,6 +100,7 @@ export function useGateway() {
       };
 
       ws.onclose = () => {
+        if (destroyed) return; // intentional cleanup — don't reconnect
         console.log("[gateway] closed, reconnecting in 3s");
         if (heartbeatTimer.current) clearInterval(heartbeatTimer.current);
         reconnectTimer.current = setTimeout(connect, 3000);
@@ -170,6 +175,7 @@ export function useGateway() {
     connect();
 
     return () => {
+      destroyed = true;
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       if (heartbeatTimer.current) clearInterval(heartbeatTimer.current);
       wsRef.current?.close();

@@ -4,19 +4,20 @@ use nexus_common::models::member::Member;
 
 use uuid::Uuid;
 
+use crate::select_cols::MEMBER_COLS;
+
 /// Add a user as a member of a server.
 pub async fn add_member(
     pool: &sqlx::AnyPool,
     user_id: Uuid,
     server_id: Uuid,
 ) -> Result<Member, sqlx::Error> {
-    sqlx::query_as::<_, Member>(
-        r#"
-        INSERT INTO members (user_id, server_id, roles, muted, deafened, joined_at)
-        VALUES (?, ?, ARRAY[]::UUID[], false, false, CURRENT_TIMESTAMP)
-        RETURNING *
-        "#,
-    )
+    let q = format!(
+        "INSERT INTO members (user_id, server_id, roles, muted, deafened, joined_at) \
+         VALUES ($1::uuid, $2::uuid, ARRAY[]::UUID[], false, false, CURRENT_TIMESTAMP) \
+         RETURNING {MEMBER_COLS}"
+    );
+    sqlx::query_as::<_, Member>(&q)
     .bind(user_id.to_string())
     .bind(server_id.to_string())
     .fetch_one(pool)
@@ -29,7 +30,7 @@ pub async fn remove_member(
     user_id: Uuid,
     server_id: Uuid,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("DELETE FROM members WHERE user_id = ? AND server_id = ?")
+    sqlx::query("DELETE FROM members WHERE user_id = $1::uuid AND server_id = $2::uuid")
         .bind(user_id.to_string())
         .bind(server_id.to_string())
         .execute(pool)
@@ -43,9 +44,8 @@ pub async fn find_member(
     user_id: Uuid,
     server_id: Uuid,
 ) -> Result<Option<Member>, sqlx::Error> {
-    sqlx::query_as::<_, Member>(
-        "SELECT * FROM members WHERE user_id = ? AND server_id = ?",
-    )
+    let q = format!("SELECT {MEMBER_COLS} FROM members WHERE user_id = $1::uuid AND server_id = $2::uuid");
+    sqlx::query_as::<_, Member>(&q)
     .bind(user_id.to_string())
     .bind(server_id.to_string())
     .fetch_optional(pool)
@@ -59,14 +59,13 @@ pub async fn list_members(
     limit: i64,
     offset: i64,
 ) -> Result<Vec<Member>, sqlx::Error> {
-    sqlx::query_as::<_, Member>(
-        r#"
-        SELECT * FROM members
-        WHERE server_id = ?
-        ORDER BY joined_at
-        LIMIT ? OFFSET ?
-        "#,
-    )
+    let q = format!(
+        "SELECT {MEMBER_COLS} FROM members \
+         WHERE server_id = $1::uuid \
+         ORDER BY joined_at \
+         LIMIT $2 OFFSET $3"
+    );
+    sqlx::query_as::<_, Member>(&q)
     .bind(server_id.to_string())
     .bind(limit)
     .bind(offset)
@@ -81,10 +80,10 @@ pub async fn update_nickname(
     server_id: Uuid,
     nickname: Option<&str>,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE members SET nickname = ? WHERE user_id = ? AND server_id = ?")
+    sqlx::query("UPDATE members SET nickname = $1 WHERE user_id = $2::uuid AND server_id = $3::uuid")
+        .bind(nickname)
         .bind(user_id.to_string())
         .bind(server_id.to_string())
-        .bind(nickname)
         .execute(pool)
         .await?;
     Ok(())
@@ -98,11 +97,11 @@ pub async fn add_role(
     role_id: Uuid,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "UPDATE members SET roles = array_append(roles, ?) WHERE user_id = ? AND server_id = ? AND NOT (? = ANY(roles))",
+        "UPDATE members SET roles = array_append(roles, $1::uuid) WHERE user_id = $2::uuid AND server_id = $3::uuid AND NOT ($1::uuid = ANY(roles))",
     )
+    .bind(role_id.to_string())
     .bind(user_id.to_string())
     .bind(server_id.to_string())
-    .bind(role_id.to_string())
     .execute(pool)
     .await?;
     Ok(())
@@ -116,11 +115,11 @@ pub async fn remove_role(
     role_id: Uuid,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "UPDATE members SET roles = array_remove(roles, ?) WHERE user_id = ? AND server_id = ?",
+        "UPDATE members SET roles = array_remove(roles, $1::uuid) WHERE user_id = $2::uuid AND server_id = $3::uuid",
     )
+    .bind(role_id.to_string())
     .bind(user_id.to_string())
     .bind(server_id.to_string())
-    .bind(role_id.to_string())
     .execute(pool)
     .await?;
     Ok(())
@@ -133,7 +132,7 @@ pub async fn is_member(
     server_id: Uuid,
 ) -> Result<bool, sqlx::Error> {
     let result: (bool,) = sqlx::query_as(
-        "SELECT EXISTS(SELECT 1 FROM members WHERE user_id = ? AND server_id = ?)",
+        "SELECT EXISTS(SELECT 1 FROM members WHERE user_id = $1::uuid AND server_id = $2::uuid)",
     )
     .bind(user_id.to_string())
     .bind(server_id.to_string())

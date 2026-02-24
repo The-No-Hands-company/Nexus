@@ -8,6 +8,7 @@ import ChannelList from "../components/ChannelList";
 import ChatView from "../components/ChatView";
 import VoiceChannel from "../components/VoiceChannel";
 import SettingsPage from "./Settings";
+import FriendsPanel from "../components/FriendsPanel";
 
 export default function MainLayout() {
   const { loadServers, activeServerId, loadChannels } = useStore();
@@ -39,6 +40,7 @@ export default function MainLayout() {
       <div className="flex flex-col flex-1 overflow-hidden">
         <Routes>
           <Route path="/" element={<div className="flex-1 flex items-center justify-center text-muted text-sm">Select a channel</div>} />
+          <Route path="/home" element={<FriendsPanel />} />
           <Route path="/channel/:channelId" element={<ChatView />} />
           <Route path="/voice/:channelId" element={<VoiceChannel />} />
           <Route path="/settings" element={<SettingsPage />} />

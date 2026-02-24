@@ -42,7 +42,7 @@ pub async fn add_reaction(
     let result = sqlx::query(
         r#"
         INSERT INTO reactions (message_id, user_id, emoji, created_at)
-        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
         ON CONFLICT (message_id, user_id, emoji) DO NOTHING
         "#,
     )
@@ -62,7 +62,7 @@ pub async fn remove_reaction(
     emoji: &str,
 ) -> Result<bool, sqlx::Error> {
     let result = sqlx::query(
-        "DELETE FROM reactions WHERE message_id = ? AND user_id = ? AND emoji = ?",
+        "DELETE FROM reactions WHERE message_id = $1 AND user_id = $2 AND emoji = $3",
     )
     .bind(message_id.to_string())
     .bind(user_id.to_string())
@@ -79,7 +79,7 @@ pub async fn remove_all_reactions_for_emoji(
     emoji: &str,
 ) -> Result<u64, sqlx::Error> {
     let result = sqlx::query(
-        "DELETE FROM reactions WHERE message_id = ? AND emoji = ?",
+        "DELETE FROM reactions WHERE message_id = $1 AND emoji = $2",
     )
     .bind(message_id.to_string())
     .bind(emoji)
@@ -93,7 +93,7 @@ pub async fn remove_all_reactions(
     pool: &sqlx::AnyPool,
     message_id: Uuid,
 ) -> Result<u64, sqlx::Error> {
-    let result = sqlx::query("DELETE FROM reactions WHERE message_id = ?")
+    let result = sqlx::query("DELETE FROM reactions WHERE message_id = $1")
         .bind(message_id.to_string())
         .execute(pool)
         .await?;
@@ -109,7 +109,7 @@ pub async fn get_reaction_counts(
         r#"
         SELECT emoji, COUNT(*) as count
         FROM reactions
-        WHERE message_id = ?
+        WHERE message_id = $1
         GROUP BY emoji
         ORDER BY MIN(created_at) ASC
         "#,
@@ -127,7 +127,7 @@ pub async fn has_user_reacted(
     emoji: &str,
 ) -> Result<bool, sqlx::Error> {
     let row: (i64,) = sqlx::query_as(
-        "SELECT EXISTS(SELECT 1 FROM reactions WHERE message_id = ? AND user_id = ? AND emoji = ?) AS ex",
+        "SELECT EXISTS(SELECT 1 FROM reactions WHERE message_id = $1 AND user_id = $2 AND emoji = $3) AS ex",
     )
     .bind(message_id.to_string())
     .bind(user_id.to_string())
@@ -147,9 +147,9 @@ pub async fn get_reactors(
     let rows: Vec<(String,)> = sqlx::query_as(
         r#"
         SELECT user_id FROM reactions
-        WHERE message_id = ? AND emoji = ?
+        WHERE message_id = $1 AND emoji = $2
         ORDER BY created_at ASC
-        LIMIT ?
+        LIMIT $3
         "#,
     )
     .bind(message_id.to_string())

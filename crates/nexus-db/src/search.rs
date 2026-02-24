@@ -318,7 +318,7 @@ impl SearchClient {
                 );
             } else {
                 sqlx::query(
-                    "UPDATE search_sync_queue SET processed = true WHERE id = ?",
+                    "UPDATE search_sync_queue SET processed = true WHERE id = $1",
                 )
                 .bind(row.id)
                 .execute(pool)
@@ -340,7 +340,7 @@ impl SearchClient {
         sqlx::query(
             r#"
             INSERT INTO search_sync_queue (operation, index_name, document_id, payload)
-            VALUES ('index', 'messages', ?, ?)
+            VALUES ('index', 'messages', $1, $2)
             "#,
         )
         .bind(message_id.to_string())
@@ -356,7 +356,7 @@ impl SearchClient {
         sqlx::query(
             r#"
             INSERT INTO search_sync_queue (operation, index_name, document_id)
-            VALUES ('delete', 'messages', ?)
+            VALUES ('delete', 'messages', $1)
             "#,
         )
         .bind(message_id.to_string())

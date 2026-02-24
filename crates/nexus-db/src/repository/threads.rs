@@ -37,8 +37,8 @@ pub async fn create_thread(
             archived, locked, tags,
             created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, 0, 1, ?, false, false, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        RETURNING *, ? AS parent_channel_id
+        VALUES ($1, $2, $3, $4, 0, 1, $5, false, false, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        RETURNING *, $7 AS parent_channel_id
         "#,
     )
     .bind(channel_id.to_string())
@@ -63,7 +63,7 @@ pub async fn find_by_id(pool: &sqlx::AnyPool, channel_id: Uuid) -> Result<Option
         SELECT t.*, c.parent_id AS parent_channel_id
         FROM threads t
         JOIN channels c ON c.id = t.channel_id
-        WHERE t.channel_id = ?
+        WHERE t.channel_id = $1
         "#,
     )
     .bind(channel_id.to_string())
@@ -82,11 +82,11 @@ pub async fn list_active(
         SELECT t.*, c.parent_id AS parent_channel_id
         FROM threads t
         JOIN channels c ON c.id = t.channel_id
-        WHERE c.parent_id = ?
+        WHERE c.parent_id = $1
           AND t.archived = false
           AND t.locked = false
         ORDER BY t.updated_at DESC
-        LIMIT ?
+        LIMIT $2
         "#,
     )
     .bind(parent_channel_id.to_string())
@@ -108,11 +108,11 @@ pub async fn list_archived(
             SELECT t.*, c.parent_id AS parent_channel_id
             FROM threads t
             JOIN channels c ON c.id = t.channel_id
-            WHERE c.parent_id = ?
+            WHERE c.parent_id = $1
               AND t.archived = true
-              AND t.archived_at < ?
+              AND t.archived_at < $2
             ORDER BY t.archived_at DESC
-            LIMIT ?
+            LIMIT $3
             "#,
         )
         .bind(parent_channel_id.to_string())
@@ -126,10 +126,10 @@ pub async fn list_archived(
             SELECT t.*, c.parent_id AS parent_channel_id
             FROM threads t
             JOIN channels c ON c.id = t.channel_id
-            WHERE c.parent_id = ?
+            WHERE c.parent_id = $1
               AND t.archived = true
             ORDER BY t.archived_at DESC
-            LIMIT ?
+            LIMIT $2
             "#,
         )
         .bind(parent_channel_id.to_string())
@@ -167,15 +167,15 @@ pub async fn update_thread(
             r#"
             UPDATE threads
             SET
-                title = COALESCE(?, title),
-                archived = COALESCE(?, archived),
+                title = COALESCE($1, title),
+                archived = COALESCE($2, archived),
                 {archived_at_clause}
-                locked = COALESCE(?, locked),
-                auto_archive_minutes = COALESCE(?, auto_archive_minutes),
-                tags = COALESCE(?, tags),
+                locked = COALESCE($3, locked),
+                auto_archive_minutes = COALESCE($4, auto_archive_minutes),
+                tags = COALESCE($5, tags),
                 updated_at = CURRENT_TIMESTAMP
-            WHERE channel_id = ?
-            RETURNING *, (SELECT parent_id FROM channels WHERE id = ?) AS parent_channel_id
+            WHERE channel_id = $6
+            RETURNING *, (SELECT parent_id FROM channels WHERE id = $7) AS parent_channel_id
             "#
         ),
     )
@@ -195,7 +195,7 @@ pub async fn update_thread(
 /// Increment the thread message count.
 pub async fn increment_message_count(pool: &sqlx::AnyPool, channel_id: Uuid) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "UPDATE threads SET message_count = message_count + 1, updated_at = CURRENT_TIMESTAMP WHERE channel_id = ?",
+        "UPDATE threads SET message_count = message_count + 1, updated_at = CURRENT_TIMESTAMP WHERE channel_id = $1",
     )
     .bind(channel_id.to_string())
     .execute(pool)
@@ -212,7 +212,7 @@ pub async fn add_member(pool: &sqlx::AnyPool, thread_id: Uuid, user_id: Uuid) ->
     sqlx::query(
         r#"
         INSERT INTO thread_members (thread_id, user_id, joined_at)
-        VALUES (?, ?, CURRENT_TIMESTAMP)
+        VALUES ($1, $2, CURRENT_TIMESTAMP)
         ON CONFLICT (thread_id, user_id) DO NOTHING
         "#,
     )
@@ -225,9 +225,9 @@ pub async fn add_member(pool: &sqlx::AnyPool, thread_id: Uuid, user_id: Uuid) ->
     sqlx::query(
         r#"
         UPDATE threads
-        SET member_count = (SELECT COUNT(*) FROM thread_members WHERE thread_id = ?),
+        SET member_count = (SELECT COUNT(*) FROM thread_members WHERE thread_id = $1),
             updated_at = CURRENT_TIMESTAMP
-        WHERE channel_id = ?
+        WHERE channel_id = $2
         "#,
     )
     .bind(thread_id.to_string())
@@ -245,7 +245,7 @@ pub async fn remove_member(
     user_id: Uuid,
 ) -> Result<bool, sqlx::Error> {
     let result = sqlx::query(
-        "DELETE FROM thread_members WHERE thread_id = ? AND user_id = ?",
+        "DELETE FROM thread_members WHERE thread_id = $1 AND user_id = $2",
     )
     .bind(thread_id.to_string())
     .bind(user_id.to_string())
@@ -256,9 +256,9 @@ pub async fn remove_member(
         sqlx::query(
             r#"
             UPDATE threads
-            SET member_count = (SELECT COUNT(*) FROM thread_members WHERE thread_id = ?),
+            SET member_count = (SELECT COUNT(*) FROM thread_members WHERE thread_id = $1),
                 updated_at = CURRENT_TIMESTAMP
-            WHERE channel_id = ?
+            WHERE channel_id = $2
             "#,
         )
         .bind(thread_id.to_string())
@@ -273,7 +273,7 @@ pub async fn remove_member(
 /// Check if a user is a member of a thread.
 pub async fn is_member(pool: &sqlx::AnyPool, thread_id: Uuid, user_id: Uuid) -> Result<bool, sqlx::Error> {
     let row = sqlx::query(
-        "SELECT 1 FROM thread_members WHERE thread_id = ? AND user_id = ?",
+        "SELECT 1 FROM thread_members WHERE thread_id = $1 AND user_id = $2",
     )
     .bind(thread_id.to_string())
     .bind(user_id.to_string())
@@ -288,7 +288,7 @@ pub async fn list_members(
     thread_id: Uuid,
 ) -> Result<Vec<uuid::Uuid>, sqlx::Error> {
     let rows = sqlx::query_as::<_, ThreadMemberRow>(
-        "SELECT user_id FROM thread_members WHERE thread_id = ? ORDER BY joined_at",
+        "SELECT user_id FROM thread_members WHERE thread_id = $1 ORDER BY joined_at",
     )
     .bind(thread_id.to_string())
     .fetch_all(pool)

@@ -1,13 +1,15 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useStore, Message } from "../store";
 import MessageInput from "./MessageInput";
+import MemberList from "./MemberList";
 import { formatDistanceToNow, format, isToday, isYesterday } from "date-fns";
 import clsx from "clsx";
 
 export default function ChatView() {
   const { channelId } = useParams<{ channelId: string }>();
-  const { messages, channels, session, loadMessages } = useStore();
+  const { messages, channels, session, loadMessages, activeServerId, isHomeMode } = useStore();
+  const [showMembers, setShowMembers] = useState(true);
 
   const msgs: Message[] = channelId ? (messages[channelId] ?? []) : [];
   const channel = channels.find((c) => c.id === channelId);
@@ -36,62 +38,87 @@ export default function ChatView() {
 
   if (!channelId) return null;
 
+  // Only show member list for server channels, not DMs
+  const isServerChannel = !!activeServerId && !isHomeMode;
+
   return (
-    <div className="flex flex-col h-full bg-bg-800">
-      {/* Channel header */}
-      <div className="h-12 px-4 flex items-center gap-2 border-b border-bg-600/50 shrink-0 no-select">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className="text-muted shrink-0">
-          <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/>
-        </svg>
-        <span className="font-semibold text-fg text-sm">{channel?.name}</span>
-        {channel?.isE2ee && (
-          <span className="text-xs bg-green-900/40 text-green-400 px-1.5 py-0.5 rounded font-medium">
-            E2EE
-          </span>
-        )}
+    <div className="flex h-full overflow-hidden bg-bg-800">
+      {/* Chat column */}
+      <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+        {/* Channel header */}
+        <div className="h-12 px-4 flex items-center gap-2 border-b border-bg-600/50 shrink-0 no-select">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className="text-muted shrink-0">
+            <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/>
+          </svg>
+          <span className="font-semibold text-fg text-sm flex-1">{channel?.name}</span>
+          {channel?.isE2ee && (
+            <span className="text-xs bg-green-900/40 text-green-400 px-1.5 py-0.5 rounded font-medium">
+              E2EE
+            </span>
+          )}
+          {isServerChannel && (
+            <button
+              onClick={() => setShowMembers((v) => !v)}
+              title={showMembers ? "Hide members" : "Show members"}
+              className={clsx(
+                "p-1.5 rounded transition-colors",
+                showMembers ? "text-fg bg-bg-600/60" : "text-muted hover:text-fg hover:bg-bg-700/60"
+              )}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/>
+              </svg>
+            </button>
+          )}
+        </div>
+
+        {/* Messages */}
+        <div
+          ref={containerRef}
+          onScroll={handleScroll}
+          className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-0.5"
+        >
+          {msgs.length === 0 && (
+            <p className="text-muted text-sm text-center mt-16">
+              No messages yet. Be the first!
+            </p>
+          )}
+          {msgs.map((msg, i) => {
+            const prevMsg = msgs[i - 1];
+            const grouped =
+              prevMsg?.authorId === msg.authorId &&
+              new Date(msg.createdAt).getTime() -
+                new Date(prevMsg.createdAt).getTime() <
+                5 * 60 * 1000;
+            // Date separator when the calendar day changes
+            const newDay = !prevMsg ||
+              new Date(msg.createdAt).toDateString() !== new Date(prevMsg.createdAt).toDateString();
+            return (
+              <>
+                {newDay && <DateSeparator key={`sep-${msg.id}`} date={new Date(msg.createdAt)} />}
+                <MessageRow
+                  key={msg.id}
+                  msg={msg}
+                  grouped={grouped && !newDay}
+                  isOwn={msg.authorId === session?.userId}
+                />
+              </>
+            );
+          })}
+          <div ref={bottomRef} />
+        </div>
+
+        {/* Typing bar */}
+        {channelId && <TypingBar channelId={channelId} />}
+
+        {/* Input */}
+        <MessageInput channelId={channelId} isE2ee={!!channel?.isE2ee} />
       </div>
 
-      {/* Messages */}
-      <div
-        ref={containerRef}
-        onScroll={handleScroll}
-        className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-0.5"
-      >
-        {msgs.length === 0 && (
-          <p className="text-muted text-sm text-center mt-16">
-            No messages yet. Be the first!
-          </p>
-        )}
-        {msgs.map((msg, i) => {
-          const prevMsg = msgs[i - 1];
-          const grouped =
-            prevMsg?.authorId === msg.authorId &&
-            new Date(msg.createdAt).getTime() -
-              new Date(prevMsg.createdAt).getTime() <
-              5 * 60 * 1000;
-          // Date separator when the calendar day changes
-          const newDay = !prevMsg ||
-            new Date(msg.createdAt).toDateString() !== new Date(prevMsg.createdAt).toDateString();
-          return (
-            <>
-              {newDay && <DateSeparator key={`sep-${msg.id}`} date={new Date(msg.createdAt)} />}
-              <MessageRow
-                key={msg.id}
-                msg={msg}
-                grouped={grouped && !newDay}
-                isOwn={msg.authorId === session?.userId}
-              />
-            </>
-          );
-        })}
-        <div ref={bottomRef} />
-      </div>
-
-      {/* Typing bar */}
-      {channelId && <TypingBar channelId={channelId} />}
-
-      {/* Input */}
-      <MessageInput channelId={channelId} isE2ee={!!channel?.isE2ee} />
+      {/* Member list sidebar */}
+      {isServerChannel && showMembers && (
+        <MemberList serverId={activeServerId!} />
+      )}
     </div>
   );
 }

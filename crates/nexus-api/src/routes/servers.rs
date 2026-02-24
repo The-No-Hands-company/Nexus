@@ -208,11 +208,49 @@ async fn delete_server(
 
 /// GET /api/v1/servers/:server_id/members
 async fn list_members(
+    Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
     Path(server_id): Path<Uuid>,
-) -> NexusResult<Json<Vec<nexus_common::models::member::MemberResponse>>> {
-    let members_list = members::list_members(&state.db.pool, server_id, 1000, 0).await?;
-    Ok(Json(members_list.into_iter().map(Into::into).collect()))
+) -> NexusResult<Json<serde_json::Value>> {
+    if !members::is_member(&state.db.pool, auth.user_id, server_id).await? {
+        return Err(NexusError::Forbidden);
+    }
+
+    let rows = sqlx::query(
+        "SELECT m.user_id::text AS user_id, m.nickname, \
+         COALESCE(array_to_json(m.roles), '[]'::json)::text AS roles, \
+         m.muted, m.deafened, m.joined_at::text AS joined_at, \
+         u.username, u.display_name, u.avatar, u.presence::text AS presence \
+         FROM members m \
+         JOIN users u ON u.id = m.user_id \
+         WHERE m.server_id = $1::uuid \
+         ORDER BY u.username \
+         LIMIT 500",
+    )
+    .bind(server_id.to_string())
+    .fetch_all(&state.db.pool)
+    .await?;
+
+    use sqlx::Row;
+    let members_json: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|row| {
+            serde_json::json!({
+                "user_id": row.try_get::<String, _>("user_id").unwrap_or_default(),
+                "nickname": row.try_get::<Option<String>, _>("nickname").unwrap_or(None),
+                "roles": row.try_get::<String, _>("roles").unwrap_or_else(|_| "[]".into()),
+                "muted": row.try_get::<bool, _>("muted").unwrap_or_default(),
+                "deafened": row.try_get::<bool, _>("deafened").unwrap_or_default(),
+                "joined_at": row.try_get::<String, _>("joined_at").unwrap_or_default(),
+                "username": row.try_get::<String, _>("username").unwrap_or_default(),
+                "display_name": row.try_get::<Option<String>, _>("display_name").unwrap_or(None),
+                "avatar": row.try_get::<Option<String>, _>("avatar").unwrap_or(None),
+                "presence": row.try_get::<String, _>("presence").unwrap_or_else(|_| "offline".into()),
+            })
+        })
+        .collect();
+
+    Ok(Json(serde_json::json!(members_json)))
 }
 
 /// POST /api/v1/servers/:server_id/join

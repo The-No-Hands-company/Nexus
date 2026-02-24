@@ -10,6 +10,7 @@ pub mod messages;
 pub mod plugins;
 pub mod reactions;
 pub mod read_states;
+pub mod relationships;
 pub mod roles;
 pub mod servers;
 pub mod slash_commands;

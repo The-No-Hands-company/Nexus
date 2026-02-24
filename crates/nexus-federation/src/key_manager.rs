@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use chrono::{Duration, Utc};
-use sqlx::{PgPool, Row as _};
+use sqlx::{AnyPool, Row as _};
 use tracing::{info, warn};
 
 use crate::{error::FederationError, keys::ServerKeyPair};
@@ -24,12 +24,12 @@ const KEY_TTL_DAYS: i64 = 90;
 /// Handles loading or provisioning this server's Ed25519 signing key from
 /// the `federation_keys` PostgreSQL table.
 pub struct KeyManager {
-    pool: PgPool,
+    pool: AnyPool,
 }
 
 impl KeyManager {
     /// Create a new `KeyManager` backed by the given connection pool.
-    pub fn new(pool: PgPool) -> Self {
+    pub fn new(pool: AnyPool) -> Self {
         Self { pool }
     }
 
@@ -74,13 +74,13 @@ impl KeyManager {
         sqlx::query(
             "INSERT INTO federation_keys \
              (key_id, seed_bytes, public_key_b64, expires_at, is_active) \
-             VALUES ($1, $2, $3, $4, TRUE) \
+             VALUES (?, ?, ?, ?, TRUE) \
              ON CONFLICT (key_id) DO NOTHING",
         )
         .bind(&kp.key_id)
         .bind(kp.seed_bytes().to_vec())
         .bind(kp.public_key_base64())
-        .bind(expires_at)
+        .bind(expires_at.to_rfc3339())
         .execute(&self.pool)
         .await
         .map_err(|e| FederationError::Other(anyhow!(e)))?;

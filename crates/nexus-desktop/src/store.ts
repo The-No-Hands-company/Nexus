@@ -56,6 +56,45 @@ export interface VoiceParticipant {
   avatar?: string;
 }
 
+export interface Relationship {
+  /** The other user's ID */
+  id: string;
+  direction: "incoming" | "outgoing";
+  status: "pending" | "accepted" | "blocked" | "denied";
+  user: {
+    id: string;
+    username: string;
+    displayName?: string;
+    avatar?: string;
+  };
+}
+
+export interface DmChannel {
+  id: string;
+  channelType: "dm" | "group_dm";
+  name?: string;
+  lastMessageId?: string;
+  recipients: {
+    id: string;
+    username: string;
+    displayName?: string;
+    avatar?: string;
+  }[];
+}
+
+export interface ServerMember {
+  userId: string;
+  username: string;
+  displayName?: string;
+  avatar?: string;
+  nickname?: string;
+  presence: "online" | "idle" | "do_not_disturb" | "invisible" | "offline";
+  joinedAt: string;
+  roles: string[];
+  muted: boolean;
+  deafened: boolean;
+}
+
 export interface UpdateInfo {
   version: string;
   body: string;
@@ -122,6 +161,21 @@ interface StoreState {
   loadChannels: (serverId: string) => Promise<void>;
   loadMessages: (channelId: string, before?: string) => Promise<void>;
   createChannel: (serverId: string, name: string, channelType: string) => Promise<Channel>;
+
+  // Home / Friends / DMs
+  isHomeMode: boolean;
+  setHomeMode: (v: boolean) => void;
+  relationships: Relationship[];
+  setRelationships: (rels: Relationship[]) => void;
+  dmChannels: DmChannel[];
+  setDmChannels: (dms: DmChannel[]) => void;
+  appendDmChannel: (dm: DmChannel) => void;
+  loadRelationships: () => Promise<void>;
+  loadDmChannels: () => Promise<void>;
+
+  // Server members — keyed by serverId
+  members: Record<string, ServerMember[]>;
+  loadMembers: (serverId: string) => Promise<void>;
 }
 
 // Module-level map so typing-clear timeouts survive re-renders
@@ -151,14 +205,21 @@ export const useStore = create<StoreState>((set, get) => ({
   // ─── Messages ─────────────────────────────────────────────────────────
   messages: {},
   appendMessage: (channelId, msg) =>
-    set((s) => ({
-      messages: {
-        ...s.messages,
-        [channelId]: [...(s.messages[channelId] ?? []), msg],
-      },      // Mark channel unread if the user isn't currently looking at it
-      unreadChannels: s.activeChannelId === channelId
-        ? s.unreadChannels
-        : { ...s.unreadChannels, [channelId]: true },    })),
+    set((s) => {
+      const existing = s.messages[channelId] ?? [];
+      // Dedup: if message already present (optimistic add + WS event), skip
+      if (existing.some((m) => m.id === msg.id)) return s;
+      return {
+        messages: {
+          ...s.messages,
+          [channelId]: [...existing, msg],
+        },
+        // Mark channel unread if the user isn't currently looking at it
+        unreadChannels: s.activeChannelId === channelId
+          ? s.unreadChannels
+          : { ...s.unreadChannels, [channelId]: true },
+      };
+    }),
   prependMessages: (channelId, msgs) =>
     set((s) => ({
       messages: {
@@ -279,6 +340,10 @@ export const useStore = create<StoreState>((set, get) => ({
       unreadChannels: {},
       activeServerId: null,
       activeChannelId: null,
+      isHomeMode: false,
+      relationships: [],
+      dmChannels: [],
+      members: {},
     });
   },
 
@@ -286,7 +351,17 @@ export const useStore = create<StoreState>((set, get) => ({
     try {
       const servers = await invoke<Server[]>("list_servers");
       set({ servers });
+      // Auto-select the first server if none is currently active
+      if (servers.length > 0 && !get().activeServerId) {
+        get().setActiveServer(servers[0].id);
+      }
     } catch (e) {
+      // If the token expired and couldn't be refreshed, force logout
+      if (e instanceof Error && e.message.startsWith("401:")) {
+        console.warn("Session expired — logging out");
+        get().logout();
+        return;
+      }
       console.error("loadServers error", e);
     }
   },
@@ -320,6 +395,61 @@ export const useStore = create<StoreState>((set, get) => ({
       }
     } catch (e) {
       console.error("loadMessages error", e);
+    }
+  },
+
+  // ─── Home / Friends / DMs ────────────────────────────────────────────
+  isHomeMode: false,
+  setHomeMode: (v) => set({ isHomeMode: v }),
+  relationships: [],
+  setRelationships: (rels) => set({ relationships: rels }),
+  dmChannels: [],
+  setDmChannels: (dms) => set({ dmChannels: dms }),
+  appendDmChannel: (dm) =>
+    set((s) => {
+      if (s.dmChannels.some((d) => d.id === dm.id)) return s;
+      return { dmChannels: [dm, ...s.dmChannels] };
+    }),
+
+  loadRelationships: async () => {
+    try {
+      const rels = await invoke<Relationship[]>("list_relationships");
+      set({ relationships: rels });
+    } catch (e) {
+      console.error("loadRelationships error", e);
+    }
+  },
+
+  loadDmChannels: async () => {
+    try {
+      const dms = await invoke<DmChannel[]>("list_dm_channels");
+      set({ dmChannels: dms });
+    } catch (e) {
+      console.error("loadDmChannels error", e);
+    }
+  },
+
+  // ─── Server members ───────────────────────────────────────────────────
+  members: {},
+  loadMembers: async (serverId: string) => {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const raw = await invoke<any[]>("list_members", { serverId });
+      const mapped: ServerMember[] = raw.map((m) => ({
+        userId: m.user_id,
+        username: m.username,
+        displayName: m.display_name ?? undefined,
+        avatar: m.avatar ?? undefined,
+        nickname: m.nickname ?? undefined,
+        presence: m.presence ?? "offline",
+        joinedAt: m.joined_at,
+        roles: [],
+        muted: m.muted ?? false,
+        deafened: m.deafened ?? false,
+      }));
+      set((s) => ({ members: { ...s.members, [serverId]: mapped } }));
+    } catch (e) {
+      console.error("loadMembers error", e);
     }
   },
 }));
