@@ -8,7 +8,7 @@ use axum::{
 };
 use nexus_common::{
     error::{NexusError, NexusResult},
-    models::server::{CreateServerRequest, ServerResponse, UpdateServerRequest},
+    models::server::{CreateServerRequest, Invite, ServerResponse, UpdateServerRequest},
     permissions::Permissions,
     snowflake,
     validation::validate_request,
@@ -27,10 +27,10 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/servers/{server_id}/members", get(list_members))
         .route("/servers/{server_id}/join", post(join_server))
         .route("/servers/{server_id}/leave", post(leave_server))
-        .route("/servers/{server_id}/invites", post(create_invite_route))
+        .route("/servers/{server_id}/invites", get(list_invites_route).post(create_invite_route))
         .route("/invites/{code}", get(get_invite_route))
         .route("/invites/{code}/join", post(join_via_invite_route))
-        .route_layer(middleware::from_fn(crate::middleware::auth_middleware))
+        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
 }
 
 /// Generate a short random alphanumeric invite code.
@@ -307,6 +307,25 @@ async fn leave_server(
 
     Ok(Json(serde_json::json!({ "left": true })))
 }
+/// GET /api/v1/servers/:server_id/invites — List active invites for a server.
+async fn list_invites_route(
+    Extension(auth): Extension<AuthContext>,
+    State(state): State<Arc<AppState>>,
+    Path(server_id): Path<Uuid>,
+) -> NexusResult<Json<Vec<Invite>>> {
+    let _server = servers::find_by_id(&state.db.pool, server_id)
+        .await?
+        .ok_or(NexusError::NotFound {
+            resource: "Server".into(),
+        })?;
+    let is_member = members::is_member(&state.db.pool, auth.user_id, server_id).await?;
+    if !is_member {
+        return Err(NexusError::Forbidden);
+    }
+    let invites = servers::list_server_invites(&state.db.pool, server_id).await?;
+    Ok(Json(invites))
+}
+
 /// POST /api/v1/servers/:server_id/invites
 async fn create_invite_route(
     Extension(auth): Extension<AuthContext>,

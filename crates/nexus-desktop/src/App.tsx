@@ -1,5 +1,5 @@
 import { Routes, Route, Navigate } from "react-router-dom";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useStore } from "./store";
 import { isTauri } from "./invoke";
@@ -10,9 +10,23 @@ import OverlayPage from "./pages/Overlay";
 import UpdateBanner from "./components/UpdateBanner";
 import ThemeProvider from "./themes/ThemeProvider";
 import PluginLoader from "./plugins/PluginLoader";
+import SearchModal from "./components/SearchModal";
 
 export default function App() {
   const { session, setUpdateAvailable } = useStore();
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  // Cmd+K / Ctrl+K global search shortcut
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        if (session) setSearchOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [session]);
 
   // Listen for update-available event from the Tauri updater plugin (Tauri only)
   useEffect(() => {
@@ -44,6 +58,9 @@ export default function App() {
 
       <div className="flex flex-col h-full">
         <UpdateBanner />
+        {searchOpen && session && (
+          <SearchModal onClose={() => setSearchOpen(false)} />
+        )}
         <div className="flex-1 overflow-hidden">
           <Routes>
             <Route

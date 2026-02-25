@@ -20,8 +20,8 @@ use nexus_common::{
     crypto::{validate_identity_key, validate_signature, validate_x25519_key},
     error::{NexusError, NexusResult},
     models::crypto::{
-        Device, KeyBundle, OtpkCountResponse, RegisterDeviceRequest, RotateSignedPreKeyRequest,
-        UploadOtpkRequest,
+        Device, E2eeSession, KeyBundle, OtpkCountResponse, RegisterDeviceRequest,
+        RotateSignedPreKeyRequest, UpdateSessionRequest, UploadOtpkRequest,
     },
 };
 use nexus_db::repository::keystore;
@@ -50,13 +50,22 @@ pub fn router() -> Router<Arc<AppState>> {
             "/devices/{device_id}/one-time-pre-keys/count",
             get(count_one_time_pre_keys),
         )
+        // Session management (double-ratchet state persistence + resumption)
+        .route(
+            "/devices/{device_id}/sessions",
+            get(list_sessions),
+        )
+        .route(
+            "/devices/{device_id}/sessions/{remote_device_id}",
+            get(get_session).put(put_session).delete(delete_session),
+        )
         // Key bundles (for X3DH initiators)
         .route("/users/{user_id}/key-bundle", get(get_all_key_bundles))
         .route(
             "/users/{user_id}/devices/{device_id}/key-bundle",
             get(get_device_key_bundle),
         )
-        .route_layer(middleware::from_fn(crate::middleware::auth_middleware))
+        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
 }
 
 // ============================================================
@@ -285,6 +294,126 @@ async fn count_one_time_pre_keys(
         .map_err(|e| NexusError::Internal(e))?;
 
     Ok(Json(OtpkCountResponse { device_id, remaining }))
+}
+
+// ============================================================
+// Session management — double-ratchet state persistence
+//
+// The server stores each device's ratchet state as an opaque blob that the
+// device encrypts locally (AES-256-GCM).  The server never reads it —
+// it only provides safe storage so clients can resume sessions on reinstall
+// or synchronise state across linked devices.
+// ============================================================
+
+/// GET /devices/:device_id/sessions — list all persisted sessions for this device.
+async fn list_sessions(
+    Extension(auth): Extension<AuthContext>,
+    State(state): State<Arc<AppState>>,
+    Path(device_id): Path<Uuid>,
+) -> NexusResult<Json<Vec<E2eeSession>>> {
+    // Caller must own the device.
+    let device = keystore::find_device(&state.db.pool, device_id)
+        .await
+        .map_err(|e| NexusError::Internal(e))?
+        .ok_or(NexusError::NotFound { resource: "Device".into() })?;
+    if device.user_id != auth.user_id {
+        return Err(NexusError::Forbidden);
+    }
+    keystore::touch_device(&state.db.pool, device_id)
+        .await
+        .map_err(|e| NexusError::Internal(e))?;
+    let sessions = keystore::list_sessions(&state.db.pool, device_id)
+        .await
+        .map_err(|e| NexusError::Internal(e))?;
+    Ok(Json(sessions))
+}
+
+/// GET /devices/:device_id/sessions/:remote_device_id — fetch session state for resumption.
+async fn get_session(
+    Extension(auth): Extension<AuthContext>,
+    State(state): State<Arc<AppState>>,
+    Path((device_id, remote_device_id)): Path<(Uuid, Uuid)>,
+) -> NexusResult<Json<E2eeSession>> {
+    let device = keystore::find_device(&state.db.pool, device_id)
+        .await
+        .map_err(|e| NexusError::Internal(e))?
+        .ok_or(NexusError::NotFound { resource: "Device".into() })?;
+    if device.user_id != auth.user_id {
+        return Err(NexusError::Forbidden);
+    }
+    let session = keystore::get_session(&state.db.pool, device_id, remote_device_id)
+        .await
+        .map_err(|e| NexusError::Internal(e))?
+        .ok_or(NexusError::NotFound { resource: "Session".into() })?;
+    Ok(Json(session))
+}
+
+/// PUT /devices/:device_id/sessions/:remote_device_id — persist ratchet state after
+/// each send or receive step.
+///
+/// Body: `{ "session_state": "<base64-encrypted-blob>", "ratchet_step": N }`
+///
+/// `session_state` is the client's ratchet state serialised and encrypted with its
+/// local storage key before upload.  The server stores but never inspects it.
+/// `ratchet_step` should be the client's local monotonic step counter.
+async fn put_session(
+    Extension(auth): Extension<AuthContext>,
+    State(state): State<Arc<AppState>>,
+    Path((device_id, remote_device_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<UpdateSessionRequest>,
+) -> NexusResult<Json<E2eeSession>> {
+    let device = keystore::find_device(&state.db.pool, device_id)
+        .await
+        .map_err(|e| NexusError::Internal(e))?
+        .ok_or(NexusError::NotFound { resource: "Device".into() })?;
+    if device.user_id != auth.user_id {
+        return Err(NexusError::Forbidden);
+    }
+    if body.session_state.is_empty() {
+        return Err(NexusError::Validation {
+            message: "session_state must not be empty".into(),
+        });
+    }
+    if body.ratchet_step < 0 {
+        return Err(NexusError::Validation {
+            message: "ratchet_step must be non-negative".into(),
+        });
+    }
+    // Verify remote device exists (prevents storing state for phantom devices).
+    keystore::find_device(&state.db.pool, remote_device_id)
+        .await
+        .map_err(|e| NexusError::Internal(e))?
+        .ok_or(NexusError::NotFound { resource: "RemoteDevice".into() })?;
+    let session = keystore::upsert_session(
+        &state.db.pool,
+        device_id,
+        remote_device_id,
+        &body.session_state,
+        body.ratchet_step,
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e))?;
+    Ok(Json(session))
+}
+
+/// DELETE /devices/:device_id/sessions/:remote_device_id — tear down a session
+/// (e.g. after a safety-number change or explicit session reset).
+async fn delete_session(
+    Extension(auth): Extension<AuthContext>,
+    State(state): State<Arc<AppState>>,
+    Path((device_id, remote_device_id)): Path<(Uuid, Uuid)>,
+) -> NexusResult<()> {
+    let device = keystore::find_device(&state.db.pool, device_id)
+        .await
+        .map_err(|e| NexusError::Internal(e))?
+        .ok_or(NexusError::NotFound { resource: "Device".into() })?;
+    if device.user_id != auth.user_id {
+        return Err(NexusError::Forbidden);
+    }
+    keystore::delete_session(&state.db.pool, device_id, remote_device_id)
+        .await
+        .map_err(|e| NexusError::Internal(e))?;
+    Ok(())
 }
 
 // ============================================================

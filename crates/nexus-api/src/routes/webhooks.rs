@@ -34,19 +34,19 @@ pub fn router() -> Router<Arc<AppState>> {
             "/channels/{channel_id}/webhooks",
             get(get_channel_webhooks)
                 .post(create_incoming_webhook)
-                .route_layer(middleware::from_fn(crate::middleware::auth_middleware)),
+                .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware)),
         )
         .route(
             "/servers/{server_id}/webhooks/outgoing",
             post(create_outgoing_webhook)
-                .route_layer(middleware::from_fn(crate::middleware::auth_middleware)),
+                .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware)),
         )
         .route(
             "/webhooks/{webhook_id}",
             get(get_webhook_authed)
                 .patch(modify_webhook)
                 .delete(delete_webhook)
-                .route_layer(middleware::from_fn(crate::middleware::auth_middleware)),
+                .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware)),
         )
         // Public execution URL — token in path, no Bearer required
         .route(

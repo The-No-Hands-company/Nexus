@@ -12,11 +12,65 @@ use nexus_common::{
     snowflake,
     validation::validate_request,
 };
-use nexus_db::repository::{channels, servers};
+use nexus_common::permissions::Permissions;
+use nexus_db::repository::{channels, members, roles, servers};
 use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{middleware::AuthContext, AppState};
+
+/// Verify that `user_id` holds `required` permission in a server.
+///
+/// Short-circuits for the server owner (always allowed). Otherwise resolves
+/// the member's role set, computes the effective permission bitfield, and
+/// checks the required bit (or ADMINISTRATOR).
+async fn require_server_permission(
+    pool: &sqlx::AnyPool,
+    server_id: Uuid,
+    server_owner_id: Uuid,
+    user_id: Uuid,
+    required: Permissions,
+) -> NexusResult<()> {
+    // Server owner always has all permissions.
+    if user_id == server_owner_id {
+        return Ok(());
+    }
+
+    // Caller must actually be a member of the server.
+    let member = members::find_member(pool, user_id, server_id)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?
+        .ok_or_else(|| NexusError::MissingPermission {
+            permission: format!("{required:?}"),
+        })?;
+
+    // Fetch every role defined in the server so we can look up permissions.
+    let all_server_roles = roles::list_server_roles(pool, server_id)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+
+    // Base: @everyone role permissions (is_default = true).
+    let base = all_server_roles
+        .iter()
+        .find(|r| r.is_default)
+        .map(|r| Permissions::from_bits_truncate(r.permissions))
+        .unwrap_or_else(Permissions::empty);
+
+    // OR in permissions from each role the member holds.
+    let effective = all_server_roles
+        .iter()
+        .filter(|r| !r.is_default && member.roles.contains(&r.id))
+        .map(|r| Permissions::from_bits_truncate(r.permissions))
+        .fold(base, |acc, rp| acc | rp);
+
+    if effective.has(required) {
+        Ok(())
+    } else {
+        Err(NexusError::MissingPermission {
+            permission: format!("{required:?}"),
+        })
+    }
+}
 
 /// Channel routes.
 pub fn router() -> Router<Arc<AppState>> {
@@ -27,7 +81,7 @@ pub fn router() -> Router<Arc<AppState>> {
             "/channels/{channel_id}",
             get(get_channel).patch(update_channel).delete(delete_channel),
         )
-        .route_layer(middleware::from_fn(crate::middleware::auth_middleware));
+        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware));
 
     Router::new().merge(authed)
 }
@@ -57,12 +111,14 @@ async fn create_channel(
             resource: "Server".into(),
         })?;
 
-    // For now, only owner can create channels (TODO: proper permission check)
-    if server.owner_id != auth.user_id {
-        return Err(NexusError::MissingPermission {
-            permission: "MANAGE_CHANNELS".into(),
-        });
-    }
+    require_server_permission(
+        &state.db.pool,
+        server_id,
+        server.owner_id,
+        auth.user_id,
+        Permissions::MANAGE_CHANNELS,
+    )
+    .await?;
 
     let channel_id = snowflake::generate_id();
     let channel_type_str = serde_json::to_value(&body.channel_type)
@@ -109,20 +165,38 @@ async fn get_channel(
 
 /// PATCH /api/v1/channels/:channel_id
 async fn update_channel(
-    Extension(_auth): Extension<AuthContext>,
+    Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
     Path(channel_id): Path<Uuid>,
     Json(body): Json<UpdateChannelRequest>,
 ) -> NexusResult<Json<nexus_common::models::channel::Channel>> {
     validate_request(&body)?;
 
-    let _channel = channels::find_by_id(&state.db.pool, channel_id)
+    let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
         .ok_or(NexusError::NotFound {
             resource: "Channel".into(),
         })?;
 
-    // TODO: proper permission check
+    // Resolve the server this channel belongs to so we can check permissions.
+    let server_id = channel.server_id.ok_or(NexusError::MissingPermission {
+        permission: "MANAGE_CHANNELS".into(),
+    })?;
+    let server = servers::find_by_id(&state.db.pool, server_id)
+        .await?
+        .ok_or(NexusError::NotFound {
+            resource: "Server".into(),
+        })?;
+
+    require_server_permission(
+        &state.db.pool,
+        server_id,
+        server.owner_id,
+        auth.user_id,
+        Permissions::MANAGE_CHANNELS,
+    )
+    .await?;
+
     let updated = channels::update_channel(
         &state.db.pool,
         channel_id,
@@ -139,11 +213,35 @@ async fn update_channel(
 
 /// DELETE /api/v1/channels/:channel_id
 async fn delete_channel(
-    Extension(_auth): Extension<AuthContext>,
+    Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
     Path(channel_id): Path<Uuid>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    // TODO: proper permission check
+    // Load the channel first so we can find its server and return 404 if missing.
+    let channel = channels::find_by_id(&state.db.pool, channel_id)
+        .await?
+        .ok_or(NexusError::NotFound {
+            resource: "Channel".into(),
+        })?;
+
+    let server_id = channel.server_id.ok_or(NexusError::MissingPermission {
+        permission: "MANAGE_CHANNELS".into(),
+    })?;
+    let server = servers::find_by_id(&state.db.pool, server_id)
+        .await?
+        .ok_or(NexusError::NotFound {
+            resource: "Server".into(),
+        })?;
+
+    require_server_permission(
+        &state.db.pool,
+        server_id,
+        server.owner_id,
+        auth.user_id,
+        Permissions::MANAGE_CHANNELS,
+    )
+    .await?;
+
     channels::delete_channel(&state.db.pool, channel_id).await?;
 
     tracing::info!(channel_id = %channel_id, "Channel deleted");

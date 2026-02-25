@@ -1,8 +1,19 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useStore } from "../store";
 import { invoke } from "../invoke";
 import ThemeSwitcher from "../themes/ThemeSwitcher";
 import type { PluginManifest } from "../plugins/types";
+import { formatDistanceToNow } from "date-fns";
+
+interface E2eeDevice {
+  id: string;
+  userId: string;
+  name: string;
+  deviceType: string;
+  lastSeenAt?: string;
+  verified: boolean;
+  createdAt: string;
+}
 
 export default function SettingsPage() {
   const { plugins, enabledPlugins, installPlugin, uninstallPlugin, togglePlugin, session, setSession } = useStore();
@@ -15,6 +26,49 @@ export default function SettingsPage() {
   const [avatarUrl, setAvatarUrl] = useState(session?.avatar ?? "");
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileMsg, setProfileMsg] = useState<string | null>(null);
+
+  // ── Notification preferences (persisted to localStorage) ──────────────────
+  const [notifEnabled, setNotifEnabled] = useState(
+    () => localStorage.getItem("nexus:notif:enabled") !== "false"
+  );
+  const [notifMentionsOnly, setNotifMentionsOnly] = useState(
+    () => localStorage.getItem("nexus:notif:mentionsOnly") === "true"
+  );
+  const [notifSound, setNotifSound] = useState(
+    () => localStorage.getItem("nexus:notif:sound") !== "false"
+  );
+  const toggleNotif = (key: string, value: boolean) => {
+    localStorage.setItem(`nexus:notif:${key}`, String(value));
+    if (key === "enabled") setNotifEnabled(value);
+    if (key === "mentionsOnly") setNotifMentionsOnly(value);
+    if (key === "sound") setNotifSound(value);
+  };
+
+  // ── Privacy preferences ────────────────────────────────────────────────────
+  const [privacyReadReceipts, setPrivacyReadReceipts] = useState(
+    () => localStorage.getItem("nexus:privacy:readReceipts") !== "false"
+  );
+  const [privacyOnlineStatus, setPrivacyOnlineStatus] = useState(
+    () => localStorage.getItem("nexus:privacy:onlineStatus") !== "false"
+  );
+  const togglePrivacy = (key: string, value: boolean) => {
+    localStorage.setItem(`nexus:privacy:${key}`, String(value));
+    if (key === "readReceipts") setPrivacyReadReceipts(value);
+    if (key === "onlineStatus") setPrivacyOnlineStatus(value);
+  };
+
+  // ── E2EE Devices ───────────────────────────────────────────────────────────
+  const [devices, setDevices] = useState<E2eeDevice[]>([]);
+  const [devicesLoading, setDevicesLoading] = useState(false);
+  const [devicesError, setDevicesError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!session) return;
+    setDevicesLoading(true);
+    invoke<E2eeDevice[]>("list_devices", {})
+      .then(setDevices)
+      .catch((e) => setDevicesError(String(e)))
+      .finally(() => setDevicesLoading(false));
+  }, [session]);
 
   const saveProfile = async () => {
     if (!session) return;
@@ -206,6 +260,138 @@ export default function SettingsPage() {
           </ul>
         )}
       </section>
+
+      {/* ── Notifications ──────────────────────────────── */}
+      <section className="mb-10">
+        <h2 className="text-base font-semibold mb-4 border-b border-bg-600 pb-2">Notifications</h2>
+        <div className="flex flex-col gap-4 max-w-md">
+          <ToggleRow
+            label="Enable notifications"
+            description="Show desktop notifications for new messages"
+            value={notifEnabled}
+            onChange={(v) => toggleNotif("enabled", v)}
+          />
+          <ToggleRow
+            label="Mentions only"
+            description="Only notify for @mentions and direct messages"
+            value={notifMentionsOnly}
+            onChange={(v) => toggleNotif("mentionsOnly", v)}
+          />
+          <ToggleRow
+            label="Notification sounds"
+            description="Play a sound when a notification arrives"
+            value={notifSound}
+            onChange={(v) => toggleNotif("sound", v)}
+          />
+        </div>
+      </section>
+
+      {/* ── Privacy ─────────────────────────────────────── */}
+      <section className="mb-10">
+        <h2 className="text-base font-semibold mb-4 border-b border-bg-600 pb-2">Privacy</h2>
+        <div className="flex flex-col gap-4 max-w-md">
+          <ToggleRow
+            label="Show online status"
+            description="Let others see when you are online"
+            value={privacyOnlineStatus}
+            onChange={(v) => togglePrivacy("onlineStatus", v)}
+          />
+          <ToggleRow
+            label="Read receipts"
+            description="Show others when you have read their messages"
+            value={privacyReadReceipts}
+            onChange={(v) => togglePrivacy("readReceipts", v)}
+          />
+        </div>
+      </section>
+
+      {/* ── Devices ─────────────────────────────────────── */}
+      <section className="mb-10">
+        <h2 className="text-base font-semibold mb-4 border-b border-bg-600 pb-2">Devices</h2>
+        {devicesError ? (
+          <p className="text-sm text-red-400">Failed to load devices: {devicesError}</p>
+        ) : devicesLoading ? (
+          <p className="text-sm text-muted">Loading devices…</p>
+        ) : devices.length === 0 ? (
+          <p className="text-sm text-muted">No registered E2EE devices found.</p>
+        ) : (
+          <ul className="flex flex-col gap-2 max-w-lg">
+            {devices.map((d) => (
+              <li key={d.id} className="flex items-center gap-3 rounded-lg bg-bg-800 p-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-fg">{d.name}</p>
+                  <p className="text-xs text-muted">
+                    {d.deviceType} · {d.verified ? "✓ Verified" : "Unverified"}
+                  </p>
+                  {d.lastSeenAt && (
+                    <p className="text-xs text-muted/60">
+                      Last seen {formatDistanceToNow(new Date(d.lastSeenAt), { addSuffix: true })}
+                    </p>
+                  )}
+                </div>
+                <code className="text-[10px] text-muted/60 font-mono shrink-0">
+                  {d.id.slice(0, 8)}…
+                </code>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* ── Connection ──────────────────────────────────── */}
+      <section className="mb-10">
+        <h2 className="text-base font-semibold mb-4 border-b border-bg-600 pb-2">Connection</h2>
+        <div className="max-w-md">
+          <label className="block text-xs font-semibold text-muted uppercase tracking-wide mb-1">
+            Server URL
+          </label>
+          <div className="flex items-center gap-2 rounded-lg bg-bg-800 border border-bg-600/50 px-3 py-2">
+            <code className="text-sm text-fg flex-1 truncate">
+              {session?.serverUrl ?? "Not connected"}
+            </code>
+            <span className="text-xs text-green-400">●</span>
+          </div>
+          <p className="text-xs text-muted mt-1">
+            To change the server, log out and connect to a different instance.
+          </p>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+// ── ToggleRow helper ─────────────────────────────────────────────────────────
+function ToggleRow({
+  label,
+  description,
+  value,
+  onChange,
+}: {
+  label: string;
+  description?: string;
+  value: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <div className="flex-1">
+        <p className="text-sm font-medium text-fg">{label}</p>
+        {description && <p className="text-xs text-muted mt-0.5">{description}</p>}
+      </div>
+      <button
+        type="button"
+        onClick={() => onChange(!value)}
+        aria-pressed={value}
+        className={`relative shrink-0 h-5 w-9 rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-500 ${
+          value ? "bg-accent-600" : "bg-bg-600/60"
+        }`}
+      >
+        <span
+          className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+            value ? "translate-x-4" : "translate-x-0"
+          }`}
+        />
+      </button>
     </div>
   );
 }

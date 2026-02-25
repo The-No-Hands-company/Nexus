@@ -36,7 +36,10 @@ export interface Message {
   createdAt: string;
   editedAt?: string;
   attachments?: Attachment[];
+  reactions?: Reaction[];
+  embeds?: Embed[];
   replyTo?: string;
+  threadId?: string;
 }
 
 export interface Attachment {
@@ -45,6 +48,23 @@ export interface Attachment {
   url: string;
   size: number;
   contentType?: string;
+}
+
+export interface Reaction {
+  emoji: string;
+  count: number;
+  /** true if the current user has added this reaction */
+  me: boolean;
+}
+
+export interface Embed {
+  type?: string;
+  title?: string;
+  description?: string;
+  url?: string;
+  thumbnail?: { url: string };
+  image?: { url: string };
+  color?: number;
 }
 
 export interface VoiceParticipant {
@@ -122,6 +142,7 @@ interface StoreState {
   appendMessage: (channelId: string, msg: Message) => void;
   prependMessages: (channelId: string, msgs: Message[]) => void;
   setMessages: (channelId: string, msgs: Message[]) => void;
+  updateMessageReaction: (channelId: string, messageId: string, emoji: string, delta: number, mine: boolean) => void;
 
   // Typing — keyed by channelId → list of usernames currently typing
   typingUsers: Record<string, string[]>;
@@ -231,6 +252,39 @@ export const useStore = create<StoreState>((set, get) => ({
     set((s) => ({
       messages: { ...s.messages, [channelId]: msgs },
     })),
+
+  updateMessageReaction: (channelId, messageId, emoji, delta, mine) =>
+    set((s) => {
+      const msgs = s.messages[channelId];
+      if (!msgs) return s;
+      return {
+        messages: {
+          ...s.messages,
+          [channelId]: msgs.map((m) => {
+            if (m.id !== messageId) return m;
+            const existing = m.reactions ?? [];
+            const idx = existing.findIndex((r) => r.emoji === emoji);
+            if (idx >= 0) {
+              const updated = [...existing];
+              const newCount = updated[idx].count + delta;
+              if (newCount <= 0) {
+                updated.splice(idx, 1);
+              } else {
+                updated[idx] = {
+                  ...updated[idx],
+                  count: newCount,
+                  me: delta > 0 ? mine || updated[idx].me : (mine ? false : updated[idx].me),
+                };
+              }
+              return { ...m, reactions: updated };
+            } else if (delta > 0) {
+              return { ...m, reactions: [...existing, { emoji, count: 1, me: mine }] };
+            }
+            return m;
+          }),
+        },
+      };
+    }),
 
   // ─── Typing ───────────────────────────────────────────────────────────────
   typingUsers: {},

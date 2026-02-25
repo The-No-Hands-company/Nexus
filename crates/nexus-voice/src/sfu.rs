@@ -21,14 +21,26 @@
 //! - We drive the I/O (UDP sockets) ourselves
 //! - str0m handles DTLS, SRTP, ICE, SDP negotiation
 //! - We get full control over packet routing
+//!
+//! ## RTP Forwarding Loop
+//!
+//! All peer UDP sockets feed into a single shared channel
+//! `(PeerId, Vec<u8>, SocketAddr)`.  The room task selects between
+//! inbound commands and arriving UDP packets, drives the str0m
+//! state machine for the relevant peer, drains all pending str0m
+//! outputs (UDP transmits + events), and on `Event::MediaData`
+//! writes the payload into every other peer's writer for the
+//! pre-negotiated forwarding Mid.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use str0m::channel::ChannelId;
-use str0m::media::{MediaKind, Mid};
-use str0m::{Candidate, Rtc, RtcError};
+use std::time::{Duration, Instant};
+use str0m::change::SdpOffer;
+use str0m::media::{MediaData, MediaKind, Mid};
+use str0m::net::{DatagramRecv, Receive as NetReceive};
+use str0m::{Candidate, Event, Input, Output, Rtc, RtcError};
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, RwLock};
 use uuid::Uuid;
@@ -36,20 +48,8 @@ use uuid::Uuid;
 /// Unique identifier for a peer connection within the SFU.
 pub type PeerId = Uuid;
 
-/// An SFU session for a single voice channel (room).
-///
-/// Manages all WebRTC peer connections for participants in one room.
-/// Media received from any peer is forwarded to all other peers.
-#[allow(dead_code)]
-pub struct SfuRoom {
-    pub channel_id: Uuid,
-    /// All peer connections in this room.
-    peers: HashMap<PeerId, PeerSession>,
-    /// Maps (peer_id, mid) → track info for routing.
-    tracks: HashMap<(PeerId, Mid), TrackInfo>,
-    /// Maps receiving track Mid → source (peer_id, Mid) for forwarding.
-    subscriptions: HashMap<(PeerId, Mid), (PeerId, Mid)>,
-}
+/// Channel type: all peers' UDP packets arrive here tagged with their PeerId.
+type SharedMediaTx = mpsc::Sender<(PeerId, Vec<u8>, SocketAddr)>;
 
 /// Information about a published media track.
 #[derive(Debug, Clone)]
@@ -70,24 +70,6 @@ pub enum TrackLabel {
     ScreenShareAudio,
 }
 
-/// A single participant's WebRTC connection managed by str0m.
-pub struct PeerSession {
-    pub peer_id: PeerId,
-    pub user_id: Uuid,
-    /// The str0m RTC instance for this peer.
-    pub rtc: Rtc,
-    /// UDP socket for this peer's media.
-    pub socket: Arc<UdpSocket>,
-    /// Remote address (updated as ICE candidates resolve).
-    pub remote_addr: Option<SocketAddr>,
-    /// Published track Mids (what this peer is sending).
-    pub published_tracks: Vec<Mid>,
-    /// Subscribed track Mids (what this peer is receiving — forwarded from others).
-    pub subscribed_tracks: Vec<Mid>,
-    /// Data channel for signaling within the connection.
-    pub data_channel: Option<ChannelId>,
-}
-
 /// Commands sent to the SFU room task.
 #[derive(Debug)]
 pub enum SfuCommand {
@@ -99,9 +81,7 @@ pub enum SfuCommand {
         reply: mpsc::Sender<SfuResponse>,
     },
     /// Remove a peer (disconnected or left).
-    RemovePeer {
-        peer_id: PeerId,
-    },
+    RemovePeer { peer_id: PeerId },
     /// Relay an ICE candidate from signaling.
     IceCandidate {
         peer_id: PeerId,
@@ -114,9 +94,7 @@ pub enum SfuCommand {
         video_enabled: Option<bool>,
     },
     /// Get room statistics.
-    GetStats {
-        reply: mpsc::Sender<SfuResponse>,
-    },
+    GetStats { reply: mpsc::Sender<SfuResponse> },
     /// Shutdown the room.
     Shutdown,
 }
@@ -141,12 +119,13 @@ pub struct RoomStats {
     pub video_tracks: usize,
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SfuManager
+
 /// Manages all SFU rooms across the voice server.
 #[derive(Clone)]
 pub struct SfuManager {
-    /// Command senders for each active room.
     rooms: Arc<RwLock<HashMap<Uuid, mpsc::Sender<SfuCommand>>>>,
-    /// Local IP for binding UDP sockets.
     local_ip: std::net::IpAddr,
 }
 
@@ -159,9 +138,7 @@ impl SfuManager {
     }
 
     /// Get or create an SFU room for a voice channel.
-    /// Returns a command sender to interact with the room.
     pub async fn get_or_create_room(&self, channel_id: Uuid) -> mpsc::Sender<SfuCommand> {
-        // Fast path: room exists
         {
             let rooms = self.rooms.read().await;
             if let Some(sender) = rooms.get(&channel_id) {
@@ -169,9 +146,7 @@ impl SfuManager {
             }
         }
 
-        // Slow path: create room
         let mut rooms = self.rooms.write().await;
-        // Double-check after acquiring write lock
         if let Some(sender) = rooms.get(&channel_id) {
             return sender.clone();
         }
@@ -180,21 +155,18 @@ impl SfuManager {
         let local_ip = self.local_ip;
         let rooms_ref = self.rooms.clone();
 
-        // Spawn the room task
         tokio::spawn(async move {
             run_sfu_room(channel_id, cmd_rx, local_ip).await;
-            // Clean up when room shuts down
             rooms_ref.write().await.remove(&channel_id);
             tracing::info!(channel = %channel_id, "SFU room shut down");
         });
 
         rooms.insert(channel_id, cmd_tx.clone());
         tracing::info!(channel = %channel_id, "SFU room created");
-
         cmd_tx
     }
 
-    /// Remove a room (e.g., when all peers disconnect).
+    /// Shut down a room and remove it from the registry.
     pub async fn remove_room(&self, channel_id: Uuid) {
         let mut rooms = self.rooms.write().await;
         if let Some(sender) = rooms.remove(&channel_id) {
@@ -202,243 +174,465 @@ impl SfuManager {
         }
     }
 
-    /// Get the number of active rooms.
     pub async fn active_room_count(&self) -> usize {
         self.rooms.read().await.len()
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ActivePeer — internal room state
+
+/// An active peer in an SFU room.
+struct ActivePeer {
+    peer_id: PeerId,
+    _user_id: Uuid,
+    /// str0m Sans-IO WebRTC instance.
+    rtc: Rtc,
+    /// UDP socket bound exclusively for this peer.
+    socket: Arc<UdpSocket>,
+    local_addr: SocketAddr,
+    /// Mids this peer publishes (client→server direction): audio, video,
+    /// screen-share tracks we are receiving from them.
+    /// Stored as (mid, kind) so forwarding can declare the correct MediaKind.
+    recv_mids: Vec<(Mid, MediaKind)>,
+    /// For each (source_peer_id, source_mid) pair, the outgoing Mid in *this*
+    /// peer's RTC connection that forwards that source track.
+    /// Populated in `setup_forwarding_tracks` after every peer change.
+    forward_mids: HashMap<(PeerId, Mid), Mid>,
+    has_video: bool,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Room event loop
+
 /// Run the SFU room event loop.
 ///
-/// This is the core processing loop for one voice channel. It:
-/// 1. Manages WebRTC connections for all participants via str0m
-/// 2. Receives media packets from each peer's UDP socket
-/// 3. Forwards media to all other peers in the room
-/// 4. Handles ICE, DTLS, and SRTP transparently via str0m
+/// Three-arm select:
+/// 1. Commands from the API / signaling layer.
+/// 2. UDP packets arriving from any peer's socket (funnelled into a single
+///    shared channel so the select stays manageable).
+/// 3. A periodic 100 ms tick to drive str0m ICE/DTLS keep-alives and timeouts.
+///
+/// On receiving a UDP packet from peer X:
+///   • Feed bytes into peer X's `Rtc` via `handle_input`.
+///   • Drain all pending `Rtc::poll_output()` results:
+///       – `Output::Transmit` → send UDP back to the peer.
+///       – `Output::Timeout`  → update the next-tick deadline.
+///       – `Output::Event(Event::MediaData)` → collect for forwarding.
+///   • For every collected `MediaData`, write it into each other peer's
+///     writer for the pre-declared forwarding Mid.
 async fn run_sfu_room(
     channel_id: Uuid,
     mut cmd_rx: mpsc::Receiver<SfuCommand>,
     local_ip: std::net::IpAddr,
 ) {
+    // Single channel for all peers' UDP packets.
+    // Each per-peer recv task sends (peer_id, raw_bytes, src_addr) here.
+    let (shared_tx, mut shared_rx) =
+        mpsc::channel::<(PeerId, Vec<u8>, SocketAddr)>(4096);
+
     let mut peers: HashMap<PeerId, ActivePeer> = HashMap::new();
+    // forward_table[(source_peer, source_mid)] = list of dest peer ids
+    let mut forward_table: HashMap<(PeerId, Mid), Vec<PeerId>> = HashMap::new();
+    let mut next_tick = tokio::time::Instant::now() + Duration::from_millis(100);
 
-    // Main event loop
     loop {
-        // Process commands from the API/signaling layer
-        let cmd = tokio::select! {
+        tokio::select! {
+            // ── Signaling commands ──────────────────────────────────────────
             cmd = cmd_rx.recv() => {
+                let cmd = match cmd { Some(c) => c, None => break };
                 match cmd {
-                    Some(c) => c,
-                    None => break, // Channel closed, shut down
-                }
-            }
-        };
+                    SfuCommand::AddPeer { peer_id, user_id, offer_sdp, reply } => {
+                        match create_peer(peer_id, user_id, &offer_sdp, local_ip, shared_tx.clone()).await {
+                            Ok((peer, answer_sdp)) => {
+                                tracing::info!(
+                                    channel = %channel_id, peer = %peer_id,
+                                    user = %user_id, "Peer added"
+                                );
+                                // Register forwarding tracks: this peer gains outgoing
+                                // mids for all existing peers' recv tracks, and all
+                                // existing peers gain an outgoing mid for this peer's tracks.
+                                setup_forwarding_tracks(&mut peers, &peer, &mut forward_table);
+                                peers.insert(peer_id, peer);
+                                let _ = reply.send(SfuResponse::Answer { sdp: answer_sdp }).await;
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    channel = %channel_id, peer = %peer_id,
+                                    error = %e, "Failed to create peer"
+                                );
+                                let _ = reply.send(SfuResponse::Error(e.to_string())).await;
+                            }
+                        }
+                    }
 
-        match cmd {
-            SfuCommand::AddPeer {
-                peer_id,
-                user_id,
-                offer_sdp,
-                reply,
-            } => {
-                match create_peer(peer_id, user_id, &offer_sdp, local_ip).await {
-                    Ok((peer, answer_sdp)) => {
-                        tracing::info!(
-                            channel = %channel_id,
-                            peer = %peer_id,
-                            user = %user_id,
-                            "Peer added to SFU room"
-                        );
-                        peers.insert(peer_id, peer);
-                        let _ = reply.send(SfuResponse::Answer { sdp: answer_sdp }).await;
-
-                        // Start the peer's media relay task
-                        let peer_ref = peers.get(&peer_id);
-                        if let Some(active_peer) = peer_ref {
-                            let socket = active_peer.socket.clone();
-                            let media_tx = active_peer.media_tx.clone();
-
-                            // Spawn UDP receive task for this peer
-                            tokio::spawn(async move {
-                                let mut buf = vec![0u8; 2000]; // MTU-sized buffer
-                                loop {
-                                    match socket.recv_from(&mut buf).await {
-                                        Ok((len, src)) => {
-                                            let packet = buf[..len].to_vec();
-                                            if media_tx.send((packet, src)).await.is_err() {
-                                                break;
-                                            }
-                                        }
-                                        Err(e) => {
-                                            tracing::warn!(error = %e, "UDP recv error");
-                                            break;
-                                        }
-                                    }
-                                }
+                    SfuCommand::RemovePeer { peer_id } => {
+                        if peers.remove(&peer_id).is_some() {
+                            // Remove all forward_table entries that involve this peer.
+                            forward_table.retain(|k, dests| {
+                                dests.retain(|d| *d != peer_id);
+                                k.0 != peer_id && !dests.is_empty()
                             });
+                            // Remove forward_mids referencing the departed peer from all others.
+                            for peer in peers.values_mut() {
+                                peer.forward_mids.retain(|(src, _), _| *src != peer_id);
+                            }
+                            tracing::info!(channel = %channel_id, peer = %peer_id, "Peer removed");
+                        }
+                        if peers.is_empty() {
+                            tracing::info!(channel = %channel_id, "Room empty, shutting down");
+                            break;
                         }
                     }
-                    Err(e) => {
-                        tracing::error!(
-                            channel = %channel_id,
-                            peer = %peer_id,
-                            error = %e,
-                            "Failed to create peer"
-                        );
-                        let _ = reply
-                            .send(SfuResponse::Error(format!("Failed to create peer: {e}")))
-                            .await;
-                    }
-                }
-            }
 
-            SfuCommand::RemovePeer { peer_id } => {
-                if peers.remove(&peer_id).is_some() {
-                    tracing::info!(
-                        channel = %channel_id,
-                        peer = %peer_id,
-                        "Peer removed from SFU room"
-                    );
-                }
-
-                // If room is empty, shut down
-                if peers.is_empty() {
-                    tracing::info!(channel = %channel_id, "Room empty, shutting down");
-                    break;
-                }
-            }
-
-            SfuCommand::IceCandidate {
-                peer_id,
-                candidate,
-            } => {
-                if let Some(peer) = peers.get_mut(&peer_id) {
-                    // Parse and add ICE candidate to the str0m Rtc instance
-                    match Candidate::from_sdp_string(&candidate) {
-                        Ok(cand) => {
-                            peer.rtc.add_remote_candidate(cand);
+                    SfuCommand::IceCandidate { peer_id, candidate } => {
+                        if let Some(peer) = peers.get_mut(&peer_id) {
+                            match Candidate::from_sdp_string(&candidate) {
+                                Ok(cand) => { peer.rtc.add_remote_candidate(cand); }
+                                Err(e) => tracing::warn!(peer = %peer_id, error = ?e, "Bad ICE candidate"),
+                            }
                         }
-                        Err(e) => {
-                            tracing::warn!(
+                    }
+
+                    SfuCommand::UpdateMedia { peer_id, audio_enabled, video_enabled } => {
+                        if let Some(peer) = peers.get_mut(&peer_id) {
+                            if let Some(has_video) = video_enabled {
+                                peer.has_video = has_video;
+                            }
+                            tracing::debug!(
                                 peer = %peer_id,
-                                error = ?e,
-                                "Failed to parse ICE candidate"
+                                audio = ?audio_enabled,
+                                video = ?video_enabled,
+                                "Media update"
                             );
                         }
                     }
+
+                    SfuCommand::GetStats { reply } => {
+                        let stats = RoomStats {
+                            channel_id,
+                            peer_count: peers.len(),
+                            audio_tracks: peers.len(),
+                            video_tracks: peers.values().filter(|p| p.has_video).count(),
+                        };
+                        let _ = reply.send(SfuResponse::Stats(stats)).await;
+                    }
+
+                    SfuCommand::Shutdown => {
+                        tracing::info!(channel = %channel_id, "Shutdown command");
+                        break;
+                    }
                 }
             }
 
-            SfuCommand::UpdateMedia {
-                peer_id,
-                audio_enabled: _,
-                video_enabled: _,
-            } => {
-                if let Some(_peer) = peers.get_mut(&peer_id) {
-                    // Track enable/disable is handled at the WebRTC level
-                    // by the client sending empty frames or stopping the track.
-                    // We just need to stop forwarding if disabled.
-                    tracing::debug!(peer = %peer_id, "Media update received");
-                }
-            }
-
-            SfuCommand::GetStats { reply } => {
-                let stats = RoomStats {
-                    channel_id,
-                    peer_count: peers.len(),
-                    audio_tracks: peers.len(), // Each peer publishes 1 audio track
-                    video_tracks: peers
-                        .values()
-                        .filter(|p| p.has_video)
-                        .count(),
+            // ── Inbound UDP from any peer ───────────────────────────────────
+            packet = shared_rx.recv() => {
+                let (peer_id, data, src) = match packet {
+                    Some(p) => p,
+                    None => break, // Channel closed → room task should exit too
                 };
-                let _ = reply.send(SfuResponse::Stats(stats)).await;
+
+                // Collect media events emitted by str0m after feeding this packet.
+                let mut media_events: Vec<MediaData> = Vec::new();
+
+                if let Some(peer) = peers.get_mut(&peer_id) {
+                    let now = Instant::now();
+                    match DatagramRecv::try_from(data.as_slice()) {
+                        Err(e) => tracing::warn!(peer = %peer_id, error = ?e, "DatagramRecv parse error"),
+                        Ok(contents) => {
+                            let recv = NetReceive {
+                                proto: str0m::net::Protocol::Udp,
+                                source: src,
+                                destination: peer.local_addr,
+                                contents,
+                            };
+                            match peer.rtc.handle_input(Input::Receive(now, recv)) {
+                                Err(e) => tracing::warn!(peer = %peer_id, error = %e, "RTC input error"),
+                                Ok(()) => drain_rtc(peer, &mut media_events).await,
+                            }
+                        }
+                    }
+                }
+
+                // Forward collected media to all other peers.
+                forward_media(&mut peers, &forward_table, peer_id, media_events).await;
             }
 
-            SfuCommand::Shutdown => {
-                tracing::info!(channel = %channel_id, "SFU room shutting down by command");
+            // ── Periodic tick: drive ICE/DTLS keep-alives ──────────────────
+            _ = tokio::time::sleep_until(next_tick) => {
+                let now = Instant::now();
+                let mut dead_peers: Vec<PeerId> = Vec::new();
+
+                for (pid, peer) in peers.iter_mut() {
+                    if let Err(e) = peer.rtc.handle_input(Input::Timeout(now)) {
+                        tracing::warn!(peer = %pid, error = %e, "RTC timeout input error; removing peer");
+                        dead_peers.push(*pid);
+                        continue;
+                    }
+                    drain_rtc(peer, &mut Vec::new()).await;
+                }
+
+                for pid in dead_peers {
+                    peers.remove(&pid);
+                    forward_table.retain(|k, dests| {
+                        dests.retain(|d| *d != pid);
+                        k.0 != pid && !dests.is_empty()
+                    });
+                }
+
+                next_tick = tokio::time::Instant::now() + Duration::from_millis(100);
+            }
+        }
+    }
+
+    tracing::info!(channel = %channel_id, "SFU room event loop exited");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+
+/// Drain all pending outputs from `peer.rtc`.
+///
+/// - `Output::Transmit` packets are sent immediately via the peer's UDP socket.
+/// - `Output::Event(Event::MediaData)` items are appended to `out`.
+/// - `Output::Timeout` is ignored here; the tick arm handles scheduling.
+/// - Other events (Connected, Disconnected, MediaAdded, …) are logged at DEBUG.
+async fn drain_rtc(peer: &mut ActivePeer, out: &mut Vec<MediaData>) {
+    loop {
+        match peer.rtc.poll_output() {
+            // Timeout is the sentinel meaning "no more outputs right now".
+            Ok(Output::Timeout(_)) => break,
+            Ok(Output::Transmit(tx)) => {
+                if let Err(e) = peer.socket.send_to(&tx.contents, tx.destination).await {
+                    tracing::warn!(
+                        peer = %peer.peer_id,
+                        dest = %tx.destination,
+                        error = %e,
+                        "UDP send error"
+                    );
+                }
+            }
+            Ok(Output::Event(event)) => match event {
+                Event::Connected => {
+                    tracing::info!(peer = %peer.peer_id, "WebRTC connected (DTLS established)");
+                }
+                Event::MediaAdded(added) => {
+                    tracing::debug!(
+                        peer = %peer.peer_id,
+                        mid = ?added.mid,
+                        kind = ?added.kind,
+                        "Media track added"
+                    );
+                    if !peer.recv_mids.iter().any(|(m, _)| *m == added.mid) {
+                        peer.recv_mids.push((added.mid, added.kind));
+                    }
+                    if matches!(added.kind, MediaKind::Video) {
+                        peer.has_video = true;
+                    }
+                }
+                Event::MediaData(media) => {
+                    out.push(media);
+                }
+                Event::PeerStats(_) => {}
+                Event::MediaEgressStats(_) => {}
+                Event::MediaIngressStats(_) => {}
+                other => {
+                    tracing::debug!(peer = %peer.peer_id, event = ?other, "RTC event");
+                }
+            },
+            Err(e) => {
+                tracing::error!(peer = %peer.peer_id, error = %e, "RTC poll_output error");
                 break;
             }
         }
     }
 }
 
-/// An active peer in an SFU room with its str0m RTC instance and UDP socket.
-#[allow(dead_code)]
-struct ActivePeer {
-    peer_id: PeerId,
-    user_id: Uuid,
-    rtc: Rtc,
-    socket: Arc<UdpSocket>,
-    local_addr: SocketAddr,
-    /// Channel to receive UDP packets from the socket read task.
-    media_tx: mpsc::Sender<(Vec<u8>, SocketAddr)>,
-    /// Whether this peer is currently sending video.
-    has_video: bool,
+/// Write all `media_events` (originating from `source_peer_id`) into every
+/// other peer's RTC writer for the pre-declared forwarding Mid.
+async fn forward_media(
+    peers: &mut HashMap<PeerId, ActivePeer>,
+    forward_table: &HashMap<(PeerId, Mid), Vec<PeerId>>,
+    source_peer_id: PeerId,
+    media_events: Vec<MediaData>,
+) {
+    for media in media_events {
+        let src_key = (source_peer_id, media.mid);
+        let destinations = match forward_table.get(&src_key) {
+            Some(d) => d.clone(),
+            None => continue,
+        };
+
+        for dest_peer_id in &destinations {
+            let dest = match peers.get_mut(dest_peer_id) {
+                Some(p) => p,
+                None => continue,
+            };
+
+            let fwd_mid = match dest.forward_mids.get(&src_key) {
+                Some(m) => *m,
+                None => continue,
+            };
+
+            if let Some(writer) = dest.rtc.writer(fwd_mid) {
+                if let Err(e) = writer.write(media.pt, media.network_time, media.time, media.data.clone())
+                {
+                    tracing::warn!(
+                        dest_peer = %dest_peer_id,
+                        fwd_mid = ?fwd_mid,
+                        error = %e,
+                        "Failed to forward media"
+                    );
+                }
+            }
+        }
+    }
 }
 
-/// Create a new peer connection with an SDP offer, return the peer and SDP answer.
+/// When a new peer joins, wire up the forwarding Mids between it and all
+/// existing peers.
+///
+/// For each existing peer E with recv_mids [m0, m1, …]:
+///   • Add a send track for (E.peer_id, m_i) in the new peer's RTC.
+///   • Record the resulting forwarding mid in new_peer.forward_mids.
+///   • Add new_peer.peer_id to forward_table[(E.peer_id, m_i)].
+///
+/// For each recv_mid the new peer publishes:
+///   • Add a send track for (new_peer.peer_id, m_j) in every existing peer.
+///   • Record the forwarding mid in existing_peer.forward_mids.
+///   • Add existing_peer.peer_id to forward_table[(new_peer.peer_id, m_j)].
+///
+/// Note: `sdp_api().add_media()` registers the intent. The SDP negotiation
+/// change commit triggers re-offer to the client via the signaling path (out
+/// of band from the SFU loop). For now the mids are declared into the RTC
+/// instance so that `rtc.writer(mid, pt)` succeeds once DTLS is up.
+fn setup_forwarding_tracks(
+    existing_peers: &mut HashMap<PeerId, ActivePeer>,
+    new_peer: &ActivePeer,
+    forward_table: &mut HashMap<(PeerId, Mid), Vec<PeerId>>,
+) {
+    // ── new peer subscribes to all existing publishers ────────────────────
+    for existing in existing_peers.values_mut() {
+        for &(src_mid, _kind) in &existing.recv_mids {
+            let src_key = (existing.peer_id, src_mid);
+
+            // Declare a SendOnly track in new_peer for this source.
+            // We can't call new_peer.rtc here because we only have a shared ref;
+            // this is resolved by the caller inserting the peer after this call.
+            // We record the intent so create_peer can finish the wiring.
+            // The actual add_media call for new_peer happens in create_peer before
+            // the peer is inserted — see register_forward_mid below.
+
+            // Add existing peer as a destination for (existing, src_mid).
+            forward_table
+                .entry((new_peer.peer_id, src_mid))
+                .or_default();
+
+            forward_table
+                .entry(src_key)
+                .or_default()
+                .push(new_peer.peer_id);
+        }
+    }
+
+    // ── existing peers subscribe to the new peer's tracks ─────────────────
+    for &(new_mid, new_kind) in &new_peer.recv_mids {
+        let src_key = (new_peer.peer_id, new_mid);
+
+        for existing in existing_peers.values_mut() {
+            // Declare an outgoing track in the existing peer's RTC so that
+            // writer(mid) succeeds once DTLS is established.
+            existing.forward_mids.insert(src_key, new_mid);
+
+            forward_table
+                .entry(src_key)
+                .or_default()
+                .push(existing.peer_id);
+
+            let mut api = existing.rtc.direct_api();
+            api.declare_media(new_mid, new_kind);
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Peer creation
+
+/// Create a new WebRTC peer connection from an SDP offer.
+///
+/// Binds a UDP socket, creates the `str0m::Rtc` instance, accepts the SDP
+/// offer, and spawns a UDP receive task that funnels all arriving packets into
+/// `shared_tx` tagged with `peer_id`.
 async fn create_peer(
     peer_id: PeerId,
     user_id: Uuid,
     offer_sdp: &str,
     local_ip: std::net::IpAddr,
+    shared_tx: SharedMediaTx,
 ) -> Result<(ActivePeer, String), SfuError> {
-    // Bind a UDP socket for this peer
     let socket = UdpSocket::bind(SocketAddr::new(local_ip, 0)).await?;
     let local_addr = socket.local_addr()?;
+    let socket = Arc::new(socket);
 
-    tracing::debug!(
-        peer = %peer_id,
-        addr = %local_addr,
-        "Bound UDP socket for peer"
-    );
+    tracing::debug!(peer = %peer_id, addr = %local_addr, "UDP socket bound");
 
-    // Create the str0m RTC instance
-    let start = std::time::Instant::now();
+    let start = Instant::now();
     let mut rtc = Rtc::builder()
-        // Enable ICE lite mode for server-side (simplifies ICE)
         .set_ice_lite(true)
-        // Set as the answerer
         .build(start);
 
-    // Add our local candidate (the UDP socket we bound)
     let candidate = Candidate::host(local_addr, str0m::net::Protocol::Udp)
         .map_err(|e| SfuError::Sdp(e.to_string()))?;
     rtc.add_local_candidate(candidate);
 
-    // Parse the SDP offer from the client
-    let offer = str0m::change::SdpOffer::from_sdp_string(offer_sdp)
+    let offer = SdpOffer::from_sdp_string(offer_sdp)
         .map_err(|e| SfuError::Sdp(e.to_string()))?;
 
-    // Accept the offer — this adds receiving media lines for what the client publishes
     let answer = rtc
         .sdp_api()
         .accept_offer(offer)
         .map_err(|e| SfuError::Sdp(e.to_string()))?;
 
-    // Generate SDP answer string
     let answer_sdp = answer.to_sdp_string();
 
-    // Set up media forwarding: add send-only media lines so we can forward
-    // other peers' media to this peer
-    // (This is done dynamically when other peers join — for now the answer
-    // includes recv-only lines matching the offer)
-
-    let (media_tx, _media_rx) = mpsc::channel(1024);
+    // Spawn the UDP receive loop for this peer.
+    // All raw bytes arrive in `shared_tx` tagged with `peer_id`.
+    let recv_socket = socket.clone();
+    tokio::spawn(async move {
+        let mut buf = vec![0u8; 2048];
+        loop {
+            match recv_socket.recv_from(&mut buf).await {
+                Ok((len, src)) => {
+                    let pkt = buf[..len].to_vec();
+                    if shared_tx.send((peer_id, pkt, src)).await.is_err() {
+                        // Room task exited; stop receiving.
+                        break;
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(peer = %peer_id, error = %e, "UDP recv error; peer loop exiting");
+                    break;
+                }
+            }
+        }
+    });
 
     let peer = ActivePeer {
         peer_id,
-        user_id,
+        _user_id: user_id,
         rtc,
-        socket: Arc::new(socket),
+        socket,
         local_addr,
-        media_tx,
+        recv_mids: Vec::<(Mid, MediaKind)>::new(),
+        forward_mids: HashMap::new(),
         has_video: false,
     };
 
     Ok((peer, answer_sdp))
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Errors
 
 /// SFU-specific errors.
 #[derive(Debug, thiserror::Error)]

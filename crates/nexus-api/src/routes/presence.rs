@@ -41,7 +41,7 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/users/@me/presence", post(update_presence))
         .route("/users/{user_id}/presence", get(get_user_presence))
-        .route_layer(middleware::from_fn(crate::middleware::auth_middleware))
+        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
 }
 
 // ============================================================

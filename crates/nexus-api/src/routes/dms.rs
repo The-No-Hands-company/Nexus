@@ -32,7 +32,7 @@ pub fn router() -> Router<Arc<AppState>> {
             "/users/@me/channels/{channel_id}",
             get(get_dm_channel),
         )
-        .route_layer(middleware::from_fn(crate::middleware::auth_middleware))
+        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
 }
 
 #[derive(Debug, Deserialize)]

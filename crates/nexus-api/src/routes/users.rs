@@ -24,7 +24,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/users/{user_id}", get(get_user))
         .route("/users/{user_id}/profile", get(get_user_profile))
         .route_layer(middleware::from_fn(
-            crate::middleware::auth_middleware,
+            crate::middleware::combined_auth_middleware,
         ))
 }
 

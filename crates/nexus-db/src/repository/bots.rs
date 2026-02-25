@@ -203,6 +203,17 @@ pub async fn get_server_bots(pool: &sqlx::AnyPool, server_id: Uuid) -> Result<Ve
     Ok(rows.iter().map(row_to_server_install).collect())
 }
 
+/// Return all servers a given bot is installed in.
+pub async fn get_bot_servers(pool: &sqlx::AnyPool, bot_id: Uuid) -> Result<Vec<BotServerInstall>> {
+    let rows = sqlx::query(
+        "SELECT * FROM bot_server_installs WHERE bot_id = $1 ORDER BY installed_at DESC",
+    )
+    .bind(bot_id.to_string())
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.iter().map(row_to_server_install).collect())
+}
+
 pub async fn uninstall_bot_from_server(
     pool: &sqlx::AnyPool,
     bot_id: Uuid,

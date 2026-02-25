@@ -33,7 +33,7 @@ pub fn router() -> Router<Arc<AppState>> {
             post(verify_device).delete(remove_verification),
         )
         .route("/users/@me/verifications", get(list_my_verifications))
-        .route_layer(middleware::from_fn(crate::middleware::auth_middleware))
+        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
 }
 
 // ============================================================

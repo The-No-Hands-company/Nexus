@@ -45,6 +45,6 @@ pub use client::FederationClient;
 pub use error::FederationError;
 pub use key_manager::KeyManager;
 pub use keys::ServerKeyPair;
-pub use matrix_bridge::{BridgeConfig, BridgedEvent, MatrixBridge, MatrixTransaction};
+pub use matrix_bridge::{BridgeConfig, BridgeError, BridgedEvent, MatrixBridge, MatrixTransaction, mxid_to_username};
 pub use signatures::sign_event;
 pub use types::{FederationEvent, FederationTransaction, ServerInfo};

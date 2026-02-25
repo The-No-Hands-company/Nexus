@@ -34,7 +34,7 @@ pub fn router() -> Router<Arc<AppState>> {
             "/channels/{channel_id}/e2ee",
             get(get_e2ee_config).put(enable_e2ee),
         )
-        .route_layer(middleware::from_fn(crate::middleware::auth_middleware))
+        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
 }
 
 #[derive(Deserialize)]
@@ -133,6 +133,47 @@ async fn send_encrypted_message(
         channel_id: Some(channel_id),
         user_id: Some(auth.user_id),
     });
+
+    // ── Ratchet step advancement ───────────────────────────────────────────────
+    // For each recipient device in the ciphertext map, advance the server-side
+    // ratchet_step counter.  This lets recipients detect if they missed any
+    // ratchet steps (out-of-order / dropped messages).
+    //
+    // message type 1 = PreKeySignalMessage  → X3DH session establishment,
+    //                                          starts fresh session at step 1
+    // message type 2 = SignalMessage        → in-session step, increment counter
+    if let Some(map) = body.ciphertext_map.as_object() {
+        for (device_id_str, envelope) in map {
+            if let Ok(recipient_device_id) = Uuid::parse_str(device_id_str) {
+                let msg_type = envelope
+                    .get("type")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(2);
+                if msg_type == 1 {
+                    // PreKeySignalMessage: establish a fresh session record.
+                    // session_state is empty here; the client will PUT the
+                    // encrypted state blob after completing X3DH.
+                    let _ = keystore::upsert_session(
+                        &state.db.pool,
+                        sender_device.id,
+                        recipient_device_id,
+                        "",
+                        1,
+                    )
+                    .await;
+                } else {
+                    // SignalMessage: increment the ratchet counter.
+                    // Ignore missing sessions (first message race).
+                    let _ = keystore::increment_ratchet_step(
+                        &state.db.pool,
+                        sender_device.id,
+                        recipient_device_id,
+                    )
+                    .await;
+                }
+            }
+        }
+    }
 
     Ok(Json(msg))
 }

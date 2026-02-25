@@ -12,7 +12,7 @@ use nexus_common::gateway_event::GatewayEvent;
 use nexus_db::{search::SearchClient, storage::StorageClient, Database};
 use nexus_federation::{client::FederationClient, ServerKeyPair};
 use nexus_voice::state::VoiceStateManager;
-use std::sync::Arc;
+use std::{sync::Arc, time::Instant};
 use tokio::sync::broadcast;
 
 /// Shared application state available to all route handlers.
@@ -37,10 +37,16 @@ pub struct AppState {
     pub federation_key: Arc<ServerKeyPair>,
     /// Signed HTTP client for outbound server-to-server federation requests.
     pub federation_client: Arc<FederationClient>,
+    /// Monotonic timestamp captured at process start — used to compute uptime.
+    pub started_at: Instant,
 }
 
 /// Build the complete API router with all routes and middleware.
 pub fn build_router(state: AppState) -> Router {
+    // Create the Arc up-front so we can share it as an Axum Extension
+    // (`combined_auth_middleware` reads it to look up bot tokens).
+    let arc_state = Arc::new(state);
+
     let api_routes = Router::new()
         .merge(routes::auth::router())
         .merge(routes::users::router())
@@ -67,7 +73,11 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::slash_commands::router())
         .merge(routes::extensibility::router())
         // v0.8 Federation — client-facing directory endpoints
-        .merge(routes::directory::router());
+        .merge(routes::directory::router())
+        // Make Arc<AppState> available as an Axum Extension so that
+        // `combined_auth_middleware` can perform DB lookups for bot tokens
+        // without requiring `from_fn_with_state` on every sub-router.
+        .layer(axum::Extension(arc_state.clone()));
 
     Router::new()
         .nest("/api/v1", api_routes)
@@ -84,6 +94,6 @@ pub fn build_router(state: AppState) -> Router {
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .layer(tower_http::compression::CompressionLayer::new())
         .layer(axum::middleware::from_fn(middleware::security_headers))
-        .with_state(Arc::new(state))
+        .with_state(arc_state)
 }
 

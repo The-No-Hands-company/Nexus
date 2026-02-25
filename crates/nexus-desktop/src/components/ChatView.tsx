@@ -1,8 +1,11 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useStore, Message } from "../store";
+import type { Embed } from "../store";
+import { invoke } from "../invoke";
 import MessageInput from "./MessageInput";
 import MemberList from "./MemberList";
+import ThreadPanel from "./ThreadPanel";
 import { formatDistanceToNow, format, isToday, isYesterday } from "date-fns";
 import clsx from "clsx";
 
@@ -10,6 +13,9 @@ export default function ChatView() {
   const { channelId } = useParams<{ channelId: string }>();
   const { messages, channels, session, loadMessages, activeServerId, isHomeMode } = useStore();
   const [showMembers, setShowMembers] = useState(true);
+  const [openThread, setOpenThread] = useState<{ id: string; title: string } | null>(null);
+  const [startingThread, setStartingThread] = useState<{ msgId: string; msgContent: string } | null>(null);
+  const [newThreadTitle, setNewThreadTitle] = useState("");
 
   const msgs: Message[] = channelId ? (messages[channelId] ?? []) : [];
   const channel = channels.find((c) => c.id === channelId);
@@ -99,8 +105,11 @@ export default function ChatView() {
                 <MessageRow
                   key={msg.id}
                   msg={msg}
+                  channelId={channelId}
                   grouped={grouped && !newDay}
                   isOwn={msg.authorId === session?.userId}
+                  onOpenThread={(tId, title) => { setOpenThread({ id: tId, title }); setShowMembers(false); }}
+                  onStartThread={(msgId, content) => { setStartingThread({ msgId, msgContent: content }); setNewThreadTitle(""); }}
                 />
               </>
             );
@@ -116,8 +125,83 @@ export default function ChatView() {
       </div>
 
       {/* Member list sidebar */}
-      {isServerChannel && showMembers && (
+      {isServerChannel && showMembers && !openThread && (
         <MemberList serverId={activeServerId!} />
+      )}
+
+      {/* Thread panel */}
+      {openThread && (
+        <ThreadPanel
+          threadId={openThread.id}
+          threadTitle={openThread.title}
+          onClose={() => setOpenThread(null)}
+        />
+      )}
+
+      {/* Start-thread overlay */}
+      {startingThread && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="w-96 rounded-xl bg-bg-700 p-6 shadow-2xl">
+            <h2 className="mb-1 text-base font-semibold text-fg">Start a thread</h2>
+            <p className="mb-4 truncate text-xs text-muted">{startingThread.msgContent}</p>
+            <label className="mb-1 block text-xs font-medium uppercase tracking-widest text-muted">
+              Thread title
+            </label>
+            <input
+              autoFocus
+              value={newThreadTitle}
+              onChange={(e) => setNewThreadTitle(e.target.value)}
+              onKeyDown={async (e) => {
+                if (e.key === "Enter" && newThreadTitle.trim() && channelId) {
+                  e.preventDefault();
+                  try {
+                    const thread = await invoke<{ id: string; title: string }>(
+                      "create_thread",
+                      { channelId, title: newThreadTitle.trim() }
+                    );
+                    setStartingThread(null);
+                    setOpenThread({ id: thread.id, title: thread.title });
+                    setShowMembers(false);
+                  } catch (err) {
+                    console.error("create_thread error", err);
+                  }
+                } else if (e.key === "Escape") {
+                  setStartingThread(null);
+                }
+              }}
+              placeholder="e.g. Discussion about this post"
+              className="mb-4 w-full rounded-lg border border-bg-600/50 bg-bg-800 px-3 py-2 text-sm text-fg placeholder:text-muted/60 outline-none focus:border-accent-500"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setStartingThread(null)}
+                className="rounded-lg px-4 py-2 text-sm text-muted hover:text-fg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={!newThreadTitle.trim()}
+                onClick={async () => {
+                  if (!newThreadTitle.trim() || !channelId) return;
+                  try {
+                    const thread = await invoke<{ id: string; title: string }>(
+                      "create_thread",
+                      { channelId, title: newThreadTitle.trim() }
+                    );
+                    setStartingThread(null);
+                    setOpenThread({ id: thread.id, title: thread.title });
+                    setShowMembers(false);
+                  } catch (err) {
+                    console.error("create_thread error", err);
+                  }
+                }}
+                className="rounded-lg bg-accent-600 px-4 py-2 text-sm font-medium text-white hover:bg-accent-500 disabled:opacity-40 transition-colors"
+              >
+                Create Thread
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -169,13 +253,46 @@ export function TypingBar({ channelId }: { channelId: string }) {
 
 function MessageRow({
   msg,
+  channelId,
   grouped,
   isOwn,
+  onOpenThread,
+  onStartThread,
 }: {
   msg: Message;
+  channelId: string;
   grouped: boolean;
   isOwn: boolean;
+  onOpenThread?: (threadId: string, title: string) => void;
+  onStartThread?: (msgId: string, content: string) => void;
 }) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+
+  // Close picker on outside click
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setPickerOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [pickerOpen]);
+
+  const handleReaction = async (emoji: string, currentlyMine: boolean) => {
+    try {
+      if (currentlyMine) {
+        await invoke("remove_reaction", { channelId, messageId: msg.id, emoji });
+      } else {
+        await invoke("add_reaction", { channelId, messageId: msg.id, emoji });
+      }
+    } catch (e) {
+      console.error("reaction error", e);
+    }
+    setPickerOpen(false);
+  };
   return (
     <div
       className={clsx(
@@ -216,6 +333,24 @@ function MessageRow({
         <p className="text-sm text-gray-200 leading-relaxed break-words whitespace-pre-wrap">
           {msg.content}
         </p>
+        {/* Thread badge */}
+        {msg.threadId && (
+          <button
+            onClick={() => onOpenThread?.(msg.threadId!, `Thread`)}
+            className="mt-1 inline-flex items-center gap-1.5 rounded border border-accent-500/30 bg-accent-500/10 px-2 py-0.5 text-xs text-accent-300 hover:bg-accent-500/20 transition-colors"
+          >
+            <span>🧵</span>
+            <span className="font-medium">Open thread</span>
+          </button>
+        )}
+        {/* Embeds */}
+        {msg.embeds && msg.embeds.length > 0 && (
+          <div className="mt-1.5 flex flex-col gap-1.5">
+            {msg.embeds.map((embed, idx) => (
+              <EmbedCard key={idx} embed={embed} />
+            ))}
+          </div>
+        )}
         {msg.attachments && msg.attachments.length > 0 && (
           <div className="mt-1 flex flex-wrap gap-2">
             {msg.attachments.map((a) => (
@@ -231,6 +366,116 @@ function MessageRow({
             ))}
           </div>
         )}
+        {/* Reaction bar */}
+        {((msg.reactions && msg.reactions.length > 0) || true) && (
+          <div className="flex flex-wrap items-center gap-1 mt-1 relative">
+            {(msg.reactions ?? []).map((r) => (
+              <button
+                key={r.emoji}
+                onClick={() => handleReaction(r.emoji, r.me)}
+                className={clsx(
+                  "inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-full border transition-colors",
+                  r.me
+                    ? "bg-accent-500/20 border-accent-500/50 text-accent-300 hover:bg-accent-500/30"
+                    : "bg-bg-700/60 border-bg-600/50 text-muted hover:bg-bg-600/60 hover:text-fg"
+                )}
+                title={r.me ? `Remove ${r.emoji}` : `React with ${r.emoji}`}
+              >
+                <span>{r.emoji}</span>
+                <span className="font-medium">{r.count}</span>
+              </button>
+            ))}
+            {/* Add-reaction button */}
+            <div ref={pickerRef} className="relative">
+              <button
+                onClick={() => setPickerOpen((v) => !v)}
+                className="inline-flex items-center justify-center w-6 h-5 rounded-full border border-bg-600/50 bg-bg-700/40 text-muted hover:text-fg hover:bg-bg-600/60 transition-colors text-xs"
+                title="Add reaction"
+              >
+                +
+              </button>
+              {pickerOpen && (
+                <EmojiPicker onPick={(emoji) => handleReaction(emoji, (msg.reactions ?? []).find(r => r.emoji === emoji)?.me ?? false)} />
+              )}
+            </div>
+            {/* Start/open thread button */}
+            {!msg.threadId && onStartThread && (
+              <button
+                onClick={() => onStartThread(msg.id, msg.content ?? "")}
+                className="inline-flex items-center justify-center h-5 px-1.5 rounded border border-bg-600/50 bg-bg-700/40 text-muted hover:text-fg hover:bg-bg-600/60 transition-colors text-xs opacity-0 group-hover:opacity-100"
+                title="Start thread"
+              >
+                🧵
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Embed card ────────────────────────────────────────────────────────────────
+function EmbedCard({ embed }: { embed: Embed }) {
+  const borderColor = embed.color
+    ? `#${embed.color.toString(16).padStart(6, "0")}`
+    : "#4f545c";
+  return (
+    <div
+      className="max-w-lg rounded-r border-l-4 bg-bg-700/60 px-3 py-2.5 text-sm"
+      style={{ borderLeftColor: borderColor }}
+    >
+      {embed.title && (
+        embed.url ? (
+          <a
+            href={embed.url}
+            target="_blank"
+            rel="noreferrer"
+            className="block mb-0.5 font-semibold text-accent-400 hover:underline"
+          >
+            {embed.title}
+          </a>
+        ) : (
+          <p className="mb-0.5 font-semibold text-fg">{embed.title}</p>
+        )
+      )}
+      {embed.description && (
+        <p className="whitespace-pre-wrap leading-relaxed text-gray-400">
+          {embed.description}
+        </p>
+      )}
+      {(embed.thumbnail?.url ?? embed.image?.url) && (
+        <img
+          src={embed.thumbnail?.url ?? embed.image!.url}
+          alt=""
+          className="mt-2 max-h-40 rounded object-cover"
+          loading="lazy"
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Emoji picker ──────────────────────────────────────────────────────────────
+const QUICK_EMOJIS = [
+  "👍","👎","❤️","😂","😮","😢","🎉","🔥",
+  "✅","❌","🤔","👀","💯","🙌","😍","😭",
+  "🫡","💀","🚀","⭐",
+];
+
+function EmojiPicker({ onPick }: { onPick: (emoji: string) => void }) {
+  return (
+    <div className="absolute bottom-full left-0 z-50 mb-1 rounded-lg border border-bg-600/60 bg-bg-700 p-2 shadow-xl">
+      <div className="grid grid-cols-5 gap-0.5">
+        {QUICK_EMOJIS.map((e) => (
+          <button
+            key={e}
+            onClick={() => onPick(e)}
+            className="flex h-8 w-8 items-center justify-center rounded text-lg transition-colors hover:bg-bg-600/60"
+          >
+            {e}
+          </button>
+        ))}
       </div>
     </div>
   );

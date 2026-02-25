@@ -23,7 +23,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/search/messages", get(search_messages_global))
         .route("/servers/{server_id}/search", get(search_server_messages))
         .route("/channels/{channel_id}/search/meili", get(search_channel_messages))
-        .route_layer(middleware::from_fn(crate::middleware::auth_middleware))
+        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
 }
 
 // ============================================================

@@ -43,7 +43,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/users/@me/themes", get(get_my_themes).post(install_theme))
         .route("/users/@me/themes/{theme_id}", delete(uninstall_theme))
         .route("/users/@me/themes/{theme_id}/activate", post(activate_theme))
-        .route_layer(middleware::from_fn(crate::middleware::auth_middleware))
+        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
 }
 
 // ============================================================================

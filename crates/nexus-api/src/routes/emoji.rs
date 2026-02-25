@@ -40,7 +40,7 @@ pub fn router() -> Router<Arc<AppState>> {
             "/servers/{server_id}/emojis/{emoji_id}",
             get(get_emoji).patch(update_emoji).delete(delete_emoji),
         )
-        .route_layer(middleware::from_fn(crate::middleware::auth_middleware))
+        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
 }
 
 // ============================================================

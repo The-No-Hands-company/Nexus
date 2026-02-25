@@ -1,28 +1,35 @@
-//! Matrix Application Service (AS) bridge.
+//! Matrix Application Service (AS) bridge — full implementation.
 //!
 //! The bridge acts as a Matrix AS registered on a Matrix homeserver
 //! (Synapse, Conduit, etc.). It translates between:
 //!
 //! - **Nexus → Matrix**: when a Nexus user posts in a bridged channel the
-//!   bridge relays the message to the Matrix room via the homeserver AS API.
+//!   bridge relays the message to the Matrix room via the CS API.
 //! - **Matrix → Nexus**: the homeserver pushes new Matrix events to this
 //!   bridge via `PUT /_matrix/app/v1/transactions/{txnId}`. The bridge
-//!   converts them to Nexus events and dispatches them internally.
+//!   converts them to Nexus messages (stored in the DB) and dispatches
+//!   gateway `MESSAGE_CREATE` events so all connected clients are notified.
 //!
 //! # Registration
 //!
-//! A `registration.yaml` file (not this crate) must be provided to the Matrix
-//! homeserver that registers this AS with the correct `hs_token`, `as_token`,
-//! and `url` fields.
+//! A `registration.yaml` file (provided to the Matrix homeserver) must set:
+//! - `url`: public URL of the Nexus server (e.g. `https://nexus.example.com`)
+//! - `as_token`: matches `NEXUS_MATRIX_AS_TOKEN` env var
+//! - `hs_token`: matches `NEXUS_MATRIX_HS_TOKEN` env var
+//! - `namespaces.users`: `@matrix_.*:nexus.server` — ghost user pattern
 //!
-//! # Status: stub implementation
+//! # Environment variables
 //!
-//! This module provides the type definitions and handler stubs for the Matrix
-//! AS protocol. Full relay logic will be implemented in v0.8.
+//! | Variable                  | Description                                              |
+//! |---------------------------|----------------------------------------------------------|
+//! | `NEXUS_MATRIX_HS_URL`     | Matrix homeserver base URL                               |
+//! | `NEXUS_MATRIX_AS_TOKEN`   | Token this AS sends to the HS                            |
+//! | `NEXUS_MATRIX_HS_TOKEN`   | Token the HS sends to this AS (validated on every push)  |
+//! | `NEXUS_MATRIX_BOT_MXID`  | `@bot:nexus.example.com` — ghost relay user              |
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
+use uuid::Uuid;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -76,19 +83,30 @@ pub struct BridgeConfig {
     pub bot_mxid: String,
 }
 
+impl BridgeConfig {
+    /// Load configuration from environment variables.
+    ///
+    /// Returns `None` if `NEXUS_MATRIX_HS_URL` is not set (bridge disabled).
+    pub fn from_env() -> Option<Self> {
+        let homeserver_url = std::env::var("NEXUS_MATRIX_HS_URL").ok()?;
+        if homeserver_url.is_empty() {
+            return None;
+        }
+        Some(BridgeConfig {
+            homeserver_url,
+            as_token: std::env::var("NEXUS_MATRIX_AS_TOKEN").unwrap_or_default(),
+            hs_token: std::env::var("NEXUS_MATRIX_HS_TOKEN").unwrap_or_default(),
+            bot_mxid: std::env::var("NEXUS_MATRIX_BOT_MXID").unwrap_or_default(),
+        })
+    }
+}
+
 // ─── Bridge ──────────────────────────────────────────────────────────────────
 
 /// Matrix Application Service bridge.
-///
-/// Create one via [`MatrixBridge::new`] and call:
-///
-/// - [`MatrixBridge::handle_transaction`] from the AS HTTP handler.
-/// - [`MatrixBridge::send_to_matrix`] when a Nexus message should be relayed.
 pub struct MatrixBridge {
-    config: BridgeConfig,
+    pub config: BridgeConfig,
     http: reqwest::Client,
-    /// Optional: channel → Matrix room ID mapping. Populated lazily.
-    room_map: HashMap<String, String>,
 }
 
 impl MatrixBridge {
@@ -98,67 +116,219 @@ impl MatrixBridge {
             .user_agent(concat!("Nexus-Federation/", env!("CARGO_PKG_VERSION")))
             .build()
             .expect("failed to build Matrix bridge http client");
-        Self { config, http, room_map: HashMap::new() }
+        Self { config, http }
     }
 
     // ── Inbound (Matrix → Nexus) ────────────────────────────────────────────
 
     /// Handle an inbound transaction from the Matrix homeserver.
     ///
-    /// Called from the `PUT /_matrix/app/v1/transactions/{txnId}` route.
-    /// Returns a list of Nexus events to dispatch internally.
-    pub async fn handle_transaction(&self, txn: MatrixTransaction) -> Vec<BridgedEvent> {
+    /// For each recognised event this method:
+    /// 1. Resolves the Matrix room to a Nexus channel via the DB.
+    /// 2. Finds or creates a ghost Nexus user for the Matrix sender.
+    /// 3. Stores the message in the Nexus DB.
+    /// 4. Returns [`BridgedEvent`] items so the caller can fire gateway events.
+    ///
+    /// Called from `PUT /_matrix/app/v1/transactions/{txnId}`.
+    pub async fn handle_transaction(
+        &self,
+        pool: &sqlx::AnyPool,
+        txn: MatrixTransaction,
+    ) -> Vec<BridgedEvent> {
         let mut out = Vec::new();
+
         for ev in txn.events {
             match ev.event_type.as_str() {
                 "m.room.message" => {
-                    if let Some(bridged) = self.convert_matrix_message(&ev) {
-                        out.push(bridged);
+                    match self.handle_matrix_message(pool, &ev).await {
+                        Ok(Some(bridged)) => out.push(bridged),
+                        Ok(None) => {}
+                        Err(e) => {
+                            warn!("Bridge: failed to handle m.room.message {}: {}",
+                                ev.event_id.as_deref().unwrap_or("?"), e);
+                        }
                     }
                 }
                 "m.room.member" => {
-                    debug!("Matrix member event from {} in {}", ev.sender, ev.room_id);
-                    // TODO: sync membership state to Nexus
+                    if let Err(e) = self.handle_matrix_member(pool, &ev).await {
+                        warn!("Bridge: failed to handle m.room.member: {}", e);
+                    }
                 }
                 other => {
-                    debug!("Ignoring unrecognised Matrix event type: {}", other);
+                    debug!("Bridge: ignoring unrecognised Matrix event type: {}", other);
                 }
             }
         }
+
         out
     }
 
-    /// Convert a Matrix `m.room.message` to a [`BridgedEvent`].
-    fn convert_matrix_message(&self, ev: &MatrixEvent) -> Option<BridgedEvent> {
-        let body = ev.content.get("body")?.as_str()?.to_owned();
-        let msgtype = ev.content.get("msgtype").and_then(|v| v.as_str()).unwrap_or("m.text");
-        if msgtype != "m.text" && msgtype != "m.notice" {
-            return None; // Skip files, stickers, etc. for now
+    /// Handle a `m.room.message` event from Matrix.
+    async fn handle_matrix_message(
+        &self,
+        pool: &sqlx::AnyPool,
+        ev: &MatrixEvent,
+    ) -> Result<Option<BridgedEvent>, BridgeError> {
+        let body = ev
+            .content
+            .get("body")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_owned();
+
+        let msgtype = ev
+            .content
+            .get("msgtype")
+            .and_then(|v| v.as_str())
+            .unwrap_or("m.text");
+
+        if !matches!(msgtype, "m.text" | "m.notice" | "m.emote") {
+            debug!("Bridge: skipping msgtype={} from {}", msgtype, ev.sender);
+            return Ok(None);
         }
-        Some(BridgedEvent::MessageCreate {
+
+        // Resolve room → Nexus channel.
+        let mapping =
+            nexus_db::repository::matrix_bridge::get_channel_for_room(pool, &ev.room_id)
+                .await
+                .map_err(|e| BridgeError::Database(e.to_string()))?;
+
+        let mapping = match mapping {
+            Some(m) => m,
+            None => {
+                debug!("Bridge: no channel mapped for room {}", ev.room_id);
+                return Ok(None);
+            }
+        };
+
+        let channel_id = mapping.channel_id;
+
+        // Resolve MXID → ghost user.
+        let display_name = ev.content.get("displayname").and_then(|v| v.as_str());
+        let avatar_url = ev.content.get("avatar_url").and_then(|v| v.as_str());
+
+        let ghost = nexus_db::repository::matrix_bridge::find_or_create_ghost(
+            pool,
+            &ev.sender,
+            display_name,
+            avatar_url,
+        )
+        .await
+        .map_err(|e| BridgeError::Database(e.to_string()))?;
+
+        // Store message in Nexus DB.
+        let message_id = nexus_common::snowflake::generate_id();
+        nexus_db::repository::messages::create_message(
+            pool,
+            message_id,
+            channel_id,
+            ghost.id,
+            &body,
+            0,  // message_type: normal
+            None, None,
+            &[],
+            &[],
+            false,
+        )
+        .await
+        .map_err(|e| BridgeError::Database(e.to_string()))?;
+
+        info!(
+            "Bridge: Matrix message from {} in {} → nexus channel {} (msg {})",
+            ev.sender, ev.room_id, channel_id, message_id
+        );
+
+        Ok(Some(BridgedEvent::MessageCreate {
+            nexus_channel_id: channel_id,
+            nexus_message_id: message_id,
             matrix_room_id: ev.room_id.clone(),
             sender_mxid: ev.sender.clone(),
+            sender_display_name: ghost.display_name.clone(),
+            ghost_user_id: ghost.id,
             body,
             timestamp_ms: ev.origin_server_ts,
-        })
+        }))
+    }
+
+    /// Handle a `m.room.member` event — find or create ghost user.
+    async fn handle_matrix_member(
+        &self,
+        pool: &sqlx::AnyPool,
+        ev: &MatrixEvent,
+    ) -> Result<(), BridgeError> {
+        let membership = ev
+            .content
+            .get("membership")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+
+        if membership == "join" {
+            let display_name = ev.content.get("displayname").and_then(|v| v.as_str());
+            let avatar_url = ev.content.get("avatar_url").and_then(|v| v.as_str())
+                .filter(|u| u.starts_with("mxc://"));
+
+            nexus_db::repository::matrix_bridge::find_or_create_ghost(
+                pool, &ev.sender, display_name, avatar_url,
+            )
+            .await
+            .map_err(|e| BridgeError::Database(e.to_string()))?;
+
+            info!("Bridge: ghost user updated/created for {}", ev.sender);
+        } else {
+            debug!("Bridge: m.room.member membership={} from {} (no action)", membership, ev.sender);
+        }
+
+        Ok(())
     }
 
     // ── Outbound (Nexus → Matrix) ───────────────────────────────────────────
 
-    /// Relay a Nexus message to a Matrix room as the bridge bot.
+    /// Relay a Nexus message to the Matrix room mapped to `channel_id`.
     ///
-    /// # Arguments
-    ///
-    /// * `room_id`      — The Matrix room ID (`!id:server_name`)
-    /// * `display_name` — Nexus display name of the sender (for the message prefix)
-    /// * `body`         — Plain-text message body
-    pub async fn send_to_matrix(
+    /// Looks up the room mapping in the DB; if no mapping exists, returns
+    /// `Err(BridgeError::RoomNotFound)` which the caller should silently
+    /// ignore for non-bridged channels.
+    pub async fn relay_to_matrix(
         &self,
-        room_id: &str,
+        pool: &sqlx::AnyPool,
+        channel_id: Uuid,
+        message_id: Uuid,
         display_name: &str,
         body: &str,
     ) -> Result<(), BridgeError> {
-        let txn_id = uuid::Uuid::new_v4().simple().to_string();
+        let mapping =
+            nexus_db::repository::matrix_bridge::get_room_for_channel(pool, channel_id)
+                .await
+                .map_err(|e| BridgeError::Database(e.to_string()))?
+                .ok_or_else(|| BridgeError::RoomNotFound(channel_id.to_string()))?;
+
+        // Use per-room token if configured, fall back to global token.
+        let token = if mapping.as_token.is_empty() {
+            &self.config.as_token
+        } else {
+            &mapping.as_token
+        };
+
+        // Stable txnId: Nexus message UUID (idempotent on retry).
+        self.send_to_matrix(
+            &mapping.matrix_room_id,
+            token,
+            &message_id.simple().to_string(),
+            display_name,
+            body,
+        )
+        .await
+    }
+
+    /// Low-level: PUT a message to a Matrix room via the CS API.
+    pub async fn send_to_matrix(
+        &self,
+        room_id: &str,
+        token: &str,
+        txn_id: &str,
+        display_name: &str,
+        body: &str,
+    ) -> Result<(), BridgeError> {
         let url = format!(
             "{}/_matrix/client/v3/rooms/{}/send/m.room.message/{}",
             self.config.homeserver_url,
@@ -168,7 +338,6 @@ impl MatrixBridge {
 
         let content = MatrixMessageContent {
             msgtype: "m.text".to_owned(),
-            // Format as `Display Name: message body` so Matrix users see attribution.
             body: format!("{}: {}", display_name, body),
             formatted_body: Some(format!(
                 "<b>{}</b>: {}",
@@ -181,7 +350,7 @@ impl MatrixBridge {
         let resp = self
             .http
             .put(&url)
-            .header("Authorization", format!("Bearer {}", self.config.as_token))
+            .header("Authorization", format!("Bearer {}", token))
             .json(&content)
             .send()
             .await
@@ -193,22 +362,70 @@ impl MatrixBridge {
             return Err(BridgeError::HomeserverError(status.as_u16(), body));
         }
 
-        info!("Relayed message to Matrix room {}", room_id);
+        info!("Bridge: relayed message {} to Matrix room {}", txn_id, room_id);
         Ok(())
     }
 
-    // ── Room mapping ────────────────────────────────────────────────────────
+    // ── Room alias management ───────────────────────────────────────────────
 
-    /// Map a Nexus channel ID to a Matrix room ID.
-    ///
-    /// Returns `None` if this channel has no Matrix bridge configured.
-    pub fn matrix_room_for_channel(&self, channel_id: &str) -> Option<&str> {
-        self.room_map.get(channel_id).map(String::as_str)
+    /// Create a room alias on the Matrix homeserver for a Nexus channel.
+    pub async fn create_room_alias(&self, room_id: &str, alias: &str) -> Result<(), BridgeError> {
+        let url = format!(
+            "{}/_matrix/client/v3/directory/room/{}",
+            self.config.homeserver_url,
+            urlencoded(alias)
+        );
+
+        let resp = self
+            .http
+            .put(&url)
+            .header("Authorization", format!("Bearer {}", self.config.as_token))
+            .json(&serde_json::json!({ "room_id": room_id }))
+            .send()
+            .await
+            .map_err(|e| BridgeError::Http(e.to_string()))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(BridgeError::HomeserverError(status.as_u16(), body));
+        }
+
+        info!("Bridge: created room alias {} → {}", alias, room_id);
+        Ok(())
     }
 
-    /// Register a channel ↔ room mapping.
-    pub fn register_room_mapping(&mut self, channel_id: impl Into<String>, room_id: impl Into<String>) {
-        self.room_map.insert(channel_id.into(), room_id.into());
+    /// Resolve a room alias on the homeserver → room ID.
+    pub async fn resolve_room_alias(&self, alias: &str) -> Result<String, BridgeError> {
+        let url = format!(
+            "{}/_matrix/client/v3/directory/room/{}",
+            self.config.homeserver_url,
+            urlencoded(alias)
+        );
+
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.config.as_token))
+            .send()
+            .await
+            .map_err(|e| BridgeError::Http(e.to_string()))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(BridgeError::HomeserverError(status.as_u16(), body));
+        }
+
+        let json: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| BridgeError::Http(e.to_string()))?;
+
+        json["room_id"]
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| BridgeError::Http("missing room_id in alias response".into()))
     }
 }
 
@@ -218,14 +435,27 @@ impl MatrixBridge {
 #[derive(Debug, Clone)]
 pub enum BridgedEvent {
     MessageCreate {
+        /// Nexus channel that the message lives in.
+        nexus_channel_id: Uuid,
+        /// Nexus message ID (snowflake) just created in the DB.
+        nexus_message_id: Uuid,
+        /// Originating Matrix room.
         matrix_room_id: String,
+        /// Full MXID of the sender (`@user:server`).
         sender_mxid: String,
+        /// Display name of the sender (from ghost user table).
+        sender_display_name: Option<String>,
+        /// Ghost Nexus user ID that authored the DB message.
+        ghost_user_id: Uuid,
+        /// Plain-text body.
         body: String,
+        /// Matrix `origin_server_ts`.
         timestamp_ms: i64,
     },
     MemberJoin {
         matrix_room_id: String,
         mxid: String,
+        display_name: Option<String>,
     },
     MemberLeave {
         matrix_room_id: String,
@@ -243,6 +473,8 @@ pub enum BridgeError {
     HomeserverError(u16, String),
     #[error("Room not found for channel '{0}'")]
     RoomNotFound(String),
+    #[error("Database error: {0}")]
+    Database(String),
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -256,4 +488,15 @@ fn html_escape(s: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+}
+
+/// Convert a Matrix MXID to a stable Nexus username for ghost users.
+///
+/// e.g. `@alice:matrix.org` → `matrix_alice_matrix.org`
+pub fn mxid_to_username(mxid: &str) -> String {
+    // Strip leading '@'
+    let without_at = mxid.trim_start_matches('@');
+    // Replace ':' (only the first occurrence — server separator) with '_'
+    let username = without_at.replacen(':', "_", 1).replace('.', ".");
+    format!("matrix_{}", username)
 }

@@ -125,6 +125,13 @@ function mapMessage(m: Raw) {
     content: m.content,
     createdAt: m.created_at,
     editedAt: m.edited_at ?? null,
+    reactions: (m.reactions as Raw[] | undefined)?.map((r) => ({
+      emoji: r.emoji as string,
+      count: r.count as number,
+      me: (r.me as boolean) ?? false,
+    })) ?? [],
+    embeds: (m.embeds as Raw[] | undefined) ?? [],
+    threadId: (m.thread_id as string | undefined) ?? undefined,
   };
 }
 
@@ -190,6 +197,32 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
       return mapServer(raw) as T;
     }
 
+    case "update_server": {
+      const raw = await apiFetch<Raw>("PATCH", `/api/v1/servers/${args.serverId}`, {
+        name: args.name ?? undefined,
+        description: args.description ?? undefined,
+        is_public: args.isPublic ?? undefined,
+        region: args.region ?? undefined,
+      });
+      return mapServer(raw) as T;
+    }
+
+    case "delete_server": {
+      return apiFetch<T>("DELETE", `/api/v1/servers/${args.serverId}`);
+    }
+
+    case "list_server_invites": {
+      const raw = await apiFetch<Raw[]>("GET", `/api/v1/servers/${args.serverId}/invites`);
+      return raw.map((r) => ({
+        code: r.code as string,
+        serverId: r.server_id as string,
+        maxUses: (r.max_uses as number | null) ?? null,
+        uses: (r.uses as number) ?? 0,
+        expiresAt: (r.expires_at as string | null) ?? null,
+        createdAt: r.created_at as string,
+      })) as unknown as T;
+    }
+
     case "create_invite": {
       return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/invites`, {
         max_uses: args.maxUses ?? null,
@@ -245,11 +278,101 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
       return undefined as unknown as T;
     }
 
+    case "add_reaction": {
+      const emoji = encodeURIComponent(String(args.emoji));
+      return apiFetch<T>(
+        "PUT",
+        `/api/v1/channels/${args.channelId}/messages/${args.messageId}/reactions/${emoji}/@me`
+      );
+    }
+
+    case "remove_reaction": {
+      const emoji = encodeURIComponent(String(args.emoji));
+      return apiFetch<T>(
+        "DELETE",
+        `/api/v1/channels/${args.channelId}/messages/${args.messageId}/reactions/${emoji}/@me`
+      );
+    }
+
+    // ── Threads ───────────────────────────────────────────────────────────
+    case "create_thread": {
+      const raw = await apiFetch<Raw>("POST", `/api/v1/channels/${args.channelId}/threads`, {
+        title: args.title,
+        auto_archive_minutes: 60,
+      });
+      return {
+        id: raw.id as string,
+        parentChannelId: raw.parent_channel_id as string,
+        parentMessageId: (raw.parent_message_id as string | undefined) ?? undefined,
+        ownerId: raw.owner_id as string,
+        title: raw.title as string,
+        messageCount: (raw.message_count as number) ?? 0,
+        memberCount: (raw.member_count as number) ?? 0,
+        archived: (raw.archived as boolean) ?? false,
+        locked: (raw.locked as boolean) ?? false,
+        createdAt: raw.created_at as string,
+      } as unknown as T;
+    }
+
+    case "get_thread": {
+      const raw = await apiFetch<Raw>(
+        "GET",
+        `/api/v1/channels/${args.channelId}/threads/${args.threadId}`
+      );
+      return {
+        id: raw.id as string,
+        parentChannelId: raw.parent_channel_id as string,
+        parentMessageId: (raw.parent_message_id as string | undefined) ?? undefined,
+        ownerId: raw.owner_id as string,
+        title: raw.title as string,
+        messageCount: (raw.message_count as number) ?? 0,
+        memberCount: (raw.member_count as number) ?? 0,
+        archived: (raw.archived as boolean) ?? false,
+        locked: (raw.locked as boolean) ?? false,
+        createdAt: raw.created_at as string,
+      } as unknown as T;
+    }
+
+    // ── Search ────────────────────────────────────────────────────────────
+    case "search_messages": {
+      const params = new URLSearchParams({ q: String(args.q) });
+      if (args.serverId) params.set("server_id", String(args.serverId));
+      if (args.channelId) params.set("channel_id", String(args.channelId));
+      if (args.limit) params.set("limit", String(args.limit));
+      if (args.offset) params.set("offset", String(args.offset));
+      const raw = await apiFetch<Raw>("GET", `/api/v1/search/messages?${params}`);
+      return {
+        query: raw.query as string,
+        totalHits: (raw.total_hits as number | undefined) ?? null,
+        hits: ((raw.hits as Raw[]) ?? []).map((h) => ({
+          id: h.id as string,
+          channelId: h.channel_id as string,
+          authorId: h.author_id as string,
+          authorUsername: (h.author_username as string) ?? "Unknown",
+          content: (h.content as string) ?? "",
+          createdAt: h.created_at as string,
+        })),
+      } as unknown as T;
+    }
+
     case "update_profile": {
       return apiFetch<T>("PATCH", "/api/v1/users/me", {
         display_name: args.displayName ?? undefined,
         avatar_url: args.avatarUrl ?? undefined,
       });
+    }
+
+    case "list_devices": {
+      const raw = await apiFetch<Raw[]>("GET", "/api/v1/devices");
+      return raw.map((d) => ({
+        id: d.id as string,
+        userId: d.user_id as string,
+        name: (d.name as string) ?? "Unknown Device",
+        deviceType: (d.device_type as string) ?? "unknown",
+        lastSeenAt: (d.last_seen_at as string | undefined) ?? undefined,
+        verified: (d.verified as boolean) ?? false,
+        createdAt: d.created_at as string,
+      })) as unknown as T;
     }
 
     // ── Friends & Relationships ───────────────────────────────────────

@@ -42,7 +42,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route(
             "/directory/rooms/join",
             post(join_federated_room)
-                .route_layer(middleware::from_fn(crate::middleware::auth_middleware)),
+                .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware)),
         )
 }
 

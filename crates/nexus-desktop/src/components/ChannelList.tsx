@@ -2,6 +2,7 @@ import { useState, KeyboardEvent } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { useStore } from "../store";
 import clsx from "clsx";
+import ServerSettingsModal from "./ServerSettingsModal";
 
 export default function ChannelList() {
   const { channels, activeChannelId, setActiveChannel, activeServerId, servers, createChannel, unreadChannels,
@@ -14,6 +15,7 @@ export default function ChannelList() {
   const [creatingType, setCreatingType] = useState<"text" | "voice" | null>(null);
   const [newChannelName, setNewChannelName] = useState("");
   const [createError, setCreateError] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const activeServer = servers.find((s) => s.id === activeServerId);
 
@@ -142,15 +144,27 @@ export default function ChannelList() {
   }
 
   return (
+    <>
     <div className="w-56 bg-bg-800 flex flex-col shrink-0 overflow-hidden border-r border-bg-600/40">
       {/* Space name header */}
-      <div className="px-3 py-3 font-semibold text-sm text-fg no-select shrink-0 flex items-center gap-2">
+      <div className="px-3 py-3 font-semibold text-sm text-fg no-select shrink-0 flex items-center gap-2 group">
         <div className="w-5 h-5 rounded bg-accent-500/20 flex items-center justify-center shrink-0">
           <span className="text-accent-400 text-[10px] font-bold leading-none">
             {activeServer?.name.slice(0, 1).toUpperCase()}
           </span>
         </div>
-        <span className="truncate">{activeServer?.name ?? "Space"}</span>
+        <span className="truncate flex-1">{activeServer?.name ?? "Space"}</span>
+        {activeServer && (
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="opacity-0 group-hover:opacity-100 p-1 rounded text-muted hover:text-fg hover:bg-bg-600/60 transition-all"
+            title="Server settings"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
+            </svg>
+          </button>
+        )}
       </div>
 
       <div className="h-px bg-bg-600/40 mx-3 shrink-0" />
@@ -274,6 +288,15 @@ export default function ChannelList() {
         </>
       </div>
     </div>
+
+    {/* Server settings modal */}
+    {settingsOpen && activeServer && (
+      <ServerSettingsModal
+        server={activeServer}
+        onClose={() => setSettingsOpen(false)}
+      />
+    )}
+    </>
   );
 }
 

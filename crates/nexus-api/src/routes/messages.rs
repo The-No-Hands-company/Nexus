@@ -72,7 +72,7 @@ pub fn router() -> Router<Arc<AppState>> {
         // Search
         .route("/channels/{channel_id}/search", get(search_messages))
         // All routes require authentication
-        .route_layer(middleware::from_fn(crate::middleware::auth_middleware))
+        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
 }
 
 // ============================================================================

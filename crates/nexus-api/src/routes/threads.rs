@@ -52,7 +52,7 @@ pub fn router() -> Router<Arc<AppState>> {
             "/channels/{channel_id}/threads/{thread_id}/members",
             get(list_thread_members),
         )
-        .route_layer(middleware::from_fn(crate::middleware::auth_middleware))
+        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
 }
 
 // ============================================================

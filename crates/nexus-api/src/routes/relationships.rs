@@ -37,7 +37,7 @@ pub fn router() -> Router<Arc<AppState>> {
                 .delete(delete_relationship),
         )
         .route("/users/search", get(search_users))
-        .route_layer(middleware::from_fn(crate::middleware::auth_middleware))
+        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
 }
 
 // ── Request/Response shapes ───────────────────────────────────────────────────

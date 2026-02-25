@@ -693,31 +693,39 @@ async fn matrix_as_transaction(
             bot_mxid: std::env::var("NEXUS_MATRIX_BOT_MXID").unwrap_or_default(),
         });
 
-        for bridged in bridge.handle_transaction(txn).await {
+        for bridged in bridge.handle_transaction(&state.db.pool, txn).await {
             match bridged {
                 nexus_federation::BridgedEvent::MessageCreate {
+                    nexus_channel_id,
+                    nexus_message_id,
                     matrix_room_id,
                     sender_mxid,
+                    sender_display_name,
+                    ghost_user_id,
                     body,
                     timestamp_ms,
                 } => {
                     let gw = nexus_common::gateway_event::GatewayEvent {
                         event_type: "MESSAGE_CREATE".to_owned(),
                         data: json!({
+                            "id": nexus_message_id,
+                            "channel_id": nexus_channel_id,
+                            "author_id": ghost_user_id,
+                            "content": body,
+                            "timestamp_ms": timestamp_ms,
                             "source": "matrix",
                             "matrix_room_id": matrix_room_id,
                             "sender_mxid": sender_mxid,
-                            "content": { "body": body },
-                            "timestamp_ms": timestamp_ms,
+                            "sender_display_name": sender_display_name,
                         }),
                         server_id: None,
-                        channel_id: None,
-                        user_id: None,
+                        channel_id: Some(nexus_channel_id),
+                        user_id: Some(ghost_user_id),
                     };
                     let _ = state.gateway_tx.send(gw);
                 }
-                nexus_federation::BridgedEvent::MemberJoin { matrix_room_id, mxid } => {
-                    debug!("Matrix member join: {} in {}", mxid, matrix_room_id);
+                nexus_federation::BridgedEvent::MemberJoin { matrix_room_id, mxid, display_name } => {
+                    debug!("Matrix member join: {} ({:?}) in {}", mxid, display_name, matrix_room_id);
                 }
                 nexus_federation::BridgedEvent::MemberLeave { matrix_room_id, mxid } => {
                     debug!("Matrix member leave: {} in {}", mxid, matrix_room_id);

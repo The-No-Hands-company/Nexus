@@ -25,7 +25,7 @@ use axum::{
 };
 use futures_util::{SinkExt, StreamExt};
 use nexus_common::gateway_event::GatewayEvent;
-use nexus_db::repository::{channels, members, read_states, servers};
+use nexus_db::repository::{bots, channels, members, read_states, servers};
 use serde::{Deserialize, Serialize};
 use session::SessionManager;
 use std::sync::Arc;
@@ -69,8 +69,16 @@ impl GatewayState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op", content = "d")]
 pub enum GatewayMessage {
-    /// Client → Server: Authenticate with access token
+    /// Client → Server: Authenticate with access token (human users — sends JWT)
     Identify { token: String },
+
+    /// Client → Server: Bot-specific identify.
+    ///
+    /// The `token` field must be the full `"Bot <raw-token>"` string (same
+    /// format as the REST `Authorization` header).  `intents` is a bitfield
+    /// declaring which event categories the bot wants to receive; passing
+    /// `0xFFFFFFFF` (all bits set) subscribes to every intent.
+    BotIdentify { token: String, intents: u32 },
 
     /// Server → Client: Connection accepted, here's your session info
     Ready {
@@ -296,6 +304,109 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
                                 );
                             }
                             Err(_) => {
+                                let _ = direct_tx.send(serde_json::json!({
+                                    "op": "InvalidSession",
+                                    "d": null,
+                                })).await;
+                            }
+                        }
+                    }
+
+                    // ── Bot-specific identify ─────────────────────────────
+                    GatewayMessage::BotIdentify { token, intents } => {
+                        let token_hash = {
+                            use sha2::{Digest, Sha256};
+                            // Accept "Bot <raw>" or bare raw token
+                            let raw = token.strip_prefix("Bot ").unwrap_or(&token);
+                            let mut h = Sha256::new();
+                            h.update(raw.as_bytes());
+                            format!("{:x}", h.finalize())
+                        };
+
+                        match bots::get_bot_by_token_hash(&state.db.pool, &token_hash).await {
+                            Ok(Some(bot)) => {
+                                let bot_id = bot.id;
+                                authenticated = true;
+                                user_id = Some(bot_id);
+                                *authed_user_id.write().await = Some(bot_id);
+
+                                // Collect all servers this bot is installed in
+                                let bot_installs = bots::get_bot_servers(&state.db.pool, bot_id)
+                                    .await
+                                    .unwrap_or_default();
+
+                                let server_ids: Vec<uuid::Uuid> = bot_installs
+                                    .iter()
+                                    .map(|i| i.server_id)
+                                    .collect();
+
+                                // Resolve server metadata for the READY payload
+                                let mut server_payloads: Vec<serde_json::Value> = Vec::new();
+                                for sid in &server_ids {
+                                    if let Ok(Some(srv)) =
+                                        servers::find_by_id(&state.db.pool, *sid).await
+                                    {
+                                        let chans = channels::list_server_channels(
+                                            &state.db.pool, *sid,
+                                        )
+                                        .await
+                                        .unwrap_or_default();
+
+                                        server_payloads.push(serde_json::json!({
+                                            "id": srv.id,
+                                            "name": srv.name,
+                                            "icon": srv.icon,
+                                            "owner_id": srv.owner_id,
+                                            "member_count": srv.member_count,
+                                            "channels": chans.iter().map(|c| serde_json::json!({
+                                                "id": c.id,
+                                                "name": c.name,
+                                                "channel_type": c.channel_type,
+                                                "position": c.position,
+                                                "parent_id": c.parent_id,
+                                                "last_message_id": c.last_message_id,
+                                                "topic": c.topic,
+                                                "nsfw": c.nsfw,
+                                            })).collect::<Vec<_>>(),
+                                        }));
+                                    }
+                                }
+
+                                *subscribed.write().await = server_ids.clone();
+
+                                state.sessions.register(
+                                    session_id.clone(),
+                                    bot_id,
+                                    server_ids,
+                                ).await;
+
+                                let ready = serde_json::json!({
+                                    "op": "Ready",
+                                    "d": {
+                                        "session_id": session_id,
+                                        "type": "bot",
+                                        "intents": intents,
+                                        "application": {
+                                            "id": bot.id,
+                                            "name": bot.name,
+                                            "description": bot.description,
+                                            "avatar": bot.avatar,
+                                            "is_public": bot.is_public,
+                                        },
+                                        "servers": server_payloads,
+                                    }
+                                });
+
+                                let _ = direct_tx.send(ready).await;
+
+                                tracing::info!(
+                                    session = %session_id,
+                                    bot = %bot.name,
+                                    bot_id = %bot_id,
+                                    "Bot gateway READY sent"
+                                );
+                            }
+                            _ => {
                                 let _ = direct_tx.send(serde_json::json!({
                                     "op": "InvalidSession",
                                     "d": null,

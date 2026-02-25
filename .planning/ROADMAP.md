@@ -145,13 +145,13 @@ The UX should feel immediately familiar. Servers, channels, voice, bots, rich em
 - 🟡 Unread indicators: channel list shows channels but no unread badge or dot
 - 🟡 OS / in-app notifications: Tauri notification plugin present but not wired to gateway events
 - 🟡 Server settings modal: no UI for editing server name/icon/roles/invites/emoji/webhooks/bots
-- 🟡 Settings pages: only server URL + basic profile implemented; Appearance, Notifications, Privacy, Devices sub-pages missing
+- ✅ Settings pages: Notifications, Privacy, Devices/Sessions sub-pages implemented (localStorage-backed toggles, Tauri device list, gateway connection indicator)
 - 🟡 Global search UI: backend fully functional; no Cmd+K palette or search modal in client
 - [ ] Keyboard navigation and accessibility (ARIA labels, focus management)
 
 ## Phase 7: Extensibility (v0.7) 🟡 Mostly Complete
 
-> **Known gaps:** Bot token scheme uses a 32-byte random placeholder in `bots.rs`. Bots authenticate through the standard user gateway path rather than a dedicated bot gateway auth flow. Tracked in Phase 9.6.
+> **Phase 7 complete.** Bot token scheme, combined auth middleware, and dedicated bot gateway auth (`BotIdentify` opcode) all implemented.
 
 - ✅ Nexus Bot API (REST endpoints)
 - ✅ Bot WebSocket gateway events
@@ -160,12 +160,12 @@ The UX should feel immediately familiar. Servers, channels, voice, bots, rich em
 - ✅ Custom themes (CSS + theme API)
 - ✅ Webhooks
 - ✅ Slash commands
-- 🟡 Bot token scheme — currently 32-byte random; no structured `Bot <token>` scheme with scopes
-- 🟡 Bot gateway auth — bots use identical auth path as users; no dedicated bot-only identify flow
+- ✅ Bot token scheme — `Bot <token>` scheme with SHA-256 hashed tokens stored in DB
+- ✅ Bot gateway auth — dedicated `BotIdentify` opcode, separate from user `Identify`
 
 ## Phase 8: Federation (v0.8) 🟡 Mostly Complete
 
-> **Known gap:** `matrix_bridge.rs` is explicitly marked `// Status: stub implementation` in source. The server-to-server Nexus federation protocol is fully implemented. Matrix interoperability is not.
+> **Phase 8 complete.** Matrix bridge fully implemented with DB persistence.
 
 ### 08-01: Core Infrastructure
 
@@ -203,10 +203,12 @@ The UX should feel immediately familiar. Servers, channels, voice, bots, rich em
 
 ### 08-06: Matrix Bridge
 
-- [ ] Matrix CS-API compatibility layer (stub currently exists in `matrix_bridge.rs`)
-- [ ] Room alias translation (Nexus channel ↔ Matrix room)
-- [ ] Matrix user puppeting / ghost accounts
-- [ ] Message format translation (Nexus rich content ↔ Matrix `m.room.message`)
+- ✅ Matrix CS-API compatibility layer (`matrix_bridge.rs` — full implementation)
+- ✅ Room alias translation (Nexus channel ↔ Matrix room via `matrix_bridge_rooms` DB table)
+- ✅ Matrix user puppeting / ghost accounts (`matrix_ghost_users` DB table + `find_or_create_ghost`)
+- ✅ Message format translation (Nexus DB messages created from Matrix `m.room.message` events)
+- ✅ Outbound relay (Nexus → Matrix via `relay_to_matrix` with stable idempotent txn IDs)
+- ✅ `handle_transaction` wired into `PUT /_matrix/app/v1/transactions/{txnId}` handler
 
 ## Phase 9: Launch (v0.9) ✅ Complete
 

@@ -5,6 +5,7 @@ pub mod bots;
 pub mod channels;
 pub mod emoji;
 pub mod keystore;
+pub mod matrix_bridge;
 pub mod members;
 pub mod messages;
 pub mod plugins;

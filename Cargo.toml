@@ -106,6 +106,7 @@ bitflags = "2.6"
 # WebRTC (Voice/Video SFU)
 str0m = "0.16"
 socket2 = "0.6"
+bytes = "1"
 nnnoiseless = "0.5"
 systemstat = "0.2"
 

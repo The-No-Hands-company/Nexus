@@ -208,6 +208,7 @@ async fn run_server(
         server_name: config.server.name.clone(),
         federation_key,
         federation_client,
+        started_at: std::time::Instant::now(),
     };
     let api_router = build_router(api_state);
     let host: std::net::IpAddr = "0.0.0.0".parse()?;

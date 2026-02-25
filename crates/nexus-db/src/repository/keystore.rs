@@ -490,6 +490,56 @@ pub async fn list_verifications(
     Ok(rows)
 }
 
+/// List all sessions owned by a device (for session enumeration on restore).
+pub async fn list_sessions(
+    pool: &sqlx::AnyPool,
+    owner_device_id: Uuid,
+) -> Result<Vec<E2eeSession>> {
+    let rows = sqlx::query_as::<_, E2eeSession>(
+        "SELECT * FROM e2ee_sessions WHERE owner_device_id = $1 ORDER BY updated_at DESC",
+    )
+    .bind(owner_device_id.to_string())
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+/// Delete an individual session between two devices.
+pub async fn delete_session(
+    pool: &sqlx::AnyPool,
+    owner_device_id: Uuid,
+    remote_device_id: Uuid,
+) -> Result<()> {
+    sqlx::query(
+        "DELETE FROM e2ee_sessions WHERE owner_device_id = $1 AND remote_device_id = $2",
+    )
+    .bind(owner_device_id.to_string())
+    .bind(remote_device_id.to_string())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Atomically increment the sender-side ratchet step counter without touching the
+/// opaque session_state blob.  Called by the server when a SignalMessage is stored
+/// so that recipients can detect skipped ratchet steps.
+pub async fn increment_ratchet_step(
+    pool: &sqlx::AnyPool,
+    owner_device_id: Uuid,
+    remote_device_id: Uuid,
+) -> Result<()> {
+    sqlx::query(
+        "UPDATE e2ee_sessions \
+         SET ratchet_step = ratchet_step + 1, updated_at = CURRENT_TIMESTAMP \
+         WHERE owner_device_id = $1 AND remote_device_id = $2",
+    )
+    .bind(owner_device_id.to_string())
+    .bind(remote_device_id.to_string())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// Fetch the one-time pre-key for a device by key_id (for debugging / admin purposes).
 pub async fn get_one_time_pre_key(
     pool: &sqlx::AnyPool,

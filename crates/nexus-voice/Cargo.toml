@@ -23,6 +23,7 @@ redis = { workspace = true }
 # WebRTC SFU
 str0m = { workspace = true }
 socket2 = { workspace = true }
+bytes = { workspace = true }
 
 # Audio processing
 nnnoiseless = { workspace = true }

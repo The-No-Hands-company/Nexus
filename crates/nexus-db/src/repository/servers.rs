@@ -149,6 +149,25 @@ pub async fn use_invite(pool: &sqlx::AnyPool, code: &str) -> Result<(), sqlx::Er
     Ok(())
 }
 
+/// List all active (non-expired, non-exhausted) invites for a server.
+pub async fn list_server_invites(
+    pool: &sqlx::AnyPool,
+    server_id: Uuid,
+) -> Result<Vec<Invite>, sqlx::Error> {
+    let q = format!(
+        "SELECT {INVITE_COLS} FROM invites \
+         WHERE server_id = $1 \
+           AND (expires_at IS NULL OR expires_at > NOW()) \
+           AND (max_uses IS NULL OR uses < max_uses) \
+         ORDER BY created_at DESC \
+         LIMIT 50"
+    );
+    sqlx::query_as::<_, Invite>(&q)
+        .bind(server_id.to_string())
+        .fetch_all(pool)
+        .await
+}
+
 /// List public/discoverable servers.
 pub async fn list_public_servers(
     pool: &sqlx::AnyPool,

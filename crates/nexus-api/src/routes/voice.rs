@@ -57,7 +57,7 @@ pub fn router() -> Router<Arc<AppState>> {
         // Voice stats
         .route("/voice/stats", get(voice_stats))
         // All voice routes require authentication
-        .layer(middleware::from_fn(crate::middleware::auth_middleware))
+        .layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
 }
 
 /// Response for voice channel state.

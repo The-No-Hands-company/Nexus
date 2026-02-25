@@ -63,7 +63,7 @@ pub fn router() -> Router<Arc<AppState>> {
             "/interactions/{interaction_id}/callback",
             post(interaction_callback),
         )
-        .route_layer(middleware::from_fn(crate::middleware::auth_middleware))
+        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
 }
 
 // ============================================================================

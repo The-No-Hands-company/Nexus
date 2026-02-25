@@ -45,7 +45,7 @@ pub fn router() -> Router<Arc<AppState>> {
             "/servers/{server_id}/integrations/{bot_id}",
             delete(uninstall_bot),
         )
-        .route_layer(middleware::from_fn(crate::middleware::auth_middleware))
+        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
 }
 
 // ============================================================================

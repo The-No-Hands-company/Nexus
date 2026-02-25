@@ -11,6 +11,23 @@
  */
 import { useEffect, useRef } from "react";
 import { useStore, Message, VoiceParticipant } from "../store";
+import { isTauri } from "../invoke";
+
+let _sendNotification: ((title: string, body: string) => void) | null = null;
+
+// Lazily import the Tauri notification plugin — no-op in browser mode.
+async function sendOsNotification(title: string, body: string) {
+  if (!isTauri()) return;
+  try {
+    if (!_sendNotification) {
+      const mod = await import("@tauri-apps/plugin-notification");
+      _sendNotification = (t, b) => mod.sendNotification({ title: t, body: b });
+    }
+    _sendNotification(title, body);
+  } catch {
+    // plugin not available — silently skip
+  }
+}
 
 interface WireMessage {
   op: string;
@@ -18,7 +35,7 @@ interface WireMessage {
 }
 
 export function useGateway() {
-  const { session, appendMessage, setVoiceParticipants, setPttActive, setTyping } =
+  const { session, appendMessage, setVoiceParticipants, setPttActive, setTyping, updateMessageReaction } =
     useStore();
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -123,6 +140,9 @@ export function useGateway() {
             content: string;
             created_at: string;
             edited_at?: string;
+            reactions?: { emoji: string; count: number; me: boolean }[];
+            embeds?: object[];
+            thread_id?: string;
           };
 
           // Dedup: skip if this message was already added optimistically
@@ -138,8 +158,25 @@ export function useGateway() {
             content: raw.content,
             createdAt: raw.created_at,
             editedAt: raw.edited_at,
+            reactions: raw.reactions ?? [],
+            embeds: raw.embeds ?? [],
+            threadId: raw.thread_id,
           };
           appendMessage(msg.channelId, msg);
+
+          // OS notification for @mentions when the window is not focused
+          const currentUserId = useStore.getState().session?.userId;
+          const currentUsername = useStore.getState().session?.username ?? "";
+          const isMention =
+            currentUserId != null &&
+            (raw.author_id !== currentUserId) &&
+            (raw.content.includes(`@${currentUsername}`) || raw.content.includes(`@everyone`));
+          if (isMention && document.hidden) {
+            sendOsNotification(
+              `${raw.author_username ?? "Someone"} mentioned you`,
+              raw.content.length > 120 ? raw.content.slice(0, 120) + "…" : raw.content
+            );
+          }
           break;
         }
 
@@ -156,6 +193,30 @@ export function useGateway() {
         case "VOICE_STATE_UPDATE": {
           const participants = data as VoiceParticipant[];
           setVoiceParticipants(participants);
+          break;
+        }
+
+        case "MESSAGE_REACTION_ADD": {
+          const raw = data as {
+            message_id: string;
+            channel_id: string;
+            user_id: string;
+            emoji: string;
+          };
+          const mine = raw.user_id === useStore.getState().session?.userId;
+          updateMessageReaction(raw.channel_id, raw.message_id, raw.emoji, +1, mine);
+          break;
+        }
+
+        case "MESSAGE_REACTION_REMOVE": {
+          const raw = data as {
+            message_id: string;
+            channel_id: string;
+            user_id: string;
+            emoji: string;
+          };
+          const mine = raw.user_id === useStore.getState().session?.userId;
+          updateMessageReaction(raw.channel_id, raw.message_id, raw.emoji, -1, mine);
           break;
         }
 
@@ -180,5 +241,5 @@ export function useGateway() {
       if (heartbeatTimer.current) clearInterval(heartbeatTimer.current);
       wsRef.current?.close();
     };
-  }, [session, appendMessage, setVoiceParticipants, setPttActive, setTyping]);
+  }, [session, appendMessage, setVoiceParticipants, setPttActive, setTyping, updateMessageReaction]);
 }

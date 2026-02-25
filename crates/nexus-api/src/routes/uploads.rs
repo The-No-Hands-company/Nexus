@@ -49,7 +49,7 @@ pub fn router() -> Router<Arc<AppState>> {
             "/attachments/{id}",
             get(get_attachment).delete(delete_attachment),
         )
-        .route_layer(middleware::from_fn(crate::middleware::auth_middleware))
+        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
 }
 
 // ============================================================
