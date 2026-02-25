@@ -1,0 +1,127 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-musl
+            binary: nexus
+            asset: nexus-linux-x86_64
+
+          - name: linux-aarch64
+            os: ubuntu-22.04
+            target: aarch64-unknown-linux-musl
+            binary: nexus
+            asset: nexus-linux-aarch64
+            use_cross: true
+
+          - name: macos-x86_64
+            os: macos-13
+            target: x86_64-apple-darwin
+            binary: nexus
+            asset: nexus-macos-x86_64
+
+          - name: macos-aarch64
+            os: macos-14
+            target: aarch64-apple-darwin
+            binary: nexus
+            asset: nexus-macos-aarch64
+
+          - name: windows-x86_64
+            os: windows-2022
+            target: x86_64-pc-windows-msvc
+            binary: nexus.exe
+            asset: nexus-windows-x86_64.exe
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install musl tools (Linux)
+        if: runner.os == 'Linux' && !matrix.use_cross
+        run: sudo apt-get install -y musl-tools
+
+      - name: Install cross (aarch64)
+        if: matrix.use_cross
+        uses: taiki-e/install-action@cross
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-${{ matrix.target }}-cargo-
+
+      - name: Build (cross)
+        if: matrix.use_cross
+        run: cross build --package nexus-server --release --target ${{ matrix.target }}
+
+      - name: Build (native)
+        if: "!matrix.use_cross"
+        run: cargo build --package nexus-server --release --target ${{ matrix.target }}
+
+      - name: Rename binary
+        shell: bash
+        run: |
+          src="target/${{ matrix.target }}/release/${{ matrix.binary }}"
+          cp "$src" "${{ matrix.asset }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd artifacts
+          sha256sum * > checksums.txt
+          cat checksums.txt
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/nexus-linux-x86_64
+            artifacts/nexus-linux-aarch64
+            artifacts/nexus-macos-x86_64
+            artifacts/nexus-macos-aarch64
+            artifacts/nexus-windows-x86_64.exe
+            artifacts/checksums.txt
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}

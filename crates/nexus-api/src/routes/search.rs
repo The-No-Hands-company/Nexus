@@ -86,12 +86,12 @@ async fn search_messages_global(
     let hits: Vec<serde_json::Value> = results
         .hits
         .into_iter()
-        .map(|h| serde_json::to_value(h.result).unwrap_or_default())
+        .map(|h| serde_json::to_value(h).unwrap_or_default())
         .collect();
 
     Ok(Json(SearchResult {
         query: params.q,
-        total_hits: results.estimated_total_hits,
+        total_hits: results.total_hits,
         limit,
         offset,
         hits,
@@ -128,12 +128,12 @@ async fn search_server_messages(
     let hits: Vec<serde_json::Value> = results
         .hits
         .into_iter()
-        .map(|h| serde_json::to_value(h.result).unwrap_or_default())
+        .map(|h| serde_json::to_value(h).unwrap_or_default())
         .collect();
 
     Ok(Json(SearchResult {
         query: params.q,
-        total_hits: results.estimated_total_hits,
+        total_hits: results.total_hits,
         limit,
         offset,
         hits,
@@ -170,12 +170,12 @@ async fn search_channel_messages(
     let hits: Vec<serde_json::Value> = results
         .hits
         .into_iter()
-        .map(|h| serde_json::to_value(h.result).unwrap_or_default())
+        .map(|h| serde_json::to_value(h).unwrap_or_default())
         .collect();
 
     Ok(Json(SearchResult {
         query: params.q,
-        total_hits: results.estimated_total_hits,
+        total_hits: results.total_hits,
         limit,
         offset,
         hits,

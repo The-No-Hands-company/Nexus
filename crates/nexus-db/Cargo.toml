@@ -3,12 +3,24 @@ name = "nexus-db"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Database layer for Nexus — PostgreSQL, ScyllaDB, Redis"
+description = "Database layer for Nexus — PostgreSQL, SQLite, Redis (optional), local storage"
+
+# Features
+# ─────────
+# full        (default) — PostgreSQL + Redis + S3/MinIO + MeiliSearch
+# storage-lite           — SQLite + local filesystem + tantivy full-text search
+#
+# In practice the runtime backend is selected by DATABASE_URL (sqlite:// vs postgres://)
+# and the --lite flag. Feature flags prevent unused heavy crates from linking.
+[features]
+default = ["full"]
+full = []
+storage-lite = []
 
 [dependencies]
 nexus-common = { workspace = true }
 sqlx = { workspace = true }
-scylla = { workspace = true }
+# scylla intentionally excluded — not yet wired; avoids large link-time overhead
 redis = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
@@ -22,3 +34,4 @@ aws-sdk-s3 = { workspace = true }
 aws-config = { workspace = true }
 meilisearch-sdk = { workspace = true }
 mime_guess = { workspace = true }
+tantivy = { workspace = true }

@@ -40,35 +40,41 @@ curl https://your-domain.com/api/v1/health
 ## Quick Start (Lite / Single Binary)
 
 For home labs, small teams, or local testing you can run the entire backend as a
-single binary with an embedded SQLite database — no Docker, Postgres, Redis, or
-MinIO required.
+single binary with an embedded SQLite database and embedded full-text search —
+no Docker, Postgres, Redis, MinIO, or MeiliSearch required.
+
+### Option A — one-line install (pre-built binary)
+
+```bash
+curl -fsSL https://get.nexus.chat | sh
+nexus serve --lite
+```
+
+That's it. Your server starts at **http://localhost:8080**. SQLite, file storage,
+and full-text search (Tantivy) are all created automatically on first run.
+
+> Pre-built binaries are published to [GitHub Releases](https://github.com/The-No-hands-Company/Nexus/releases)
+> for Linux x86\_64, Linux aarch64, macOS x86\_64, macOS Apple Silicon, and Windows.
+
+### Option B — build from source
 
 ```bash
 # Build the release binary (first time ~2–3 min)
 cargo build -p nexus-server --release
 
 # Start in lite mode — SQLite is created automatically at ./nexus.db
-NEXUS_JWT_SECRET=$(openssl rand -hex 64) \
-  ./target/release/nexus serve --lite
-
-# Optional: specify a custom database path and bind address
-NEXUS_JWT_SECRET=... \
-  ./target/release/nexus serve --lite \
-    --db-path /data/nexus.db \
-    --bind 0.0.0.0:4000
+./target/release/nexus serve --lite
 ```
 
-> **What `--lite` enables**
-> - SQLite via `sqlx::AnyPool` (no external database)
-> - In-process auth (JWT only, no Redis session store)
-> - Local filesystem storage (no MinIO / S3)
-> - Voice signalling disabled (no SFU)
-> - Federation disabled
+> **What `--lite` bundles**
+> - SQLite via `sqlx::AnyPool` (no external database needed)
+> - In-process auth (JWT, secrets auto-generated to `nexus.toml`)
+> - Local filesystem storage for uploads (no MinIO / S3)
+> - Tantivy embedded full-text search (no MeiliSearch)
 >
 > **What you lose vs. the full stack**
 > - Horizontal scaling (single process only)
-> - Full-text search (MeiliSearch not available)
-> - Voice/video calls
+> - Voice/video calls (SFU disabled)
 > - ActivityPub / Matrix federation
 
 ---

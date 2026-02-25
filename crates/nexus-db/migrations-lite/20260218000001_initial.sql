@@ -526,3 +526,24 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_log_server ON audit_log (server_id, created_at DESC);
+
+-- ============================================================
+-- User Relationships (friends, pending requests, blocks)
+-- ============================================================
+-- A row is directional: requester sent the request to addressee.
+-- Friendship = one row with status='accepted'.
+-- Block = requester_id is the blocking party.
+CREATE TABLE IF NOT EXISTS user_relationships (
+    id              TEXT PRIMARY KEY,
+    requester_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    addressee_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status          TEXT NOT NULL DEFAULT 'pending'
+                        CHECK (status IN ('pending', 'accepted', 'blocked')),
+    created_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at      TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (requester_id, addressee_id),
+    CHECK (requester_id != addressee_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_relationships_requester ON user_relationships (requester_id);
+CREATE INDEX IF NOT EXISTS idx_relationships_addressee ON user_relationships (addressee_id);

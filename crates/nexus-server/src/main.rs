@@ -182,10 +182,11 @@ async fn run_server(
         s.bootstrap_indexes().await?;
         tracing::info!("🔍 MeiliSearch ready at {}", config.search.url);
         s
+    } else if lite {
+        let data_dir = &config.storage.data_dir;
+        tracing::info!("🔍 Tantivy embedded search (lite mode)");
+        SearchClient::new_tantivy(data_dir)?
     } else {
-        if lite {
-            tracing::info!("🔍 Full-text search disabled in lite mode");
-        }
         SearchClient::disabled()
     };
 

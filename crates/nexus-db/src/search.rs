@@ -1,23 +1,18 @@
-//! MeiliSearch integration — full-text search client and indexing helpers.
+//! Full-text search — supports two backends selected at runtime:
 //!
-//! Wraps `meilisearch-sdk` to provide:
-//! - Server-scoped message search
-//! - Background sync queue processing
-//! - Index management (create, configure)
+//! * **MeiliSearch** — used in full / production mode (`NEXUS_SEARCH_URL` is set).
+//! * **Tantivy**     — embedded Rust search engine used in lite mode (no external process).
+//! * **Disabled**    — no-op fallback (returns empty results).
 
 use anyhow::{Context, Result};
-use meilisearch_sdk::{client::Client, search::SearchResults};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-// ============================================================
-// Search document shapes
-// ============================================================
+// ── Public result types ───────────────────────────────────────────────────────
 
-/// Message document indexed in MeiliSearch.
+/// Message document indexed for full-text search.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageDocument {
-    /// Primary key (UUID string — MeiliSearch requires a string/int primary key)
     pub id: String,
     pub channel_id: String,
     pub server_id: Option<String>,
@@ -26,11 +21,11 @@ pub struct MessageDocument {
     pub content: String,
     pub has_attachments: bool,
     pub has_embeds: bool,
-    /// Unix timestamp for range-filter support
+    /// Unix timestamp (seconds) for range filtering / sorting.
     pub created_at: i64,
 }
 
-/// Server document (for cross-server search in future versions).
+/// Server document indexed for discovery search.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerDocument {
     pub id: String,
@@ -39,159 +34,203 @@ pub struct ServerDocument {
     pub member_count: u32,
 }
 
-// ============================================================
-// SearchClient
-// ============================================================
+/// Unified search result returned by all backends.
+#[derive(Debug, Default)]
+pub struct NexusSearchResults {
+    pub hits: Vec<MessageDocument>,
+    /// Estimated total matches (may be `None` for large tantivy indexes).
+    pub total_hits: Option<usize>,
+}
 
-/// MeiliSearch client wrapper.
-/// When constructed with [`SearchClient::disabled`] all write operations are
-/// no-ops and read operations return an appropriate error, allowing the rest of
-/// the application to compile and run without MeiliSearch (lite mode).
-#[derive(Clone)]
+// ── Backend internals ─────────────────────────────────────────────────────────
+
+#[derive(Clone, Copy)]
+struct TantivyFields {
+    id: tantivy::schema::Field,
+    channel_id: tantivy::schema::Field,
+    server_id: tantivy::schema::Field,
+    author_id: tantivy::schema::Field,
+    author_username: tantivy::schema::Field,
+    content: tantivy::schema::Field,
+    created_at: tantivy::schema::Field,
+}
+
+struct TantivyState {
+    index: tantivy::Index,
+    writer: std::sync::Mutex<tantivy::IndexWriter>,
+    reader: tantivy::IndexReader,
+    fields: TantivyFields,
+}
+
+// SAFETY: Index, IndexReader are Send+Sync; Mutex<IndexWriter> is Send+Sync.
+unsafe impl Send for TantivyState {}
+unsafe impl Sync for TantivyState {}
+
+enum SearchBackend {
+    Meilisearch(meilisearch_sdk::client::Client),
+    Tantivy(std::sync::Arc<TantivyState>),
+    Disabled,
+}
+
+// ── SearchClient ──────────────────────────────────────────────────────────────
+
 pub struct SearchClient {
-    inner: Option<Client>,
+    backend: SearchBackend,
+}
+
+impl Clone for SearchClient {
+    fn clone(&self) -> Self {
+        match &self.backend {
+            SearchBackend::Meilisearch(c) => Self { backend: SearchBackend::Meilisearch(c.clone()) },
+            SearchBackend::Tantivy(s) => Self { backend: SearchBackend::Tantivy(s.clone()) },
+            SearchBackend::Disabled => Self { backend: SearchBackend::Disabled },
+        }
+    }
 }
 
 impl SearchClient {
-    /// Construct from URL + master key.
+    // ── Constructors ──────────────────────────────────────────────────────────
+
+    /// Connect to a MeiliSearch instance.
     pub fn new(url: &str, api_key: &str) -> Self {
         Self {
-            inner: Some(
-                Client::new(url, Some(api_key))
+            backend: SearchBackend::Meilisearch(
+                meilisearch_sdk::client::Client::new(url, Some(api_key))
                     .expect("Failed to create MeiliSearch client"),
             ),
         }
     }
 
-    /// Construct a disabled client (lite mode — no MeiliSearch).
-    /// All write operations are no-ops; search returns an empty result set.
+    /// Open (or create) an embedded Tantivy index in `<data_dir>/search/`.
+    pub fn new_tantivy(data_dir: &str) -> Result<Self> {
+        use tantivy::schema::{FAST, STORED, STRING, TEXT};
+        use tantivy::{Index, ReloadPolicy};
+
+        let search_dir = std::path::Path::new(data_dir).join("search");
+        std::fs::create_dir_all(&search_dir)
+            .with_context(|| format!("Cannot create tantivy dir: {}", search_dir.display()))?;
+
+        let mut b = tantivy::schema::Schema::builder();
+        let id              = b.add_text_field("id",              STORED);
+        let channel_id      = b.add_text_field("channel_id",      STORED | STRING);
+        let server_id       = b.add_text_field("server_id",       STORED | STRING);
+        let author_id       = b.add_text_field("author_id",       STORED | STRING);
+        let author_username = b.add_text_field("author_username",  TEXT | STORED);
+        let content         = b.add_text_field("content",          TEXT | STORED);
+        let created_at      = b.add_i64_field("created_at",        FAST | STORED);
+        let schema = b.build();
+
+        let fields = TantivyFields { id, channel_id, server_id, author_id, author_username, content, created_at };
+
+        let dir = tantivy::directory::MmapDirectory::open(&search_dir)
+            .with_context(|| format!("Cannot open tantivy dir: {}", search_dir.display()))?;
+        let index = Index::open_or_create(dir, schema).context("Failed to open/create tantivy index")?;
+
+        let writer = index.writer(50 * 1024 * 1024).context("Failed to create tantivy IndexWriter")?;
+        let reader = index
+            .reader_builder()
+            .reload_policy(ReloadPolicy::OnCommitWithDelay)
+            .try_into()
+            .context("Failed to create tantivy IndexReader")?;
+
+        tracing::info!("🔍 Tantivy search index at {}", search_dir.display());
+
+        Ok(Self {
+            backend: SearchBackend::Tantivy(std::sync::Arc::new(TantivyState {
+                index,
+                writer: std::sync::Mutex::new(writer),
+                reader,
+                fields,
+            })),
+        })
+    }
+
+    /// No-op client — all operations are silent no-ops.
     pub fn disabled() -> Self {
-        Self { inner: None }
+        Self { backend: SearchBackend::Disabled }
     }
 
-    /// Returns `true` if this client is connected to a live MeiliSearch instance.
     pub fn is_enabled(&self) -> bool {
-        self.inner.is_some()
+        !matches!(self.backend, SearchBackend::Disabled)
     }
 
-    // ------------------------------------------------------------------
-    // Index bootstrapping
-    // ------------------------------------------------------------------
+    // ── Bootstrap ─────────────────────────────────────────────────────────────
 
-    /// Create and configure indexes on first run.
     pub async fn bootstrap_indexes(&self) -> Result<()> {
-        if self.inner.is_none() {
-            return Ok(());
+        if let SearchBackend::Meilisearch(client) = &self.backend {
+            Self::meili_setup_messages(client).await?;
+            Self::meili_setup_servers(client).await?;
         }
-        self.setup_messages_index().await?;
-        self.setup_servers_index().await?;
         Ok(())
     }
 
-    async fn setup_messages_index(&self) -> Result<()> {
-        let inner = match &self.inner { Some(c) => c, None => return Ok(()) };
-        // Attempt to create; ignore if already exists
-        if let Ok(task) = inner
-            .create_index("messages", Some("id"))
-            .await
-        {
-            // Wait for task to complete (non-critical, best effort)
-            let _ = inner.wait_for_task(task, None, None).await;
-        }
+    // ── Indexing ──────────────────────────────────────────────────────────────
 
-        let index = inner.index("messages");
-
-        // Configure searchable attributes
-        index
-            .set_searchable_attributes(["content", "author_username"])
-            .await
-            .context("Failed to set searchable attributes for messages index")?;
-
-        // Configure filterable attributes
-        index
-            .set_filterable_attributes([
-                "channel_id",
-                "server_id",
-                "author_id",
-                "has_attachments",
-                "has_embeds",
-                "created_at",
-            ])
-            .await
-            .context("Failed to set filterable attributes for messages index")?;
-
-        // Configure sortable attributes
-        index
-            .set_sortable_attributes(["created_at"])
-            .await
-            .context("Failed to set sortable attributes for messages index")?;
-
-        Ok(())
-    }
-
-    async fn setup_servers_index(&self) -> Result<()> {
-        let inner = match &self.inner { Some(c) => c, None => return Ok(()) };
-        if let Ok(task) = inner
-            .create_index("servers", Some("id"))
-            .await
-        {
-            let _ = inner.wait_for_task(task, None, None).await;
-        }
-
-        let index = inner.index("servers");
-        index
-            .set_searchable_attributes(["name", "description"])
-            .await
-            .context("Failed to set searchable attributes for servers index")?;
-
-        Ok(())
-    }
-
-    // ------------------------------------------------------------------
-    // Message indexing
-    // ------------------------------------------------------------------
-
-    /// Index (or update) a single message document.
     pub async fn index_message(&self, doc: MessageDocument) -> Result<()> {
-        let inner = match &self.inner { Some(c) => c, None => return Ok(()) };
-        let index = inner.index("messages");
-        index
-            .add_or_update(&[doc], Some("id"))
-            .await
-            .context("Failed to index message in MeiliSearch")?;
-        Ok(())
-    }
-
-    /// Index a batch of messages (more efficient for bulk sync).
-    pub async fn index_messages_batch(&self, docs: Vec<MessageDocument>) -> Result<()> {
-        if docs.is_empty() {
-            return Ok(());
+        match &self.backend {
+            SearchBackend::Meilisearch(client) => {
+                client.index("messages")
+                    .add_or_update(&[doc], Some("id")).await
+                    .context("MeiliSearch: index_message failed")?;
+            }
+            SearchBackend::Tantivy(state) => {
+                let state = state.clone();
+                tokio::task::spawn_blocking(move || Self::tantivy_add_document(&state, &doc)).await??;
+            }
+            SearchBackend::Disabled => {}
         }
-        let inner = match &self.inner { Some(c) => c, None => return Ok(()) };
-        let index = inner.index("messages");
-        index
-            .add_or_update(&docs, Some("id"))
-            .await
-            .context("Failed to batch-index messages in MeiliSearch")?;
         Ok(())
     }
 
-    /// Delete a message from the index.
+    pub async fn index_messages_batch(&self, docs: Vec<MessageDocument>) -> Result<()> {
+        if docs.is_empty() { return Ok(()); }
+        match &self.backend {
+            SearchBackend::Meilisearch(client) => {
+                client.index("messages")
+                    .add_or_update(&docs, Some("id")).await
+                    .context("MeiliSearch: batch index failed")?;
+            }
+            SearchBackend::Tantivy(state) => {
+                let state = state.clone();
+                tokio::task::spawn_blocking(move || {
+                    let mut writer = state.writer.lock()
+                        .map_err(|_| anyhow::anyhow!("tantivy writer lock poisoned"))?;
+                    for doc in &docs {
+                        writer.add_document(Self::tantivy_build_doc(&state.fields, doc))
+                            .context("tantivy add_document failed")?;
+                    }
+                    writer.commit().context("tantivy commit failed").map(|_| ())
+                }).await??;
+            }
+            SearchBackend::Disabled => {}
+        }
+        Ok(())
+    }
+
     pub async fn delete_message(&self, message_id: Uuid) -> Result<()> {
-        let inner = match &self.inner { Some(c) => c, None => return Ok(()) };
-        let index = inner.index("messages");
-        index
-            .delete_document(message_id.to_string())
-            .await
-            .context("Failed to delete message from MeiliSearch")?;
+        let id_str = message_id.to_string();
+        match &self.backend {
+            SearchBackend::Meilisearch(client) => {
+                client.index("messages").delete_document(&id_str).await
+                    .context("MeiliSearch: delete_message failed")?;
+            }
+            SearchBackend::Tantivy(state) => {
+                let state = state.clone();
+                tokio::task::spawn_blocking(move || {
+                    let term = tantivy::Term::from_field_text(state.fields.id, &id_str);
+                    let mut writer = state.writer.lock()
+                        .map_err(|_| anyhow::anyhow!("tantivy writer lock poisoned"))?;
+                    writer.delete_term(term);
+                    writer.commit().context("tantivy commit (delete) failed").map(|_| ())
+                }).await??;
+            }
+            SearchBackend::Disabled => {}
+        }
         Ok(())
     }
 
-    // ------------------------------------------------------------------
-    // Search
-    // ------------------------------------------------------------------
+    // ── Search ────────────────────────────────────────────────────────────────
 
-    /// Full-text search messages within a server.
     pub async fn search_messages(
         &self,
         query: &str,
@@ -200,87 +239,42 @@ impl SearchClient {
         author_id: Option<Uuid>,
         limit: usize,
         offset: usize,
-    ) -> Result<SearchResults<MessageDocument>> {
-        let inner = match &self.inner {
-            Some(c) => c,
-            None => anyhow::bail!("Full-text search is not available in lite mode"),
-        };
-        let index = inner.index("messages");
-
-        // Build filter string
-        let mut filters: Vec<String> = Vec::new();
-        if let Some(sid) = server_id {
-            filters.push(format!("server_id = \"{}\"", sid));
+    ) -> Result<NexusSearchResults> {
+        match &self.backend {
+            SearchBackend::Meilisearch(client) => {
+                Self::meili_search(client, query, server_id, channel_id, author_id, limit, offset).await
+            }
+            SearchBackend::Tantivy(state) => {
+                Self::tantivy_search(state.clone(), query.to_string(), server_id, channel_id, author_id, limit, offset).await
+            }
+            SearchBackend::Disabled => {
+                anyhow::bail!("Full-text search is disabled (no search backend configured)")
+            }
         }
-        if let Some(cid) = channel_id {
-            filters.push(format!("channel_id = \"{}\"", cid));
-        }
-        if let Some(aid) = author_id {
-            filters.push(format!("author_id = \"{}\"", aid));
-        }
-
-        let filter_str = filters.join(" AND ");
-
-        let mut search_req = index.search();
-        search_req.with_query(query)
-            .with_limit(limit)
-            .with_offset(offset)
-            .with_sort(&["created_at:desc"]);
-
-        if !filter_str.is_empty() {
-            search_req.with_filter(&filter_str);
-        }
-
-        search_req
-            .execute::<MessageDocument>()
-            .await
-            .context("MeiliSearch query failed")
     }
 
-    // ------------------------------------------------------------------
-    // Sync queue processing
-    // ------------------------------------------------------------------
+    // ── Sync queue ────────────────────────────────────────────────────────────
 
-    /// Process pending sync queue entries from the database.
-    /// Call this from a background task every few seconds.
     pub async fn process_sync_queue(&self, pool: &sqlx::AnyPool) -> Result<()> {
-        if self.inner.is_none() {
-            return Ok(());
-        }
+        let client = match &self.backend {
+            SearchBackend::Meilisearch(c) => c,
+            _ => return Ok(()),
+        };
+
+        #[derive(sqlx::FromRow)]
         struct QueueRow {
             id: i64,
             operation: String,
             index_name: String,
             document_id: String,
-            payload: Option<serde_json::Value>,
-        }
-
-        impl<'r> sqlx::FromRow<'r, sqlx::any::AnyRow> for QueueRow {
-            fn from_row(row: &'r sqlx::any::AnyRow) -> Result<Self, sqlx::Error> {
-                use sqlx::Row;
-                use crate::any_compat::get_opt_json_value;
-                Ok(QueueRow {
-                    id: row.try_get("id")?,
-                    operation: row.try_get("operation")?,
-                    index_name: row.try_get("index_name")?,
-                    document_id: row.try_get("document_id")?,
-                    payload: get_opt_json_value(row, "payload")?,
-                })
-            }
+            payload: Option<String>,
         }
 
         let rows = sqlx::query_as::<_, QueueRow>(
-            r#"
-            SELECT id, operation, index_name, document_id, payload
-            FROM search_sync_queue
-            WHERE processed = false
-            ORDER BY created_at
-            LIMIT 100
-            "#,
+            "SELECT id, operation, index_name, document_id, payload \
+             FROM search_sync_queue WHERE processed = false ORDER BY created_at LIMIT 100"
         )
-        .fetch_all(pool)
-        .await
-        .context("Failed to fetch search sync queue")?;
+        .fetch_all(pool).await.context("Failed to fetch search sync queue")?;
 
         for row in rows {
             let result: Result<()> = async {
@@ -288,81 +282,188 @@ impl SearchClient {
                     "index" | "update" => {
                         if row.index_name == "messages" {
                             if let Some(payload) = row.payload {
-                                let doc: MessageDocument =
-                                    serde_json::from_value(payload)
-                                        .context("Failed to deserialise MessageDocument")?;
-                                self.index_message(doc).await?;
+                                let doc: MessageDocument = serde_json::from_str(&payload)
+                                    .context("Failed to deserialise MessageDocument")?;
+                                client.index("messages").add_or_update(&[doc], Some("id")).await
+                                    .context("MeiliSearch: queue index failed")?;
                             }
                         }
                     }
                     "delete" => {
                         if row.index_name == "messages" {
-                            let id = Uuid::parse_str(&row.document_id)
-                                .context("Invalid UUID in sync queue")?;
-                            self.delete_message(id).await?;
+                            let id = Uuid::parse_str(&row.document_id).context("Invalid UUID")?;
+                            client.index("messages").delete_document(id.to_string()).await
+                                .context("MeiliSearch: queue delete failed")?;
                         }
                     }
-                    other => {
-                        tracing::warn!("Unknown search sync operation: {}", other);
-                    }
+                    other => tracing::warn!("Unknown search sync operation: {other}"),
                 }
                 Ok(())
-            }
-            .await;
+            }.await;
 
             if let Err(e) = result {
-                tracing::error!(
-                    queue_id = row.id,
-                    error = %e,
-                    "Failed to process search sync queue entry"
-                );
+                tracing::error!(queue_id = row.id, error = %e, "Search sync queue error");
             } else {
-                sqlx::query(
-                    "UPDATE search_sync_queue SET processed = true WHERE id = $1",
-                )
-                .bind(row.id)
-                .execute(pool)
-                .await
-                .context("Failed to mark sync queue item processed")?;
+                let _ = sqlx::query("UPDATE search_sync_queue SET processed = true WHERE id = $1")
+                    .bind(row.id).execute(pool).await;
             }
         }
-
         Ok(())
     }
 
-    /// Enqueue a message to be indexed (called after message creation/edit).
-    pub async fn enqueue_message_index(
-        pool: &sqlx::AnyPool,
-        message_id: Uuid,
-        doc: &MessageDocument,
-    ) -> Result<()> {
-        let payload = serde_json::to_value(doc).context("Failed to serialise MessageDocument")?;
+    pub async fn enqueue_message_index(pool: &sqlx::AnyPool, message_id: Uuid, doc: &MessageDocument) -> Result<()> {
+        let payload = serde_json::to_string(doc).context("Failed to serialise MessageDocument")?;
         sqlx::query(
-            r#"
-            INSERT INTO search_sync_queue (operation, index_name, document_id, payload)
-            VALUES ('index', 'messages', $1, $2)
-            "#,
+            "INSERT INTO search_sync_queue (operation, index_name, document_id, payload) \
+             VALUES ('index', 'messages', $1, $2)"
         )
-        .bind(message_id.to_string())
-        .bind(serde_json::to_string(&payload).unwrap_or_default())
-        .execute(pool)
-        .await
-        .context("Failed to enqueue message for search indexing")?;
+        .bind(message_id.to_string()).bind(payload)
+        .execute(pool).await.context("Failed to enqueue message for search indexing")?;
         Ok(())
     }
 
-    /// Enqueue a message deletion from the index.
     pub async fn enqueue_message_delete(pool: &sqlx::AnyPool, message_id: Uuid) -> Result<()> {
         sqlx::query(
-            r#"
-            INSERT INTO search_sync_queue (operation, index_name, document_id)
-            VALUES ('delete', 'messages', $1)
-            "#,
+            "INSERT INTO search_sync_queue (operation, index_name, document_id) \
+             VALUES ('delete', 'messages', $1)"
         )
-        .bind(message_id.to_string())
-        .execute(pool)
-        .await
+        .bind(message_id.to_string()).execute(pool).await
         .context("Failed to enqueue message delete for search")?;
+        Ok(())
+    }
+
+    // ── Private helpers ───────────────────────────────────────────────────────
+
+    fn tantivy_build_doc(f: &TantivyFields, doc: &MessageDocument) -> tantivy::TantivyDocument {
+        let mut d = tantivy::TantivyDocument::default();
+        d.add_text(f.id, &doc.id);
+        d.add_text(f.channel_id, &doc.channel_id);
+        if let Some(sid) = &doc.server_id { d.add_text(f.server_id, sid); }
+        d.add_text(f.author_id, &doc.author_id);
+        d.add_text(f.author_username, &doc.author_username);
+        d.add_text(f.content, &doc.content);
+        d.add_i64(f.created_at, doc.created_at);
+        d
+    }
+
+    fn tantivy_add_document(state: &TantivyState, doc: &MessageDocument) -> Result<()> {
+        let tantivy_doc = Self::tantivy_build_doc(&state.fields, doc);
+        let mut writer = state.writer.lock()
+            .map_err(|_| anyhow::anyhow!("tantivy writer lock poisoned"))?;
+        writer.add_document(tantivy_doc).context("tantivy add_document failed")?;
+        writer.commit().context("tantivy commit failed").map(|_| ())
+    }
+
+    async fn tantivy_search(
+        state: std::sync::Arc<TantivyState>,
+        query: String,
+        server_id: Option<Uuid>,
+        channel_id: Option<Uuid>,
+        author_id: Option<Uuid>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<NexusSearchResults> {
+        tokio::task::spawn_blocking(move || {
+            use tantivy::collector::TopDocs;
+            use tantivy::query::QueryParser;
+            use tantivy::schema::OwnedValue;
+
+            let f = &state.fields;
+            let searcher = state.reader.searcher();
+
+            let qp = QueryParser::for_index(&state.index, vec![f.content, f.author_username]);
+            let parsed = qp.parse_query(&query)
+                .map_err(|e| anyhow::anyhow!("Tantivy parse error: {:?}", e))?;
+
+            let top_docs = searcher.search(&parsed, &TopDocs::with_limit((limit + offset).max(1)))
+                .context("Tantivy search failed")?;
+
+            let mut hits = Vec::<MessageDocument>::new();
+            for (_score, addr) in top_docs.into_iter().skip(offset) {
+                let doc = searcher.doc::<tantivy::TantivyDocument>(addr)
+                    .context("Tantivy: failed to retrieve doc")?;
+
+                let str_val = |field| -> String {
+                    doc.get_first(field)
+                        .and_then(|v| if let OwnedValue::Str(s) = v { Some(s.as_str()) } else { None })
+                        .unwrap_or("").to_string()
+                };
+
+                let msg_server_id = { let s = str_val(f.server_id); if s.is_empty() { None } else { Some(s) } };
+                let msg_channel_id = str_val(f.channel_id);
+                let msg_author_id  = str_val(f.author_id);
+
+                // Post-retrieval filter (avoids full collector complexity)
+                if let Some(sid) = &server_id {
+                    if msg_server_id.as_deref() != Some(sid.to_string().as_str()) { continue; }
+                }
+                if let Some(cid) = &channel_id {
+                    if msg_channel_id != cid.to_string() { continue; }
+                }
+                if let Some(aid) = &author_id {
+                    if msg_author_id != aid.to_string() { continue; }
+                }
+
+                hits.push(MessageDocument {
+                    id: str_val(f.id),
+                    channel_id: msg_channel_id,
+                    server_id: msg_server_id,
+                    author_id: msg_author_id,
+                    author_username: str_val(f.author_username),
+                    content: str_val(f.content),
+                    has_attachments: false,
+                    has_embeds: false,
+                    created_at: doc.get_first(f.created_at)
+                        .and_then(|v| if let OwnedValue::I64(n) = v { Some(*n) } else { None })
+                        .unwrap_or(0),
+                });
+            }
+
+            let total = hits.len();
+            Ok::<_, anyhow::Error>(NexusSearchResults { hits, total_hits: Some(total) })
+        }).await?
+    }
+
+    async fn meili_search(
+        client: &meilisearch_sdk::client::Client,
+        query: &str,
+        server_id: Option<Uuid>,
+        channel_id: Option<Uuid>,
+        author_id: Option<Uuid>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<NexusSearchResults> {
+        let mut filters = Vec::<String>::new();
+        if let Some(s) = server_id  { filters.push(format!("server_id = \"{s}\"")); }
+        if let Some(c) = channel_id { filters.push(format!("channel_id = \"{c}\"")); }
+        if let Some(a) = author_id  { filters.push(format!("author_id = \"{a}\"")); }
+        let filter_str = filters.join(" AND ");
+
+        let index = client.index("messages");
+        let mut req = index.search();
+        req.with_query(query).with_limit(limit).with_offset(offset).with_sort(&["created_at:desc"]);
+        if !filter_str.is_empty() { req.with_filter(&filter_str); }
+
+        let results = req.execute::<MessageDocument>().await.context("MeiliSearch query failed")?;
+        Ok(NexusSearchResults {
+            hits: results.hits.into_iter().map(|h| h.result).collect(),
+            total_hits: results.estimated_total_hits,
+        })
+    }
+
+    async fn meili_setup_messages(client: &meilisearch_sdk::client::Client) -> Result<()> {
+        if let Ok(t) = client.create_index("messages", Some("id")).await { let _ = client.wait_for_task(t, None, None).await; }
+        let idx = client.index("messages");
+        idx.set_searchable_attributes(["content", "author_username"]).await.context("meili searchable")?;
+        idx.set_filterable_attributes(["channel_id","server_id","author_id","has_attachments","has_embeds","created_at"]).await.context("meili filterable")?;
+        idx.set_sortable_attributes(["created_at"]).await.context("meili sortable")?;
+        Ok(())
+    }
+
+    async fn meili_setup_servers(client: &meilisearch_sdk::client::Client) -> Result<()> {
+        if let Ok(t) = client.create_index("servers", Some("id")).await { let _ = client.wait_for_task(t, None, None).await; }
+        client.index("servers")
+            .set_searchable_attributes(["name", "description"]).await.context("meili server searchable")?;
         Ok(())
     }
 }

@@ -39,7 +39,6 @@ clap = { version = "4", features = ["derive", "env"] }
 
 # Database
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "sqlite", "any", "uuid", "chrono", "json"] }
-scylla = "0.15"
 redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
 
 # Auth & Crypto
@@ -76,6 +75,7 @@ aws-config = { version = "1.5", features = ["behavior-version-latest"] }
 
 # Search
 meilisearch-sdk = "0.27"
+tantivy = { version = "0.22", default-features = false, features = ["mmap"] }
 
 # Snowflake IDs
 snowflaked = "1.0"
