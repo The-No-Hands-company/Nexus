@@ -68,6 +68,7 @@ pub async fn update_channel(
     position: Option<i32>,
     nsfw: Option<bool>,
     rate_limit_per_user: Option<i32>,
+    is_stream: Option<bool>,
 ) -> Result<Channel, sqlx::Error> {
     let q = format!(
         "UPDATE channels SET \
@@ -76,17 +77,19 @@ pub async fn update_channel(
              position = COALESCE($3, position), \
              nsfw = COALESCE($4, nsfw), \
              rate_limit_per_user = COALESCE($5, rate_limit_per_user), \
+             is_stream = COALESCE($7, is_stream), \
              updated_at = CURRENT_TIMESTAMP \
          WHERE id = $6::uuid \
          RETURNING {CHANNEL_COLS}"
     );
     sqlx::query_as::<_, Channel>(&q)
-    .bind(id.to_string())
     .bind(name)
     .bind(topic)
     .bind(position)
     .bind(nsfw)
     .bind(rate_limit_per_user)
+    .bind(id.to_string())
+    .bind(is_stream)
     .fetch_one(pool)
     .await
 }

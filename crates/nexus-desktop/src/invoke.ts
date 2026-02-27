@@ -192,6 +192,53 @@ function mapBookmark(b: Raw) {
   };
 }
 
+// ── v0.14 mappers ────────────────────────────────────────────────────────────
+
+function mapServerEvent(e: Raw) {
+  return {
+    id: e.id as string,
+    serverId: e.server_id as string,
+    creatorId: e.creator_id as string,
+    title: e.title as string,
+    description: (e.description as string | undefined) ?? undefined,
+    startsAt: e.starts_at as string,
+    endsAt: (e.ends_at as string | undefined) ?? undefined,
+    location: (e.location as string | undefined) ?? undefined,
+    channelId: (e.channel_id as string | undefined) ?? undefined,
+    coverImage: (e.cover_image as string | undefined) ?? undefined,
+    status: (e.status as "scheduled" | "active" | "completed" | "cancelled") ?? "scheduled",
+    interestedCount: (e.interested_count as number) ?? 0,
+    isInterested: (e.is_interested as boolean) ?? false,
+    createdAt: e.created_at as string,
+    updatedAt: e.updated_at as string,
+  };
+}
+
+function mapSticker(s: Raw) {
+  return {
+    id: s.id as string,
+    packId: s.pack_id as string,
+    serverId: (s.server_id as string | undefined) ?? undefined,
+    name: s.name as string,
+    description: (s.description as string | undefined) ?? undefined,
+    assetUrl: s.asset_url as string,
+    type: (s.type as "png" | "apng" | "lottie") ?? "png",
+    createdAt: s.created_at as string,
+  };
+}
+
+function mapStickerPack(p: Raw) {
+  return {
+    id: p.id as string,
+    name: p.name as string,
+    description: (p.description as string | undefined) ?? undefined,
+    coverStickerId: (p.cover_sticker_id as string | undefined) ?? undefined,
+    serverId: (p.server_id as string | undefined) ?? undefined,
+    isPremium: (p.is_premium as boolean) ?? false,
+    stickers: Array.isArray(p.stickers) ? (p.stickers as Raw[]).map(mapSticker) : undefined,
+  };
+}
+
 // ── Command dispatch ──────────────────────────────────────────────────────────
 
 async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
@@ -683,6 +730,87 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
         custom_status_emoji: args.customStatusEmoji ?? null,
         custom_status_expires_at: args.expiresAt ?? null,
       });
+    }
+
+    // ── Phase 14: Message Forwarding ─────────────────────────────────────
+    case "forward_message": {
+      return apiFetch<T>("POST", `/api/v1/messages/${args.messageId}/forward`, {
+        target_channel_ids: args.targetChannelIds,
+      });
+    }
+
+    // ── Phase 14: Server Events ───────────────────────────────────────────
+    case "list_server_events": {
+      const qs = args.status ? `?status=${args.status}` : "";
+      const rows = await apiFetch<Raw[]>("GET", `/api/v1/servers/${args.serverId}/events${qs}`);
+      return rows.map(mapServerEvent) as unknown as T;
+    }
+
+    case "get_server_event": {
+      const raw = await apiFetch<Raw>("GET", `/api/v1/servers/${args.serverId}/events/${args.eventId}`);
+      return mapServerEvent(raw) as unknown as T;
+    }
+
+    case "create_server_event": {
+      const raw = await apiFetch<Raw>("POST", `/api/v1/servers/${args.serverId}/events`, {
+        title: args.title,
+        description: args.description ?? undefined,
+        starts_at: args.startsAt,
+        ends_at: args.endsAt ?? undefined,
+        location: args.location ?? undefined,
+        channel_id: args.channelId ?? undefined,
+      });
+      return mapServerEvent(raw) as unknown as T;
+    }
+
+    case "update_server_event": {
+      const raw = await apiFetch<Raw>("PATCH", `/api/v1/servers/${args.serverId}/events/${args.eventId}`, {
+        title: args.title ?? undefined,
+        description: args.description ?? undefined,
+        starts_at: args.startsAt ?? undefined,
+        ends_at: args.endsAt ?? undefined,
+        location: args.location ?? undefined,
+      });
+      return mapServerEvent(raw) as unknown as T;
+    }
+
+    case "cancel_server_event": {
+      return apiFetch<T>("DELETE", `/api/v1/servers/${args.serverId}/events/${args.eventId}`);
+    }
+
+    case "rsvp_server_event": {
+      return apiFetch<T>("PUT", `/api/v1/servers/${args.serverId}/events/${args.eventId}/interested`);
+    }
+
+    case "un_rsvp_server_event": {
+      return apiFetch<T>("DELETE", `/api/v1/servers/${args.serverId}/events/${args.eventId}/interested`);
+    }
+
+    // ── Phase 14: Sticker Packs ───────────────────────────────────────────
+    case "list_sticker_packs": {
+      const rows = await apiFetch<Raw[]>("GET", "/api/v1/sticker-packs");
+      return rows.map(mapStickerPack) as unknown as T;
+    }
+
+    case "list_server_stickers": {
+      const rows = await apiFetch<Raw[]>("GET", `/api/v1/servers/${args.serverId}/stickers`);
+      return rows.map(mapSticker) as unknown as T;
+    }
+
+    case "delete_sticker": {
+      return apiFetch<T>("DELETE", `/api/v1/servers/${args.serverId}/stickers/${args.stickerId}`);
+    }
+
+    // ── Phase 14: Inline Bot Queries ──────────────────────────────────────
+    case "inline_query": {
+      const qs = args.botId
+        ? `?query=${encodeURIComponent(args.query as string)}&bot_id=${args.botId}`
+        : `?query=${encodeURIComponent(args.query as string)}`;
+      return apiFetch<T>("GET", `/api/v1/channels/${args.channelId}/inline-query${qs}`);
+    }
+
+    case "list_inline_triggers": {
+      return apiFetch<T>("GET", `/api/v1/channels/${args.channelId}/bots/inline-triggers`);
     }
 
     default:

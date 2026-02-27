@@ -29,6 +29,8 @@ export interface Channel {
   kind: "text" | "voice" | "announcement";
   isE2ee?: boolean;
   disappearAfterSeconds?: number;
+  /** v0.14 — stream/topic-threaded channel */
+  isStream?: boolean;
 }
 
 export interface Message {
@@ -44,6 +46,11 @@ export interface Message {
   embeds?: Embed[];
   replyTo?: string;
   threadId?: string;
+  /** v0.14 */
+  forwardedFromMessageId?: string;
+  forwardedFromChannelId?: string;
+  stickerIds?: string[];
+  topic?: string;
 }
 
 export interface Attachment {
@@ -194,6 +201,58 @@ export interface Bookmark {
   message?: BookmarkedMessagePreview;
 }
 
+// ─── v0.14 Platform Differentiation types ────────────────────────────────────
+
+export type ServerEventStatus = "scheduled" | "active" | "completed" | "cancelled";
+
+export interface ServerEvent {
+  id: string;
+  serverId: string;
+  creatorId: string;
+  title: string;
+  description?: string;
+  startsAt: string;
+  endsAt?: string;
+  location?: string;
+  channelId?: string;
+  coverImage?: string;
+  status: ServerEventStatus;
+  interestedCount: number;
+  isInterested: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type StickerType = "png" | "apng" | "lottie";
+
+export interface Sticker {
+  id: string;
+  packId: string;
+  serverId?: string;
+  name: string;
+  description?: string;
+  assetUrl: string;
+  type: StickerType;
+  createdAt: string;
+}
+
+export interface StickerPack {
+  id: string;
+  name: string;
+  description?: string;
+  coverStickerId?: string;
+  serverId?: string;
+  isPremium: boolean;
+  stickers?: Sticker[];
+}
+
+export interface InlineSuggestion {
+  title: string;
+  description?: string;
+  content: string;
+  previewUrl?: string;
+}
+
 interface StoreState {
   // Auth
   session: Session | null;
@@ -311,6 +370,31 @@ interface StoreState {
   // Scheduled messages — keyed by channelId
   channelScheduled: Record<string, ScheduledMessage[]>;
   setChannelScheduled: (channelId: string, msgs: ScheduledMessage[]) => void;
+
+  // ─── v0.14 Platform Differentiation ───────────────────────────────────
+
+  // Message forwarding — the message being forwarded (drives ForwardModal)
+  forwardModalMessage: Message | null;
+  setForwardModalMessage: (msg: Message | null) => void;
+
+  // Server events — keyed by serverId
+  serverEvents: Record<string, ServerEvent[]>;
+  setServerEvents: (serverId: string, events: ServerEvent[]) => void;
+  upsertServerEvent: (serverId: string, event: ServerEvent) => void;
+  removeServerEvent: (serverId: string, eventId: string) => void;
+  eventsOpen: boolean;
+  setEventsOpen: (open: boolean) => void;
+  loadServerEvents: (serverId: string, status?: string) => Promise<void>;
+
+  // Sticker packs (global)
+  stickerPacks: StickerPack[];
+  setStickerPacks: (packs: StickerPack[]) => void;
+  loadStickerPacks: () => Promise<void>;
+
+  // Server stickers — keyed by serverId
+  serverStickers: Record<string, Sticker[]>;
+  setServerStickers: (serverId: string, stickers: Sticker[]) => void;
+  loadServerStickers: (serverId: string) => Promise<void>;
 }
 
 // Module-level map so typing-clear timeouts survive re-renders
@@ -731,4 +815,58 @@ export const useStore = create<StoreState>((set, get) => ({
   channelScheduled: {},
   setChannelScheduled: (channelId, msgs) =>
     set((s) => ({ channelScheduled: { ...s.channelScheduled, [channelId]: msgs } })),
+
+  // ─── v0.14 Platform Differentiation ──────────────────────────────────
+  forwardModalMessage: null,
+  setForwardModalMessage: (msg) => set({ forwardModalMessage: msg }),
+
+  serverEvents: {},
+  setServerEvents: (serverId, events) =>
+    set((s) => ({ serverEvents: { ...s.serverEvents, [serverId]: events } })),
+  upsertServerEvent: (serverId, event) =>
+    set((s) => {
+      const existing = s.serverEvents[serverId] ?? [];
+      const without = existing.filter((e) => e.id !== event.id);
+      return { serverEvents: { ...s.serverEvents, [serverId]: [event, ...without] } };
+    }),
+  removeServerEvent: (serverId, eventId) =>
+    set((s) => ({
+      serverEvents: {
+        ...s.serverEvents,
+        [serverId]: (s.serverEvents[serverId] ?? []).filter((e) => e.id !== eventId),
+      },
+    })),
+  eventsOpen: false,
+  setEventsOpen: (open) => set({ eventsOpen: open }),
+  loadServerEvents: async (serverId, status) => {
+    try {
+      const events = await invoke<ServerEvent[]>("list_server_events", { serverId, status });
+      set((s) => ({ serverEvents: { ...s.serverEvents, [serverId]: events } }));
+    } catch (e) {
+      console.error("loadServerEvents error", e);
+    }
+  },
+
+  stickerPacks: [],
+  setStickerPacks: (packs) => set({ stickerPacks: packs }),
+  loadStickerPacks: async () => {
+    try {
+      const packs = await invoke<StickerPack[]>("list_sticker_packs");
+      set({ stickerPacks: packs });
+    } catch (e) {
+      console.error("loadStickerPacks error", e);
+    }
+  },
+
+  serverStickers: {},
+  setServerStickers: (serverId, stickers) =>
+    set((s) => ({ serverStickers: { ...s.serverStickers, [serverId]: stickers } })),
+  loadServerStickers: async (serverId) => {
+    try {
+      const stickers = await invoke<Sticker[]>("list_server_stickers", { serverId });
+      set((s) => ({ serverStickers: { ...s.serverStickers, [serverId]: stickers } }));
+    } catch (e) {
+      console.error("loadServerStickers error", e);
+    }
+  },
 }));

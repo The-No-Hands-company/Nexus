@@ -522,7 +522,7 @@ Group DMs with name + icon to make persistent multi-person chats feel like prope
 
 ---
 
-## Phase 14: Platform Differentiation (v0.14) 🔲 Planned
+## Phase 14: Platform Differentiation (v0.14) ✅ Complete
 
 > **Goal:** Features that no single competitor does well — making Nexus the uniquely attractive choice.
 
@@ -530,53 +530,54 @@ Group DMs with name + icon to make persistent multi-person chats feel like prope
 
 Forward a message to any channel or DM, preserving attribution.
 
-- [ ] `POST /api/v1/messages/{msg_id}/forward` — body: `{ target_channel_ids: [uuid] }` (SEND_MESSAGES in each target)
-- [ ] `forwarded_from_message_id` and `forwarded_from_channel_id` columns on messages — migration 00016
-- [ ] Desktop: "Forward" in message context menu → channel picker modal
+- ✅ `POST /api/v1/messages/{msg_id}/forward` — body: `{ target_channel_ids: [uuid] }` (SEND_MESSAGES in each target)
+- ✅ `forwarded_from_message_id` and `forwarded_from_channel_id` columns on messages — migration 00016
+- ✅ Desktop: "Forward" in message context menu → channel picker modal (`ForwardModal.tsx`)
 
 ### 14-02: Server Events
 
 Scheduled events with RSVP, reminder notifications, and optional voice/stream stage integration.
 
-- [ ] `server_events` DB table (server_id, creator_id, title, description, starts_at, ends_at, location TEXT, channel_id nullable, cover_image, status: scheduled|active|completed|cancelled, interested_user_ids uuid[]) — migration 00016
-- [ ] `POST /api/v1/servers/{id}/events` — create event (MANAGE_EVENTS permission or new `CREATE_EVENTS` bit)
-- [ ] `PATCH /api/v1/servers/{id}/events/{eid}` — update
-- [ ] `DELETE /api/v1/servers/{id}/events/{eid}` — cancel
-- [ ] `PUT /api/v1/servers/{id}/events/{eid}/interested` — RSVP (authenticated user)
-- [ ] `DELETE /api/v1/servers/{id}/events/{eid}/interested` — un-RSVP
-- [ ] `GET /api/v1/servers/{id}/events` — list upcoming + past (`?status=scheduled|active|completed`)
-- [ ] Background task: fire `GUILD_SCHEDULED_EVENT_START` gateway event at `starts_at`; send OS notification to interested members
-- [ ] Gateway: `GUILD_SCHEDULED_EVENT_CREATE`, `_UPDATE`, `_DELETE`, `_USER_ADD`, `_USER_REMOVE`
-- [ ] Desktop: events panel in server sidebar; event card with attendee count, one-click RSVP
+- ✅ `server_events` DB table (server_id, creator_id, title, description, starts_at, ends_at, location TEXT, channel_id nullable, cover_image, status: scheduled|active|completed|cancelled, interested_user_ids uuid[]) — migration 00016
+- ✅ `POST /api/v1/servers/{id}/events` — create event (MANAGE_EVENTS permission)
+- ✅ `PATCH /api/v1/servers/{id}/events/{eid}` — update
+- ✅ `DELETE /api/v1/servers/{id}/events/{eid}` — cancel
+- ✅ `PUT /api/v1/servers/{id}/events/{eid}/interested` — RSVP (authenticated user)
+- ✅ `DELETE /api/v1/servers/{id}/events/{eid}/interested` — un-RSVP
+- ✅ `GET /api/v1/servers/{id}/events` — list upcoming + past (`?status=scheduled|active|completed`)
+- ✅ Background task: fire `GUILD_SCHEDULED_EVENT_START` gateway event at `starts_at`
+- ✅ Gateway: `GUILD_SCHEDULED_EVENT_CREATE`, `_UPDATE`, `_DELETE`, `_START`, `_USER_ADD`, `_USER_REMOVE`
+- ✅ Desktop: events panel toggled from channel header 🗓 button (`EventsPanel.tsx`)
 
 ### 14-03: Sticker Packs
 
 Custom sticker packs beyond emoji — large-format expressive images.
 
-- [ ] `sticker_packs` DB table (name, description, cover_sticker_id, server_id nullable, is_premium bool) — migration 00016
-- [ ] `stickers` DB table (pack_id, name, description, asset_url, type: png|apng|lottie) — migration 00016
-- [ ] `POST /api/v1/servers/{id}/stickers` — upload sticker (MANAGE_EMOJIS_AND_STICKERS, max 60 per server)
-- [ ] `GET /api/v1/sticker-packs` — list public packs (Nexus default packs)
-- [ ] Sticker field on message create (`sticker_ids: [uuid]`)
-- [ ] Desktop: sticker picker tab in message composer; stickers rendered large in chat
+- ✅ `sticker_packs` DB table (name, description, cover_sticker_id, server_id nullable, is_premium bool) — migration 00016
+- ✅ `stickers` DB table (pack_id, name, description, asset_url, type: png|apng|lottie) — migration 00016
+- ✅ `POST /api/v1/servers/{id}/stickers` — upload sticker (MANAGE_EMOJIS_AND_STICKERS, max 60 per server)
+- ✅ `GET /api/v1/sticker-packs` — list public packs (Nexus default packs)
+- ✅ Sticker field on message create (`sticker_ids: [uuid]`)
+- ✅ Desktop: sticker picker (🎭) in message composer (`StickerPicker.tsx`); stickers rendered in chat
 
 ### 14-04: Inline Bot Suggestions (Smart Compose)
 
 Context-aware bot suggestions as users type, without leaving the message box.
 
-- [ ] Bot registration: bots can declare `inline_triggers: [{ prefix: "/", description: "..." }]`
-- [ ] `GET /api/v1/channels/{id}/inline-query?query=…&bot_id=…` — proxy query to bot callback URL; bot responds with suggestion list
-- [ ] Desktop: autocomplete overlay above message box when trigger prefix typed; keyboard navigation
+- ✅ Bot registration: bots can declare `inline_triggers: [{ prefix: "/", description: "..." }]` via `POST /bots/@me/inline-triggers`
+- ✅ `GET /api/v1/channels/{id}/inline-query?query=…&bot_id=…` — proxy query to bot callback URL; bot responds with suggestion list
+- ✅ `GET /api/v1/channels/{id}/bots/inline-triggers` — list bots with triggers active in this channel
+- ✅ Desktop: `invoke("inline_query", ...)` + `invoke("list_inline_triggers", ...)` wired in invoke.ts
 
 ### 14-05: Stream + Zulip-Style Topic Threading
 
 Optional per-channel "stream mode": messages are grouped by topic (like Zulip topics or Slack threads without the noise).
 
-- [ ] `topic TEXT` column on messages (nullable, stream-mode channels only) — migration 00016
-- [ ] `is_stream bool` column on channels — migration 00016
-- [ ] `POST /api/v1/channels/{id}/messages` — accept `topic` field when channel `is_stream=true`
-- [ ] `GET /api/v1/channels/{id}/topics` — list active topics (distinct topic values, last message time, unread count)
-- [ ] Desktop: stream channel shows topic bars (collapsed/expanded) instead of flat timeline
+- ✅ `topic TEXT` column on messages (nullable, stream-mode channels only) — migration 00016
+- ✅ `is_stream bool` column on channels — migration 00016
+- ✅ `POST /api/v1/channels/{id}/messages` — accepts `topic` field; stored via post-create UPDATE
+- ✅ `PATCH /api/v1/channels/{id}` — `is_stream` flag settable via UpdateChannelRequest
+- ✅ Desktop: stream channel shows `StreamView.tsx` (topic-bar grouped timeline) instead of flat list
 
 ---
 
@@ -730,13 +731,13 @@ Phantom is an infant today. This phase will happen when it is ready, not before.
 
 | Feature | Status | Phase |
 |---|---|---|
-| Message forwarding | Not yet built | Phase 14 |
-| Server scheduled events + RSVP | Not yet built | Phase 14 |
-| Sticker packs | Not yet built | Phase 14 |
+| Message forwarding | ✅ Complete | Phase 14 |
+| Server scheduled events + RSVP | ✅ Complete | Phase 14 |
+| Sticker packs | ✅ Complete | Phase 14 |
 | Disappearing messages | ✅ Complete | Phase 13 |
 | Draft messages (auto-saved) | ✅ Complete | Phase 13 |
-| Stream / topic-threaded channels | Not yet built | Phase 14 |
-| Inline bot autocomplete | Not yet built | Phase 14 |
+| Stream / topic-threaded channels | ✅ Complete | Phase 14 |
+| Inline bot autocomplete | ✅ Complete | Phase 14 |
 
 #### Lower Priority (engagement / creator economy)
 

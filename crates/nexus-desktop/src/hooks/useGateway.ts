@@ -273,6 +273,95 @@ export function useGateway() {
           break;
         }
 
+        // ── v0.14 Platform Differentiation ──────────────────────────────
+
+        case "MESSAGE_FORWARD": {
+          // A forwarded message was created — append it to the target channel
+          const raw = data as Record<string, unknown>;
+          if (raw.channel_id && raw.id) {
+            appendMessage(raw.channel_id as string, {
+              id: raw.id as string,
+              channelId: raw.channel_id as string,
+              authorId: raw.author_id as string,
+              authorUsername: (raw.author_username as string) ?? "",
+              content: raw.content as string,
+              createdAt: raw.created_at as string,
+              forwardedFromMessageId: raw.forwarded_from_message_id as string | undefined,
+              forwardedFromChannelId: raw.forwarded_from_channel_id as string | undefined,
+            });
+          }
+          break;
+        }
+
+        case "GUILD_SCHEDULED_EVENT_CREATE": {
+          const raw = data as Record<string, unknown>;
+          const serverId = raw.server_id as string;
+          useStore.getState().upsertServerEvent(serverId, {
+            id: raw.id as string,
+            serverId,
+            creatorId: raw.creator_id as string,
+            title: raw.title as string,
+            description: raw.description as string | undefined,
+            startsAt: raw.starts_at as string,
+            endsAt: raw.ends_at as string | undefined,
+            location: raw.location as string | undefined,
+            channelId: raw.channel_id as string | undefined,
+            coverImage: undefined,
+            status: "scheduled",
+            interestedCount: 0,
+            isInterested: false,
+            createdAt: raw.created_at as string,
+            updatedAt: raw.updated_at as string,
+          });
+          break;
+        }
+
+        case "GUILD_SCHEDULED_EVENT_UPDATE": {
+          const raw = data as Record<string, unknown>;
+          const serverId = raw.server_id as string;
+          useStore.getState().upsertServerEvent(serverId, data as Parameters<typeof useStore.getState().upsertServerEvent>[1]);
+          break;
+        }
+
+        case "GUILD_SCHEDULED_EVENT_DELETE": {
+          const raw = data as { server_id: string; event_id: string };
+          useStore.getState().removeServerEvent(raw.server_id, raw.event_id);
+          break;
+        }
+
+        case "GUILD_SCHEDULED_EVENT_START": {
+          const raw = data as { server_id: string; event_id: string };
+          const existing = useStore.getState().serverEvents[raw.server_id] ?? [];
+          const ev = existing.find((e) => e.id === raw.event_id);
+          if (ev) useStore.getState().upsertServerEvent(raw.server_id, { ...ev, status: "active" });
+          break;
+        }
+
+        case "GUILD_SCHEDULED_EVENT_USER_ADD": {
+          const raw = data as { server_id: string; event_id: string };
+          const events = useStore.getState().serverEvents[raw.server_id] ?? [];
+          const ev = events.find((e) => e.id === raw.event_id);
+          if (ev)
+            useStore.getState().upsertServerEvent(raw.server_id, { ...ev, interestedCount: ev.interestedCount + 1, isInterested: true });
+          break;
+        }
+
+        case "GUILD_SCHEDULED_EVENT_USER_REMOVE": {
+          const raw = data as { server_id: string; event_id: string };
+          const events2 = useStore.getState().serverEvents[raw.server_id] ?? [];
+          const ev2 = events2.find((e) => e.id === raw.event_id);
+          if (ev2)
+            useStore.getState().upsertServerEvent(raw.server_id, { ...ev2, interestedCount: Math.max(0, ev2.interestedCount - 1), isInterested: false });
+          break;
+        }
+
+        case "GUILD_STICKERS_UPDATE": {
+          const raw = data as { guild_id: string };
+          // Reload server stickers to stay in sync
+          useStore.getState().loadServerStickers(raw.guild_id);
+          break;
+        }
+
         default:
           break;
       }

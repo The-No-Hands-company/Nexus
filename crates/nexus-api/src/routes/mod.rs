@@ -35,3 +35,8 @@ pub mod users;
 pub mod verification;
 pub mod voice;
 pub mod webhooks;
+// v0.14 Platform Differentiation
+pub mod events;
+pub mod forward;
+pub mod inline_query;
+pub mod stickers;

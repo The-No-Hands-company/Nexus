@@ -499,6 +499,43 @@ async fn run_server(
                                 "cleared expired custom statuses"
                             );
                         }
+
+                        // 5. Activate server events whose starts_at has arrived (v0.14)
+                        #[derive(sqlx::FromRow)]
+                        struct StartedEventRow {
+                            id: String,
+                            server_id: String,
+                            title: String,
+                        }
+                        let started_events: Vec<StartedEventRow> = sqlx::query_as(
+                            "UPDATE server_events \
+                             SET status = 'active', updated_at = NOW() \
+                             WHERE status = 'scheduled' AND starts_at <= NOW() \
+                             RETURNING id::text AS id, server_id::text AS server_id, title"
+                        )
+                        .fetch_all(&pool)
+                        .await
+                        .unwrap_or_default();
+                        for ev in &started_events {
+                            let server_uuid = ev.server_id.parse::<uuid::Uuid>().ok();
+                            let _ = gw_tx.send(nexus_common::gateway_event::GatewayEvent {
+                                event_type: nexus_common::gateway_event::event_types::GUILD_SCHEDULED_EVENT_START.into(),
+                                data: serde_json::json!({
+                                    "event_id": ev.id,
+                                    "server_id": ev.server_id,
+                                    "title": ev.title,
+                                }),
+                                server_id: server_uuid,
+                                channel_id: None,
+                                user_id: None,
+                            });
+                        }
+                        if !started_events.is_empty() {
+                            tracing::info!(
+                                count = started_events.len(), subsystem = "server_events",
+                                "activated scheduled server events"
+                            );
+                        }
                     }
                     _ = engage_rx.recv() => {
                         tracing::debug!(subsystem = "engagement", "engagement task shutting down");

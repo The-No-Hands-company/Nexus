@@ -68,6 +68,9 @@ pub struct Channel {
     /// Set on the channel; the background task deletes expired rows.
     pub disappear_after_seconds: i32,
 
+    /// Whether this is a stream/topic-threaded channel (v0.14).
+    pub is_stream: bool,
+
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

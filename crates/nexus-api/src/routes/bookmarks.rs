@@ -105,10 +105,10 @@ impl TryFrom<BookmarkRow> for Bookmark {
     type Error = NexusError;
     fn try_from(r: BookmarkRow) -> Result<Self, Self::Error> {
         Ok(Self {
-            id: r.id.parse().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
-            user_id: r.user_id.parse().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
-            message_id: r.message_id.parse().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
-            channel_id: r.channel_id.parse().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
+            id: r.id.parse::<Uuid>().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
+            user_id: r.user_id.parse::<Uuid>().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
+            message_id: r.message_id.parse::<Uuid>().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
+            channel_id: r.channel_id.parse::<Uuid>().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
             note: r.note,
             created_at: parse_dt(&r.created_at)
                 .map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,

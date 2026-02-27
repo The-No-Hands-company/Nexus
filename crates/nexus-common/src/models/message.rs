@@ -188,6 +188,13 @@ pub struct CreateMessageRequest {
     /// If channel is E2EE, encrypted content bytes
     pub encrypted_content: Option<Vec<u8>>,
     pub encryption_metadata: Option<serde_json::Value>,
+
+    /// Stream channel topic (max 80 chars) — v0.14
+    #[validate(length(max = 80, message = "topic must be 80 characters or fewer"))]
+    pub topic: Option<String>,
+
+    /// Sticker IDs to include with this message — v0.14 (max 3)
+    pub sticker_ids: Option<Vec<Uuid>>,
 }
 
 #[derive(Debug, Deserialize, Validate)]

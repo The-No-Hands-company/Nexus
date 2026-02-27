@@ -112,9 +112,9 @@ impl TryFrom<ScheduledRow> for ScheduledMessage {
 
     fn try_from(r: ScheduledRow) -> Result<Self, Self::Error> {
         Ok(Self {
-            id: r.id.parse().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
-            channel_id: r.channel_id.parse().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
-            author_id: r.author_id.parse().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
+            id: r.id.parse::<Uuid>().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
+            channel_id: r.channel_id.parse::<Uuid>().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
+            author_id: r.author_id.parse::<Uuid>().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
             content: r.content,
             attachments: serde_json::from_str::<Vec<serde_json::Value>>(&r.attachments)
                 .unwrap_or_default(),

@@ -8,6 +8,9 @@ import MemberList from "./MemberList";
 import ThreadPanel from "./ThreadPanel";
 import PollCard from "./PollCard";
 import SavedMessagesPanel from "./SavedMessagesPanel";
+import ForwardModal from "./ForwardModal";
+import EventsPanel from "./EventsPanel";
+import StreamView from "./StreamView";
 import { useFocusTrap } from "../hooks/useFocusTrap";
 import { formatDistanceToNow, format, isToday, isYesterday } from "date-fns";
 import clsx from "clsx";
@@ -17,6 +20,7 @@ export default function ChatView() {
   const {
     messages, channels, session, loadMessages, activeServerId, isHomeMode,
     channelPolls, setChannelPolls, addBookmark, savedMessagesPanelOpen, setSavedMessagesPanelOpen,
+    forwardModalMessage, setForwardModalMessage, eventsOpen, setEventsOpen,
   } = useStore();
   const [showMembers, setShowMembers] = useState(true);
   const [openThread, setOpenThread] = useState<{ id: string; title: string } | null>(null);
@@ -25,6 +29,7 @@ export default function ChatView() {
   const [showScheduled, setShowScheduled] = useState(false);
   const [scheduledMsgs, setScheduledMsgs] = useState<import("../store").ScheduledMessage[]>([]);
   const [confirmDisappear, setConfirmDisappear] = useState(false);
+  const [pendingTopic, setPendingTopic] = useState<string | undefined>(undefined);
 
   const msgs: Message[] = channelId ? (messages[channelId] ?? []) : [];
   const channel = channels.find((c) => c.id === channelId);
@@ -171,9 +176,30 @@ export default function ChatView() {
               </svg>
             </button>
           )}
+          {/* Events button — v0.14 Platform Differentiation */}
+          {isServerChannel && activeServerId && (
+            <button
+              onClick={() => setEventsOpen(!eventsOpen)}
+              title={eventsOpen ? "Hide events" : "Show events"}
+              aria-label="Toggle server events panel"
+              aria-pressed={eventsOpen}
+              className={clsx(
+                "p-1.5 rounded transition-colors text-sm leading-none",
+                eventsOpen ? "text-fg bg-bg-600/60" : "text-muted hover:text-fg hover:bg-bg-700/60"
+              )}
+            >
+              🗓
+            </button>
+          )}
         </div>
 
-        {/* Messages */}
+        {/* Messages — use StreamView for stream channels (v0.14) */}
+        {channel?.isStream ? (
+          <StreamView
+            channelId={channelId!}
+            onReply={(topic) => setPendingTopic(topic)}
+          />
+        ) : (
         <div
           ref={containerRef}
           onScroll={handleScroll}
@@ -238,6 +264,7 @@ export default function ChatView() {
                       console.error("[bookmark]", e);
                     }
                   }}
+                  onForward={() => setForwardModalMessage(msg)}
                 />
                 {attachedPoll && (
                   <PollCard
@@ -252,12 +279,13 @@ export default function ChatView() {
           })}
           <div ref={bottomRef} />
         </div>
+        )}
 
         {/* Typing bar */}
         {channelId && <TypingBar channelId={channelId} />}
 
         {/* Input */}
-        <MessageInput channelId={channelId} isE2ee={!!channel?.isE2ee} />
+        <MessageInput channelId={channelId} isE2ee={!!channel?.isE2ee} pendingTopic={pendingTopic} onTopicConsumed={() => setPendingTopic(undefined)} />
       </div>
 
       {/* Saved Messages panel (replaces member list when open) */}
@@ -265,8 +293,18 @@ export default function ChatView() {
         <SavedMessagesPanel onClose={() => setSavedMessagesPanelOpen(false)} />
       )}
 
+      {/* EventsPanel — v0.14 */}
+      {eventsOpen && activeServerId && (
+        <EventsPanel serverId={activeServerId} onClose={() => setEventsOpen(false)} />
+      )}
+
+      {/* ForwardModal — v0.14 */}
+      {forwardModalMessage && (
+        <ForwardModal message={forwardModalMessage} onClose={() => setForwardModalMessage(null)} />
+      )}
+
       {/* Member list sidebar */}
-      {isServerChannel && showMembers && !openThread && !savedMessagesPanelOpen && (
+      {isServerChannel && showMembers && !openThread && !savedMessagesPanelOpen && !eventsOpen && (
         <MemberList serverId={activeServerId!} />
       )}
 
@@ -433,6 +471,7 @@ function MessageRow({
   onOpenThread,
   onStartThread,
   onBookmark,
+  onForward,
 }: {
   msg: Message;
   channelId: string;
@@ -441,6 +480,7 @@ function MessageRow({
   onOpenThread?: (threadId: string, title: string) => void;
   onStartThread?: (msgId: string, content: string) => void;
   onBookmark?: () => void;
+  onForward?: () => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
@@ -592,6 +632,16 @@ function MessageRow({
                 title="Bookmark message"
               >
                 🔖
+              </button>
+            )}
+            {/* Forward button — v0.14 */}
+            {onForward && (
+              <button
+                onClick={onForward}
+                className="inline-flex items-center justify-center h-5 px-1.5 rounded border border-bg-600/50 bg-bg-700/40 text-muted hover:text-fg hover:bg-bg-600/60 transition-colors text-xs opacity-0 group-hover:opacity-100"
+                title="Forward message"
+              >
+                📤
               </button>
             )}
           </div>

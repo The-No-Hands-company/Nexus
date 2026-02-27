@@ -218,6 +218,7 @@ async fn update_channel(
         body.position,
         body.nsfw,
         body.rate_limit_per_user,
+        body.is_stream,
     )
     .await?;
 

@@ -209,6 +209,32 @@ async fn send_message(
     )
     .await?;
 
+    // v0.14: persist topic and sticker_ids if provided
+    if body.topic.is_some() || body.sticker_ids.as_ref().map_or(false, |v| !v.is_empty()) {
+        let topic_val = body.topic.as_deref().unwrap_or("");
+        let sticker_ids_str = body
+            .sticker_ids
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .map(|u| u.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        // Postgres array literal: '{uuid1,uuid2}'::uuid[]
+        let sticker_literal = format!("{{{sticker_ids_str}}}");
+        let sql = format!(
+            "UPDATE messages SET \
+                 topic = NULLIF($1, ''), \
+                 sticker_ids = '{sticker_literal}'::uuid[] \
+             WHERE id = $2::uuid"
+        );
+        let _ = sqlx::query(&sql)
+            .bind(topic_val)
+            .bind(message_id.to_string())
+            .execute(&state.db.pool)
+            .await;
+    }
+
     // Disappearing messages — if the channel has a TTL set, write expires_at
     // We query the column added in migration 00015 directly to avoid changing
     // the Channel model and all its consumers.

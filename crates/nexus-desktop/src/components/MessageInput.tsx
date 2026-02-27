@@ -1,20 +1,27 @@
 import { useState, KeyboardEvent, useRef, useEffect } from "react";
 import { invoke } from "../invoke";
 import { useStore, Message } from "../store";
+import type { Sticker } from "../store";
+import StickerPicker from "./StickerPicker";
 import clsx from "clsx";
 
 interface Props {
   channelId: string;
   isE2ee: boolean;
+  /** Stream channel topic pre-filled from StreamView — v0.14 */
+  pendingTopic?: string;
+  /** Called after pendingTopic is consumed so ChatView can clear it — v0.14 */
+  onTopicConsumed?: () => void;
 }
 
-export default function MessageInput({ channelId, isE2ee }: Props) {
+export default function MessageInput({ channelId, isE2ee, pendingTopic, onTopicConsumed }: Props) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [scheduleAt, setScheduleAt] = useState("");
   const [scheduling, setScheduling] = useState(false);
+  const [stickerPickerOpen, setStickerPickerOpen] = useState(false);
   const { pttActive, appendMessage, channels, setDraft } = useStore();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Throttle typing notifications to once every 3 s
@@ -72,9 +79,12 @@ export default function MessageInput({ channelId, isE2ee }: Props) {
         const msg = await invoke<Message>("send_message", {
           channelId,
           content,
+          // v0.14 stream topic (if set by StreamView)
+          ...(pendingTopic ? { topic: pendingTopic } : {}),
         });
         // Immediately reflect the sent message in the UI without waiting on the WebSocket.
         appendMessage(channelId, msg);
+        onTopicConsumed?.();
       }
       setText("");
       clearDraft();
@@ -189,6 +199,40 @@ export default function MessageInput({ channelId, isE2ee }: Props) {
         >
           🕐
         </button>
+        {/* Sticker picker — v0.14 */}
+        <div className="relative">
+          <button
+            onClick={() => setStickerPickerOpen((v) => !v)}
+            className={clsx(
+              "text-muted hover:text-accent-400 transition-colors mb-0.5 shrink-0 text-base",
+              stickerPickerOpen && "text-accent-400"
+            )}
+            title="Stickers"
+            aria-label="Open sticker picker"
+          >
+            🎥
+          </button>
+          {stickerPickerOpen && (
+            <StickerPicker
+              onClose={() => setStickerPickerOpen(false)}
+              onSelect={async (sticker: Sticker) => {
+                setStickerPickerOpen(false);
+                try {
+                  const msg = await invoke<Message>("send_message", {
+                    channelId,
+                    content: "",
+                    stickerIds: [sticker.id],
+                    ...(pendingTopic ? { topic: pendingTopic } : {}),
+                  });
+                  appendMessage(channelId, msg);
+                  onTopicConsumed?.();
+                } catch (e) {
+                  console.error("[sticker send]", e);
+                }
+              }}
+            />
+          )}
+        </div>
         <button
           onClick={send}
           disabled={!text.trim() || sending}

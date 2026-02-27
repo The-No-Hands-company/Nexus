@@ -148,10 +148,10 @@ impl TryFrom<PollRow> for Poll {
 
     fn try_from(r: PollRow) -> Result<Self, Self::Error> {
         Ok(Self {
-            id: r.id.parse().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
-            channel_id: r.channel_id.parse().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
+            id: r.id.parse::<Uuid>().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
+            channel_id: r.channel_id.parse::<Uuid>().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
             message_id: r.message_id.and_then(|s| s.parse().ok()),
-            author_id: r.author_id.parse().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
+            author_id: r.author_id.parse::<Uuid>().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
             question: r.question,
             options: serde_json::from_str::<Vec<String>>(&r.options).unwrap_or_default(),
             ends_at: r.ends_at.as_deref().and_then(|s| parse_dt(s).ok()),

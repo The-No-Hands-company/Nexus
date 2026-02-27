@@ -58,6 +58,25 @@ pub mod event_types {
     pub const POLL_ENDED: &str = "POLL_ENDED";
     /// A scheduled message was dispatched and created in the channel.
     pub const SCHEDULED_MESSAGE_SENT: &str = "SCHEDULED_MESSAGE_SENT";
+    // v0.14 — Platform Differentiation
+    /// A message was forwarded to one or more target channels.
+    pub const MESSAGE_FORWARD: &str = "MESSAGE_FORWARD";
+    /// A new server event was created.
+    pub const GUILD_SCHEDULED_EVENT_CREATE: &str = "GUILD_SCHEDULED_EVENT_CREATE";
+    /// A server event was updated.
+    pub const GUILD_SCHEDULED_EVENT_UPDATE: &str = "GUILD_SCHEDULED_EVENT_UPDATE";
+    /// A server event was cancelled or completed.
+    pub const GUILD_SCHEDULED_EVENT_DELETE: &str = "GUILD_SCHEDULED_EVENT_DELETE";
+    /// A user RSVPed to a server event.
+    pub const GUILD_SCHEDULED_EVENT_USER_ADD: &str = "GUILD_SCHEDULED_EVENT_USER_ADD";
+    /// A user removed their RSVP from a server event.
+    pub const GUILD_SCHEDULED_EVENT_USER_REMOVE: &str = "GUILD_SCHEDULED_EVENT_USER_REMOVE";
+    /// A server event became active (start time reached).
+    pub const GUILD_SCHEDULED_EVENT_START: &str = "GUILD_SCHEDULED_EVENT_START";
+    /// A new sticker was uploaded to a server.
+    pub const GUILD_STICKERS_UPDATE: &str = "GUILD_STICKERS_UPDATE";
+    /// A stream-mode channel topic bar was updated.
+    pub const STREAM_TOPIC_UPDATE: &str = "STREAM_TOPIC_UPDATE";
 }
 
 /// Events broadcast through the gateway to connected clients.
