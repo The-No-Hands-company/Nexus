@@ -353,6 +353,162 @@ async fn run_server(
         });
     }
 
+    // ── Engagement background tasks (Phase 13) ────────────────────────────────
+    // Runs every minute:
+    //   • Auto-end polls that have passed their `ends_at`
+    //   • Dispatch pending scheduled messages at their `scheduled_at` time
+    //   • Purge expired (disappearing) messages
+    //   • Clear expired custom statuses + emit PRESENCE_UPDATE
+    {
+        let pool = db.pool.clone();
+        let gw_tx = gateway_tx.clone();
+        let mut engage_rx = shutdown_tx.subscribe();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        // 1. Auto-end polls
+                        #[derive(sqlx::FromRow)]
+                        struct PollEndRow { id: String, channel_id: String }
+                        let expired_polls: Vec<PollEndRow> = sqlx::query_as(
+                            "UPDATE polls SET status = 'ended', updated_at = NOW() \
+                             WHERE status = 'open' AND ends_at IS NOT NULL AND ends_at <= NOW() \
+                             RETURNING id::text AS id, channel_id::text AS channel_id"
+                        )
+                        .fetch_all(&pool)
+                        .await
+                        .unwrap_or_default();
+                        for p in &expired_polls {
+                            let _ = gw_tx.send(nexus_common::gateway_event::GatewayEvent {
+                                event_type: nexus_common::gateway_event::event_types::POLL_ENDED.into(),
+                                data: serde_json::json!({
+                                    "poll_id": p.id,
+                                    "channel_id": p.channel_id,
+                                }),
+                                server_id: None, channel_id: None, user_id: None,
+                            });
+                        }
+                        if !expired_polls.is_empty() {
+                            tracing::info!(count = expired_polls.len(), subsystem = "polls", "auto-ended expired polls");
+                        }
+
+                        // 2. Dispatch scheduled messages
+                        #[derive(sqlx::FromRow)]
+                        struct SmsRow {
+                            id: String,
+                            channel_id: String,
+                            author_id: String,
+                            content: String,
+                        }
+                        let due: Vec<SmsRow> = sqlx::query_as(
+                            "UPDATE scheduled_messages \
+                             SET status = 'sent', updated_at = NOW() \
+                             WHERE status = 'pending' AND scheduled_at <= NOW() \
+                             RETURNING id::text AS id, channel_id::text AS channel_id, \
+                                       author_id::text AS author_id, content"
+                        )
+                        .fetch_all(&pool)
+                        .await
+                        .unwrap_or_default();
+                        for sm in &due {
+                            // Insert the actual message
+                            let msg_id = nexus_common::snowflake::generate_id();
+                            let insert_res = sqlx::query(
+                                "INSERT INTO messages \
+                                 (id, channel_id, author_id, content, message_type, \
+                                  edited, pinned, embeds, attachments, \
+                                  mentions, mention_roles, mention_everyone, flags, \
+                                  created_at, updated_at) \
+                                 VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 0, \
+                                         false, false, '[]'::jsonb, '[]'::jsonb, \
+                                         '{}'::uuid[], '{}'::uuid[], false, 0, \
+                                         NOW(), NOW())"
+                            )
+                            .bind(msg_id.to_string())
+                            .bind(&sm.channel_id)
+                            .bind(&sm.author_id)
+                            .bind(&sm.content)
+                            .execute(&pool)
+                            .await;
+                            if let Err(e) = insert_res {
+                                tracing::warn!(error = %e, sm_id = %sm.id, "Failed to dispatch scheduled message");
+                                continue;
+                            }
+                            let _ = gw_tx.send(nexus_common::gateway_event::GatewayEvent {
+                                event_type: nexus_common::gateway_event::event_types::MESSAGE_CREATE.into(),
+                                data: serde_json::json!({
+                                    "id": msg_id.to_string(),
+                                    "channel_id": sm.channel_id,
+                                    "author_id": sm.author_id,
+                                    "content": sm.content,
+                                    "scheduled_message_id": sm.id,
+                                }),
+                                server_id: None, channel_id: None, user_id: None,
+                            });
+                        }
+                        if !due.is_empty() {
+                            tracing::info!(count = due.len(), subsystem = "scheduled_messages", "dispatched scheduled messages");
+                        }
+
+                        // 3. Purge expired (disappearing) messages
+                        let deleted: Result<sqlx::any::AnyQueryResult, _> = sqlx::query(
+                            "DELETE FROM messages WHERE expires_at IS NOT NULL AND expires_at <= NOW()"
+                        )
+                        .execute(&pool)
+                        .await;
+                        match deleted {
+                            Ok(r) if r.rows_affected() > 0 => tracing::info!(
+                                count = r.rows_affected(), subsystem = "disappearing_messages",
+                                "purged expired messages"
+                            ),
+                            Err(e) => tracing::warn!(
+                                error = %e, subsystem = "disappearing_messages",
+                                "failed to purge expired messages"
+                            ),
+                            _ => {}
+                        }
+
+                        // 4. Clear expired custom statuses
+                        #[derive(sqlx::FromRow)]
+                        struct ExpiredStatusRow { id: String }
+                        let expired_statuses: Vec<ExpiredStatusRow> = sqlx::query_as(
+                            "UPDATE users \
+                             SET status = NULL, custom_status_expires_at = NULL, updated_at = NOW() \
+                             WHERE custom_status_expires_at IS NOT NULL AND custom_status_expires_at <= NOW() \
+                             RETURNING id::text AS id"
+                        )
+                        .fetch_all(&pool)
+                        .await
+                        .unwrap_or_default();
+                        for u in &expired_statuses {
+                            let _ = gw_tx.send(nexus_common::gateway_event::GatewayEvent {
+                                event_type: nexus_common::gateway_event::event_types::PRESENCE_UPDATE.into(),
+                                data: serde_json::json!({
+                                    "user_id": u.id,
+                                    "status": null,
+                                    "custom_status_expires_at": null,
+                                }),
+                                server_id: None, channel_id: None, user_id: None,
+                            });
+                        }
+                        if !expired_statuses.is_empty() {
+                            tracing::info!(
+                                count = expired_statuses.len(), subsystem = "status_expiry",
+                                "cleared expired custom statuses"
+                            );
+                        }
+                    }
+                    _ = engage_rx.recv() => {
+                        tracing::debug!(subsystem = "engagement", "engagement task shutting down");
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
     // Pre-subscribe each server before spawning so they receive the signal even
     // if it fires before the async block starts.
     let api_shutdown_rx     = shutdown_tx.subscribe();

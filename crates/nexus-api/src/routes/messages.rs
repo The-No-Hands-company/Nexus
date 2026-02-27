@@ -209,6 +209,29 @@ async fn send_message(
     )
     .await?;
 
+    // Disappearing messages — if the channel has a TTL set, write expires_at
+    // We query the column added in migration 00015 directly to avoid changing
+    // the Channel model and all its consumers.
+    let disappear_secs: Option<(i64,)> = sqlx::query_as(
+        "SELECT disappear_after_seconds FROM channels WHERE id = $1::uuid",
+    )
+    .bind(channel_id.to_string())
+    .fetch_optional(&state.db.pool)
+    .await
+    .ok()
+    .flatten();
+    if let Some((secs,)) = disappear_secs {
+        if secs > 0 {
+            let _ = sqlx::query(
+                "UPDATE messages SET expires_at = NOW() + ($1 * INTERVAL '1 second') WHERE id = $2::uuid",
+            )
+            .bind(secs)
+            .bind(message_id.to_string())
+            .execute(&state.db.pool)
+            .await;
+        }
+    }
+
     // Increment mention counts for mentioned users
     for mentioned_user_id in &mentions {
         let _ = read_states::increment_mention_count(

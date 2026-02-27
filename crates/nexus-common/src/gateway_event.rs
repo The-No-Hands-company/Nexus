@@ -47,6 +47,17 @@ pub mod event_types {
     pub const CHANNEL_RECIPIENT_ADD: &str = "CHANNEL_RECIPIENT_ADD";
     /// A user was removed from a group DM.
     pub const CHANNEL_RECIPIENT_REMOVE: &str = "CHANNEL_RECIPIENT_REMOVE";
+    // v0.13 — Engagement Features
+    /// A new poll was created in a channel.
+    pub const POLL_CREATE: &str = "POLL_CREATE";
+    /// A vote was cast on a poll option.
+    pub const POLL_VOTE_ADD: &str = "POLL_VOTE_ADD";
+    /// A vote was retracted from a poll option.
+    pub const POLL_VOTE_REMOVE: &str = "POLL_VOTE_REMOVE";
+    /// A poll reached its end time or was ended manually.
+    pub const POLL_ENDED: &str = "POLL_ENDED";
+    /// A scheduled message was dispatched and created in the channel.
+    pub const SCHEDULED_MESSAGE_SENT: &str = "SCHEDULED_MESSAGE_SENT";
 }
 
 /// Events broadcast through the gateway to connected clients.

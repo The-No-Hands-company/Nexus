@@ -177,6 +177,33 @@ async fn register(
     let tokens = issue_tokens(&state, user.id, &user.username, false, email_verified, user_agent).await?;
 
     tracing::info!(user_id = %user.id, username = %user.username, "New user registered");
+
+    // Create note-to-self channel — a private DM where recipient = sender
+    // This surfaces in the client as "Saved Notes" (like Telegram Saved Messages).
+    let note_channel_id = snowflake::generate_id();
+    if let Err(e) = sqlx::query(
+        "INSERT INTO channels (id, channel_type, created_at, updated_at) \
+         VALUES ($1::uuid, 'dm', NOW(), NOW()) \
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(note_channel_id.to_string())
+    .execute(&state.db.pool)
+    .await
+    {
+        tracing::warn!(user_id = %user.id, error = %e, "Failed to create note-to-self channel");
+    } else {
+        // Track the association
+        let _ = sqlx::query(
+            "INSERT INTO note_to_self_channels (user_id, channel_id) \
+             VALUES ($1::uuid, $2::uuid) \
+             ON CONFLICT DO NOTHING",
+        )
+        .bind(user.id.to_string())
+        .bind(note_channel_id.to_string())
+        .execute(&state.db.pool)
+        .await;
+    }
+
     Ok(Json(AuthResponse { user: user.into(), tokens }))
 }
 

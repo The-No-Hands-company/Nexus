@@ -225,6 +225,9 @@ pub struct UpdatePresenceRequest {
     #[validate(length(max = 64))]
     pub custom_status_emoji: Option<String>,
 
+    /// Optional expiry for the custom status (null = no expiry)
+    pub custom_status_expires_at: Option<DateTime<Utc>>,
+
     /// Activity update (game, music, streaming)
     pub activity: Option<ActivityUpdate>,
 }

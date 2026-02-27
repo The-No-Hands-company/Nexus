@@ -9,6 +9,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use chrono::{DateTime, Utc};
 use nexus_common::{
     error::{NexusError, NexusResult},
     models::rich::UpdatePresenceRequest,
@@ -80,7 +81,7 @@ async fn update_presence(
     validate_request(&body)?;
 
     // Update presence + status in the users table
-    if body.presence.is_some() || body.status.is_some() || body.custom_status_emoji.is_some() {
+    if body.presence.is_some() || body.status.is_some() || body.custom_status_emoji.is_some() || body.custom_status_expires_at.is_some() {
         // Use string-based presence cast to avoid compile-time type checking
         let presence_str = body.presence.map(|p| format!("{:?}", p).to_lowercase());
         let presence_str = presence_str.as_deref();
@@ -91,6 +92,7 @@ async fn update_presence(
                 presence = COALESCE(CAST($2 AS user_presence), presence),
                 status = COALESCE($3, status),
                 custom_status_emoji = COALESCE($4, custom_status_emoji),
+                custom_status_expires_at = $5,
                 updated_at = NOW()
             WHERE id = $1::uuid
             "#,
@@ -99,6 +101,7 @@ async fn update_presence(
         .bind(presence_str)
         .bind(body.status.as_deref())
         .bind(body.custom_status_emoji.as_deref())
+        .bind(body.custom_status_expires_at.map(|dt| dt.to_rfc3339()))
         .execute(&state.db.pool)
         .await?;
     }

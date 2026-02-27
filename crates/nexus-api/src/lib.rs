@@ -87,6 +87,11 @@ pub fn build_router(state: AppState) -> Router {
         // v0.12 Channel Type Completion
         .merge(routes::forum::router())            // forum posts + tags
         .merge(routes::stages::router())           // stage instances + speaker management
+        // v0.13 Engagement Features
+        .merge(routes::polls::router())                       // polls — create, vote, results, end
+        .merge(routes::scheduled_messages::router())          // scheduled messages CRUD
+        .merge(routes::bookmarks::router())                   // message bookmarks
+        .merge(routes::drafts::router())                      // per-channel drafts
         // Make Arc<AppState> available as an Axum Extension so that
         // `combined_auth_middleware` can perform DB lookups for bot tokens
         // without requiring `from_fn_with_state` on every sub-router.

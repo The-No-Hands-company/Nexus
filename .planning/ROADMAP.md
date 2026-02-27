@@ -398,7 +398,7 @@ The UX should feel immediately familiar. Servers, channels, voice, bots, rich em
 - ✅ Apply filter on message edit — same block/warn logic before persisting the edit
 - ✅ Configurable spam threshold via server settings — `spam_window_secs` (1–300 s) and `spam_max_messages` (1–20) per-server columns; editable in Server Settings Moderation panel
 
-## Phase 12: Channel Type Completion (v0.12) 🔲 Planned
+## Phase 12: Channel Type Completion (v0.12) ✅ Complete
 
 > **Goal:** The DB schema already contains `channel_type` values for `forum`, `announcement`, `stage`, and `group_dm`. Phase 12 exposes these as first-class API surfaces. Zero new schema migrations are needed for most of these — they are fast wins.
 
@@ -406,118 +406,118 @@ The UX should feel immediately familiar. Servers, channels, voice, bots, rich em
 
 Forum channels are structured thread boards: every conversation is a titled post with optional tags, rather than a flat chat flow.
 
-- [ ] `GET /api/v1/channels/{id}/posts` — paginated list of forum posts (threads with `type=forum_post`)
-- [ ] `POST /api/v1/channels/{id}/posts` — create a forum post (title, content, tag_ids[], media)
-- [ ] `PATCH /api/v1/channels/{id}/posts/{thread_id}` — edit post title or tags (OP or MANAGE_THREADS)
-- [ ] `POST /api/v1/channels/{id}/posts/{thread_id}/lock` / `unlock` — mod lock/unlock
-- [ ] `GET /api/v1/channels/{id}/tags` — list available forum tags for this channel
-- [ ] `POST/PATCH/DELETE /api/v1/channels/{id}/tags` — CRUD forum tags (MANAGE_CHANNELS)
-- [ ] Gateway: `FORUM_POST_CREATE`, `FORUM_POST_UPDATE`, `FORUM_POST_DELETE` events
-- [ ] Desktop: `ForumView` component — post list, tag filter bar, "New Post" button, post detail view
+- ✅ `GET /api/v1/channels/{id}/posts` — paginated list of forum posts (threads with `type=forum_post`)
+- ✅ `POST /api/v1/channels/{id}/posts` — create a forum post (title, content, tag_ids[], media)
+- ✅ `PATCH /api/v1/channels/{id}/posts/{thread_id}` — edit post title or tags (OP or MANAGE_THREADS)
+- ✅ `POST /api/v1/channels/{id}/posts/{thread_id}/lock` / `unlock` — mod lock/unlock
+- ✅ `GET /api/v1/channels/{id}/tags` — list available forum tags for this channel
+- ✅ `POST/PATCH/DELETE /api/v1/channels/{id}/tags` — CRUD forum tags (MANAGE_CHANNELS)
+- ✅ Gateway: `FORUM_POST_CREATE`, `FORUM_POST_UPDATE`, `FORUM_POST_DELETE` events
+- ✅ Desktop: `ForumView` component — post list, tag filter bar, "New Post" button, post detail view
 
 ### 12-02: Announcement Channels
 
 Announcement channels allow moderators to "publish" messages, cross-posting them to subscribing servers via federation.
 
-- [ ] `POST /api/v1/channels/{id}/messages/{msg_id}/crosspost` — publish a message (SEND_MESSAGES in announcement channel or MANAGE_MESSAGES)
-- [ ] `PUT /api/v1/channels/{id}/followers` — subscribe server channel to this announcement channel (`webhook_channel_id` body)
-- [ ] Cross-post delivery: on publish, relay message to all follower channels via the federation layer (or direct insert for local followers)
-- [ ] `channel_followers` DB table (source_channel_id, target_channel_id, target_guild_id) — migration 00014
-- [ ] Gateway: `MESSAGE_CROSSPOST` event with `flags` bit indicating published status
-- [ ] Desktop: announcement badge on channel icon; "Publish" button appears for eligible messages in announcement channels
+- ✅ `POST /api/v1/channels/{id}/messages/{msg_id}/crosspost` — publish a message (SEND_MESSAGES in announcement channel or MANAGE_MESSAGES)
+- ✅ `PUT /api/v1/channels/{id}/followers` — subscribe server channel to this announcement channel (`webhook_channel_id` body)
+- ✅ Cross-post delivery: on publish, relay message to all follower channels via the federation layer (or direct insert for local followers)
+- ✅ `channel_followers` DB table (source_channel_id, target_channel_id, target_guild_id) — migration 00014
+- ✅ Gateway: `MESSAGE_CROSSPOST` event with `flags` bit indicating published status
+- ✅ Desktop: announcement badge on channel icon; "Publish" button appears for eligible messages in announcement channels
 
 ### 12-03: Stage Channels
 
 Stage channels are speaker + audience voice rooms: a few speakers broadcast while the audience can request to speak.
 
-- [ ] `stage_instances` DB table (channel_id, topic, privacy_level, speaker_ids uuid[], hand_raised_ids uuid[], started_at, ended_at) — migration 00014
-- [ ] `POST /api/v1/channels/{id}/stage-instance` — create stage (topic, privacy: `guild_only` | `public`)
-- [ ] `PATCH /api/v1/channels/{id}/stage-instance` — update topic / privacy
-- [ ] `DELETE /api/v1/channels/{id}/stage-instance` — end stage
-- [ ] `POST /api/v1/channels/{id}/stage-instance/speakers/{uid}` — invite user to speak (MUTE_MEMBERS)
-- [ ] `DELETE /api/v1/channels/{id}/stage-instance/speakers/{uid}` — move speaker to audience (MUTE_MEMBERS)
-- [ ] `POST /api/v1/channels/{id}/stage-instance/raise-hand` — audience member requests to speak (authenticated user)
-- [ ] `DELETE /api/v1/channels/{id}/stage-instance/raise-hand` — retract request
-- [ ] Gateway: `STAGE_INSTANCE_CREATE`, `STAGE_INSTANCE_UPDATE`, `STAGE_INSTANCE_DELETE`, `STAGE_SPEAKER_UPDATE`
-- [ ] Desktop: `StageView` — speaker podium row, audience gallery, hand-raise button, mod tools
+- ✅ `stage_instances` DB table (channel_id, topic, privacy_level, speaker_ids uuid[], hand_raised_ids uuid[], started_at, ended_at) — migration 00014
+- ✅ `POST /api/v1/channels/{id}/stage-instance` — create stage (topic, privacy: `guild_only` | `public`)
+- ✅ `PATCH /api/v1/channels/{id}/stage-instance` — update topic / privacy
+- ✅ `DELETE /api/v1/channels/{id}/stage-instance` — end stage
+- ✅ `POST /api/v1/channels/{id}/stage-instance/speakers/{uid}` — invite user to speak (MUTE_MEMBERS)
+- ✅ `DELETE /api/v1/channels/{id}/stage-instance/speakers/{uid}` — move speaker to audience (MUTE_MEMBERS)
+- ✅ `POST /api/v1/channels/{id}/stage-instance/raise-hand` — audience member requests to speak (authenticated user)
+- ✅ `DELETE /api/v1/channels/{id}/stage-instance/raise-hand` — retract request
+- ✅ Gateway: `STAGE_INSTANCE_CREATE`, `STAGE_INSTANCE_UPDATE`, `STAGE_INSTANCE_DELETE`, `STAGE_SPEAKER_UPDATE`
+- ✅ Desktop: `StageView` — speaker podium row, audience gallery, hand-raise button, mod tools
 
 ### 12-04: Group DMs — Name & Icon
 
 Group DMs with name + icon to make persistent multi-person chats feel like proper rooms.
 
-- [ ] Ensure `channels` table has `name TEXT` and `icon TEXT` columns for `group_dm` type (add via migration 00014 if absent)
-- [ ] `PATCH /api/v1/channels/{id}` — update group DM name and/or icon (any member)
-- [ ] `POST /api/v1/channels/{id}/recipients/{user_id}` — add member (up to 10 members per group DM; owner only)
-- [ ] `DELETE /api/v1/channels/{id}/recipients/{user_id}` — remove member (self-leave or owner removing another)
-- [ ] `PUT /api/v1/channels/{id}/owner` — transfer group DM ownership (`{ user_id }` body; current owner only)
-- [ ] Gateway: `CHANNEL_RECIPIENT_ADD`, `CHANNEL_RECIPIENT_REMOVE` events
-- [ ] Desktop: group DM header shows name + avatar; edit name/icon inline; member management popover
+- ✅ Ensure `channels` table has `name TEXT` and `icon TEXT` columns for `group_dm` type (add via migration 00014 if absent)
+- ✅ `PATCH /api/v1/channels/{id}` — update group DM name and/or icon (any member)
+- ✅ `POST /api/v1/channels/{id}/recipients/{user_id}` — add member (up to 10 members per group DM; owner only)
+- ✅ `DELETE /api/v1/channels/{id}/recipients/{user_id}` — remove member (self-leave or owner removing another)
+- ✅ `PUT /api/v1/channels/{id}/owner` — transfer group DM ownership (`{ user_id }` body; current owner only)
+- ✅ Gateway: `CHANNEL_RECIPIENT_ADD`, `CHANNEL_RECIPIENT_REMOVE` events
+- ✅ Desktop: group DM header shows name + avatar; edit name/icon inline; member management popover
 
 ---
 
-## Phase 13: Engagement Features (v0.13) 🔲 Planned
+## Phase 13: Engagement Features (v0.13) � Backend Complete — Desktop Pending
 
 > **Goal:** Surface-level features that dramatically increase daily active engagement. All require new DB migrations but no architectural changes.
 
 ### 13-01: Polls
 
-- [ ] `polls` DB table (channel_id, message_id, question, options jsonb[], ends_at, allow_multiselect, is_anonymous) — migration 00015
-- [ ] `poll_votes` DB table (poll_id, user_id, option_index, voted_at) — unique (poll_id, user_id, option_index)
-- [ ] `POST /api/v1/channels/{id}/polls` — create poll (embedded in message or standalone)
-- [ ] `POST /api/v1/channels/{id}/polls/{poll_id}/vote` — cast vote (body: `{ option_indices: [n] }`)
-- [ ] `DELETE /api/v1/channels/{id}/polls/{poll_id}/vote` — retract vote (if poll allows)
-- [ ] `GET /api/v1/channels/{id}/polls/{poll_id}/results` — results (voter list hidden if anonymous)
-- [ ] `POST /api/v1/channels/{id}/polls/{poll_id}/end` — end early (MANAGE_MESSAGES)
-- [ ] Background task: auto-end polls at `ends_at`, emit `POLL_ENDED` gateway event
-- [ ] Gateway: `POLL_VOTE_ADD`, `POLL_VOTE_REMOVE`, `POLL_ENDED` events
+- ✅ `polls` DB table (channel_id, message_id, question, options jsonb[], ends_at, allow_multiselect, is_anonymous) — migration 00015
+- ✅ `poll_votes` DB table (poll_id, user_id, option_index, voted_at) — unique (poll_id, user_id, option_index)
+- ✅ `POST /api/v1/channels/{id}/polls` — create poll (embedded in message or standalone)
+- ✅ `POST /api/v1/channels/{id}/polls/{poll_id}/vote` — cast vote (body: `{ option_indices: [n] }`)
+- ✅ `DELETE /api/v1/channels/{id}/polls/{poll_id}/vote` — retract vote (if poll allows)
+- ✅ `GET /api/v1/channels/{id}/polls/{poll_id}/results` — results (voter list hidden if anonymous)
+- ✅ `POST /api/v1/channels/{id}/polls/{poll_id}/end` — end early (MANAGE_MESSAGES)
+- ✅ Background task: auto-end polls at `ends_at`, emit `POLL_ENDED` gateway event
+- ✅ Gateway: `POLL_VOTE_ADD`, `POLL_VOTE_REMOVE`, `POLL_ENDED` events
 - [ ] Desktop: `PollCard` component inline in chat; animated vote bars, timer countdown
 
 ### 13-02: Scheduled Messages
 
-- [ ] `scheduled_messages` DB table (channel_id, author_id, content, attachments jsonb, scheduled_at, status: pending|sent|cancelled) — migration 00015
-- [ ] `POST /api/v1/channels/{id}/scheduled-messages` — create (scheduled_at in future, SEND_MESSAGES)
-- [ ] `GET /api/v1/channels/{id}/scheduled-messages` — list pending scheduled messages
-- [ ] `PATCH /api/v1/channels/{id}/scheduled-messages/{id}` — edit content / reschedule
-- [ ] `DELETE /api/v1/channels/{id}/scheduled-messages/{id}` — cancel
-- [ ] Background task: fire scheduled messages at the appointed time, write to messages table, emit `MESSAGE_CREATE`
+- ✅ `scheduled_messages` DB table (channel_id, author_id, content, attachments jsonb, scheduled_at, status: pending|sent|cancelled) — migration 00015
+- ✅ `POST /api/v1/channels/{id}/scheduled-messages` — create (scheduled_at in future, SEND_MESSAGES)
+- ✅ `GET /api/v1/channels/{id}/scheduled-messages` — list pending scheduled messages
+- ✅ `PATCH /api/v1/channels/{id}/scheduled-messages/{id}` — edit content / reschedule
+- ✅ `DELETE /api/v1/channels/{id}/scheduled-messages/{id}` — cancel
+- ✅ Background task: fire scheduled messages at the appointed time, write to messages table, emit `MESSAGE_CREATE`
 - [ ] Desktop: "Schedule Send" option in message composer (date/time picker); scheduled message list in channel header dropdown
 
 ### 13-03: Message Bookmarks
 
-- [ ] `message_bookmarks` DB table (user_id, message_id, channel_id, note TEXT, created_at) — migration 00015
-- [ ] `POST /api/v1/users/@me/bookmarks` — add bookmark (`{ message_id, note? }`)
-- [ ] `DELETE /api/v1/users/@me/bookmarks/{message_id}` — remove
-- [ ] `GET /api/v1/users/@me/bookmarks` — list with full message hydration
+- ✅ `message_bookmarks` DB table (user_id, message_id, channel_id, note TEXT, created_at) — migration 00015
+- ✅ `POST /api/v1/users/@me/bookmarks` — add bookmark (`{ message_id, note? }`)
+- ✅ `DELETE /api/v1/users/@me/bookmarks/{message_id}` — remove
+- ✅ `GET /api/v1/users/@me/bookmarks` — list with full message hydration
 - [ ] Desktop: bookmark icon in message context menu; "Saved Messages" section in sidebar
 
 ### 13-04: Disappearing Messages
 
-- [ ] `disappear_after_seconds INT` column on channels (opt-in per-channel setting, 0 = off) — migration 00015
-- [ ] On message create: if channel has `disappear_after_seconds > 0`, set `expires_at = now() + interval`
-- [ ] Background task extension: purge expired messages (extend existing purge task)
-- [ ] `PATCH /api/v1/channels/{id}` — allow updating `disappear_after_seconds` (MANAGE_CHANNELS)
-- [ ] Gateway: `MESSAGE_DELETE` emitted when message expires (same event, no extra machinery)
+- ✅ `disappear_after_seconds INT` column on channels (opt-in per-channel setting, 0 = off) — migration 00015
+- ✅ On message create: if channel has `disappear_after_seconds > 0`, set `expires_at = now() + interval`
+- ✅ Background task extension: purge expired messages (extend existing purge task)
+- ✅ `PATCH /api/v1/channels/{id}` — allow updating `disappear_after_seconds` (MANAGE_CHANNELS)
+- ✅ Gateway: `MESSAGE_DELETE` emitted when message expires (same event, no extra machinery)
 - [ ] Desktop: channel header shows "⏳ Xd/Xh timer" indicator; confirmation prompt when enabling
 
 ### 13-05: Draft Messages
 
-- [ ] `message_drafts` DB table (user_id, channel_id, content TEXT, attachments jsonb, updated_at) — unique (user_id, channel_id) — migration 00015
-- [ ] `PUT /api/v1/channels/{id}/draft` — upsert draft (auto-saved client-side debounce)
-- [ ] `GET /api/v1/channels/{id}/draft` — fetch on channel open
-- [ ] `DELETE /api/v1/channels/{id}/draft` — clear on send
+- ✅ `message_drafts` DB table (user_id, channel_id, content TEXT, attachments jsonb, updated_at) — unique (user_id, channel_id) — migration 00015
+- ✅ `PUT /api/v1/channels/{id}/draft` — upsert draft (auto-saved client-side debounce)
+- ✅ `GET /api/v1/channels/{id}/draft` — fetch on channel open
+- ✅ `DELETE /api/v1/channels/{id}/draft` — clear on send
 - [ ] Desktop: draft indicator (pencil icon) on channel list items; content pre-filled on channel switch
 
 ### 13-06: Note-to-Self Channel
 
-- [ ] On user creation: create a private `note_to_self` DM channel seeded with the user as both sender and recipient (or a sentinel bot ID)
-- [ ] Existing message API handles this transparently — just a DM with `recipient_id = self`
+- ✅ On user creation: create a private `note_to_self` DM channel seeded with the user as both sender and recipient (or a sentinel bot ID)
+- ✅ Existing message API handles this transparently — just a DM with `recipient_id = self`
 - [ ] Desktop: permanent "Saved Notes" entry in DM list (pinned at top, distinct icon)
 
 ### 13-07: Status with Auto-Expiry
 
-- [ ] `custom_status_expires_at TIMESTAMPTZ` column on users — migration 00015
-- [ ] `PATCH /api/v1/users/@me/settings` — accept `custom_status_expires_at` (optional, nullable)
-- [ ] Background task extension: clear expired custom statuses + emit `PRESENCE_UPDATE` to relevant guilds
+- ✅ `custom_status_expires_at TIMESTAMPTZ` column on users — migration 00015
+- ✅ `PATCH /api/v1/users/@me/settings` — accept `custom_status_expires_at` (optional, nullable)
+- ✅ Background task extension: clear expired custom statuses + emit `PRESENCE_UPDATE` to relevant guilds
 - [ ] Desktop: expiry picker in status editor (1h, 4h, today, tomorrow, custom)
 
 ---
@@ -716,15 +716,15 @@ Phantom is an infant today. This phase will happen when it is ready, not before.
 
 | Feature | Status | Phase |
 |---|---|---|
-| Forum channels (titled posts + tags) | Schema exists, API missing | Phase 12 |
-| Announcement channels + crosspost | Schema exists, crosspost API missing | Phase 12 |
-| Stage channels (speaker + audience) | Schema exists, stage_instances missing | Phase 12 |
-| Group DM name + icon + member mgmt | Schema partially exists | Phase 12 |
-| Polls (multi-option, anonymous) | Not yet built | Phase 13 |
-| Scheduled messages | Not yet built | Phase 13 |
-| Message bookmarks / saved messages | Not yet built | Phase 13 |
-| Status with auto-expiry | Column missing, trivial add | Phase 13 |
-| Note-to-self / Saved Notes channel | Not yet built | Phase 13 |
+| Forum channels (titled posts + tags) | ✅ Complete | Phase 12 |
+| Announcement channels + crosspost | ✅ Complete | Phase 12 |
+| Stage channels (speaker + audience) | ✅ Complete | Phase 12 |
+| Group DM name + icon + member mgmt | ✅ Complete | Phase 12 |
+| Polls (multi-option, anonymous) | ✅ Backend Complete | Phase 13 |
+| Scheduled messages | ✅ Backend Complete | Phase 13 |
+| Message bookmarks / saved messages | ✅ Backend Complete | Phase 13 |
+| Status with auto-expiry | ✅ Backend Complete | Phase 13 |
+| Note-to-self / Saved Notes channel | ✅ Backend Complete | Phase 13 |
 
 #### Medium Priority (differentiation features)
 
@@ -733,8 +733,8 @@ Phantom is an infant today. This phase will happen when it is ready, not before.
 | Message forwarding | Not yet built | Phase 14 |
 | Server scheduled events + RSVP | Not yet built | Phase 14 |
 | Sticker packs | Not yet built | Phase 14 |
-| Disappearing messages | Not yet built | Phase 13 |
-| Draft messages (auto-saved) | Not yet built | Phase 13 |
+| Disappearing messages | ✅ Backend Complete | Phase 13 |
+| Draft messages (auto-saved) | ✅ Backend Complete | Phase 13 |
 | Stream / topic-threaded channels | Not yet built | Phase 14 |
 | Inline bot autocomplete | Not yet built | Phase 14 |
 
