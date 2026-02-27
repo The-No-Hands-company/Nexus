@@ -8,6 +8,7 @@ import EmojiManagementPanel from "./EmojiManagementPanel";
 import WebhookManagementPanel from "./WebhookManagementPanel";
 import BotManagementPanel from "./BotManagementPanel";
 import AuditLogPanel from "./AuditLogPanel";
+import BoosterPanel from "./BoosterPanel";
 
 interface Invite {
   code: string;
@@ -18,7 +19,7 @@ interface Invite {
   createdAt: string;
 }
 
-type Tab = "overview" | "invites" | "roles" | "emoji" | "webhooks" | "bots" | "audit" | "danger";
+type Tab = "overview" | "invites" | "roles" | "emoji" | "webhooks" | "bots" | "audit" | "boosters" | "danger";
 
 interface Props {
   server: Server;
@@ -162,6 +163,7 @@ export default function ServerSettingsModal({ server, onClose }: Props) {
   const TABS: { id: Tab; label: string }[] = [
     { id: "overview", label: "Overview" },
     { id: "invites", label: "Invites" },
+    { id: "boosters", label: "Boosters" },
     { id: "roles", label: "Roles" },
     { id: "emoji", label: "Emoji" },
     { id: "webhooks", label: "Webhooks" },
@@ -421,6 +423,18 @@ export default function ServerSettingsModal({ server, onClose }: Props) {
                 events. Requires the View Audit Log permission.
               </p>
               <AuditLogPanel serverId={server.id} />
+            </div>
+          )}
+
+          {/* ── Boosters (v0.15) ── */}
+          {tab === "boosters" && (
+            <div className="space-y-4">
+              <h2 className="text-lg font-semibold text-fg">Server Boosts</h2>
+              <p className="text-xs text-muted">
+                Boosting unlocks extra emoji slots, higher upload limits, and
+                — at Tier 2 — a custom vanity URL for your server.
+              </p>
+              <BoosterPanel serverId={server.id} />
             </div>
           )}
 

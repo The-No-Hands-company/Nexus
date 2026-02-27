@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useStore } from "../store";
 import { invoke } from "../invoke";
+import BadgesBar from "./BadgesBar";
 
 interface ProfileData {
   id: string;
@@ -177,6 +178,10 @@ export default function UserProfileCard({ userId, username, displayName, avatar,
           {profile?.status && (
             <p className="text-xs text-muted/80 mt-0.5 italic">{profile.status}</p>
           )}
+          {/* v0.15 — User badges */}
+          <div className="mt-1.5">
+            <BadgesBar userId={userId} />
+          </div>
         </div>
 
         {/* Bio */}

@@ -10,7 +10,7 @@
  *   5. Events arrive as {"op":"Dispatch","d":{"event":"EVENT_NAME","data":{...}}}
  */
 import { useEffect, useRef } from "react";
-import { useStore, Message, VoiceParticipant } from "../store";
+import { useStore, Message, VoiceParticipant, UserBadge, CanvasBlock } from "../store";
 import { isTauri, invoke } from "../invoke";
 
 let _sendNotification: ((title: string, body: string) => void) | null = null;
@@ -361,6 +361,42 @@ export function useGateway() {
           useStore.getState().loadServerStickers(raw.guild_id);
           break;
         }
+
+        // ── v0.15 Community Ecosystem ────────────────────────────────────────
+        case "USER_BADGE_ADD": {
+          const badge = data as UserBadge;
+          const existing = useStore.getState().userBadges[badge.userId] ?? [];
+          if (!existing.find((b) => b.id === badge.id)) {
+            useStore.getState().setUserBadges(badge.userId, [...existing, badge]);
+          }
+          break;
+        }
+
+        case "SERVER_BOOST":
+        case "SERVER_TIER_UPDATE": {
+          const raw = data as { server_id?: string; serverId?: string };
+          const serverId = raw.serverId ?? raw.server_id;
+          if (serverId) useStore.getState().loadBoostTierInfo(serverId);
+          break;
+        }
+
+        case "CANVAS_BLOCK_UPDATE": {
+          const raw = data as CanvasBlock & { reorder?: boolean };
+          if (raw.reorder) {
+            // Full reload on reorder to get correct positions
+            useStore.getState().loadCanvasBlocks(raw.channelId);
+          } else {
+            useStore.getState().upsertCanvasBlock(raw.channelId, raw);
+          }
+          break;
+        }
+
+        case "CANVAS_BLOCK_DELETE": {
+          const raw = data as { channel_id: string; block_id: string };
+          useStore.getState().removeCanvasBlock(raw.channel_id, raw.block_id);
+          break;
+        }
+        // ────────────────────────────────────────────────────────────────────
 
         default:
           break;

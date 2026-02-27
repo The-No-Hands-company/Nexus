@@ -20,6 +20,12 @@ export interface Server {
   require2fa?: boolean;
   spamWindowSecs?: number;
   spamMaxMessages?: number;
+  /** v0.15 — current supporter tier (0-3) */
+  boostTier?: number;
+  /** v0.15 — active booster count */
+  boosterCount?: number;
+  /** v0.15 — vanity invite code */
+  vanityCode?: string;
 }
 
 export interface Channel {
@@ -253,6 +259,49 @@ export interface InlineSuggestion {
   previewUrl?: string;
 }
 
+// ── v0.15 Community Ecosystem ────────────────────────────────────────────────
+
+export interface UserBadge {
+  id: string;
+  userId: string;
+  badgeType: string;
+  serverId?: string;
+  awardedBy?: string;
+  awardedAt: string;
+  label?: string;
+  iconUrl?: string;
+}
+
+export interface BoosterEntry {
+  id: string;
+  userId: string;
+  serverId: string;
+  slot: number;
+  startedAt: string;
+  expiresAt?: string;
+}
+
+export interface BoostTierInfo {
+  tier: number;
+  boosterCount: number;
+  extraEmojiSlots: number;
+  uploadLimitBytes: number;
+  vanityUrlAvailable: boolean;
+  currentVanityCode?: string;
+}
+
+export type CanvasBlockType = "heading" | "paragraph" | "image" | "code" | "divider" | "table" | "callout";
+
+export interface CanvasBlock {
+  id: string;
+  channelId: string;
+  blockType: CanvasBlockType;
+  content: Record<string, unknown>;
+  position: number;
+  updatedBy?: string;
+  updatedAt: string;
+}
+
 interface StoreState {
   // Auth
   session: Session | null;
@@ -395,6 +444,25 @@ interface StoreState {
   serverStickers: Record<string, Sticker[]>;
   setServerStickers: (serverId: string, stickers: Sticker[]) => void;
   loadServerStickers: (serverId: string) => Promise<void>;
+
+  // ─── v0.15 Community Ecosystem ────────────────────────────────────────
+
+  // User badges — keyed by userId
+  userBadges: Record<string, UserBadge[]>;
+  setUserBadges: (userId: string, badges: UserBadge[]) => void;
+  loadUserBadges: (userId: string) => Promise<void>;
+
+  // Server boost tier — keyed by serverId
+  boostTierInfo: Record<string, BoostTierInfo>;
+  setBoostTierInfo: (serverId: string, info: BoostTierInfo) => void;
+  loadBoostTierInfo: (serverId: string) => Promise<void>;
+
+  // Canvas blocks — keyed by channelId
+  canvasBlocks: Record<string, CanvasBlock[]>;
+  setCanvasBlocks: (channelId: string, blocks: CanvasBlock[]) => void;
+  upsertCanvasBlock: (channelId: string, block: CanvasBlock) => void;
+  removeCanvasBlock: (channelId: string, blockId: string) => void;
+  loadCanvasBlocks: (channelId: string) => Promise<void>;
 }
 
 // Module-level map so typing-clear timeouts survive re-renders
@@ -867,6 +935,58 @@ export const useStore = create<StoreState>((set, get) => ({
       set((s) => ({ serverStickers: { ...s.serverStickers, [serverId]: stickers } }));
     } catch (e) {
       console.error("loadServerStickers error", e);
+    }
+  },
+
+  // ─── v0.15 Community Ecosystem ────────────────────────────────────────
+
+  userBadges: {},
+  setUserBadges: (userId, badges) =>
+    set((s) => ({ userBadges: { ...s.userBadges, [userId]: badges } })),
+  loadUserBadges: async (userId) => {
+    try {
+      const badges = await invoke<UserBadge[]>("list_user_badges", { userId });
+      set((s) => ({ userBadges: { ...s.userBadges, [userId]: badges } }));
+    } catch (e) {
+      console.error("loadUserBadges error", e);
+    }
+  },
+
+  boostTierInfo: {},
+  setBoostTierInfo: (serverId, info) =>
+    set((s) => ({ boostTierInfo: { ...s.boostTierInfo, [serverId]: info } })),
+  loadBoostTierInfo: async (serverId) => {
+    try {
+      const info = await invoke<BoostTierInfo>("get_server_boost_tier", { serverId });
+      set((s) => ({ boostTierInfo: { ...s.boostTierInfo, [serverId]: info } }));
+    } catch (e) {
+      console.error("loadBoostTierInfo error", e);
+    }
+  },
+
+  canvasBlocks: {},
+  setCanvasBlocks: (channelId, blocks) =>
+    set((s) => ({ canvasBlocks: { ...s.canvasBlocks, [channelId]: blocks } })),
+  upsertCanvasBlock: (channelId, block) =>
+    set((s) => {
+      const existing = s.canvasBlocks[channelId] ?? [];
+      const without = existing.filter((b) => b.id !== block.id);
+      const updated = [...without, block].sort((a, b) => a.position - b.position);
+      return { canvasBlocks: { ...s.canvasBlocks, [channelId]: updated } };
+    }),
+  removeCanvasBlock: (channelId, blockId) =>
+    set((s) => ({
+      canvasBlocks: {
+        ...s.canvasBlocks,
+        [channelId]: (s.canvasBlocks[channelId] ?? []).filter((b) => b.id !== blockId),
+      },
+    })),
+  loadCanvasBlocks: async (channelId) => {
+    try {
+      const blocks = await invoke<CanvasBlock[]>("get_canvas", { channelId });
+      set((s) => ({ canvasBlocks: { ...s.canvasBlocks, [channelId]: blocks } }));
+    } catch (e) {
+      console.error("loadCanvasBlocks error", e);
     }
   },
 }));

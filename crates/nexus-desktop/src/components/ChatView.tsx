@@ -11,6 +11,7 @@ import SavedMessagesPanel from "./SavedMessagesPanel";
 import ForwardModal from "./ForwardModal";
 import EventsPanel from "./EventsPanel";
 import StreamView from "./StreamView";
+import CanvasView from "./CanvasView";
 import { useFocusTrap } from "../hooks/useFocusTrap";
 import { formatDistanceToNow, format, isToday, isYesterday } from "date-fns";
 import clsx from "clsx";
@@ -193,8 +194,10 @@ export default function ChatView() {
           )}
         </div>
 
-        {/* Messages — use StreamView for stream channels (v0.14) */}
-        {channel?.isStream ? (
+        {/* Messages — Canvas channels get a block editor (v0.15), Stream channels get StreamView (v0.14) */}
+        {channel?.kind === "canvas" ? (
+          <CanvasView channelId={channelId!} />
+        ) : channel?.isStream ? (
           <StreamView
             channelId={channelId!}
             onReply={(topic) => setPendingTopic(topic)}
@@ -281,11 +284,13 @@ export default function ChatView() {
         </div>
         )}
 
-        {/* Typing bar */}
-        {channelId && <TypingBar channelId={channelId} />}
+        {/* Typing bar — hidden for canvas channels (no chat) */}
+        {channelId && channel?.kind !== "canvas" && <TypingBar channelId={channelId} />}
 
-        {/* Input */}
-        <MessageInput channelId={channelId} isE2ee={!!channel?.isE2ee} pendingTopic={pendingTopic} onTopicConsumed={() => setPendingTopic(undefined)} />
+        {/* Input — hidden for canvas channels */}
+        {channel?.kind !== "canvas" && (
+          <MessageInput channelId={channelId} isE2ee={!!channel?.isE2ee} pendingTopic={pendingTopic} onTopicConsumed={() => setPendingTopic(undefined)} />
+        )}
       </div>
 
       {/* Saved Messages panel (replaces member list when open) */}

@@ -97,6 +97,8 @@ pub enum ChannelType {
     Stage,
     /// Announcement channel (crosspost-able)
     Announcement,
+    /// Canvas / rich document channel — block-based wiki-style editor (v0.15)
+    Canvas,
 }
 
 #[derive(Debug, Deserialize, Validate)]

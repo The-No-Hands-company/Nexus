@@ -40,3 +40,8 @@ pub mod events;
 pub mod forward;
 pub mod inline_query;
 pub mod stickers;
+
+// v0.15 Community Ecosystem
+pub mod badges;
+pub mod boosters;
+pub mod canvas;

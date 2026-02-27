@@ -77,6 +77,18 @@ pub mod event_types {
     pub const GUILD_STICKERS_UPDATE: &str = "GUILD_STICKERS_UPDATE";
     /// A stream-mode channel topic bar was updated.
     pub const STREAM_TOPIC_UPDATE: &str = "STREAM_TOPIC_UPDATE";
+
+    // v0.15 Community Ecosystem
+    /// A canvas block was created or updated
+    pub const CANVAS_BLOCK_UPDATE: &str = "CANVAS_BLOCK_UPDATE";
+    /// A canvas block was deleted
+    pub const CANVAS_BLOCK_DELETE: &str = "CANVAS_BLOCK_DELETE";
+    /// A user was awarded a badge
+    pub const USER_BADGE_ADD: &str = "USER_BADGE_ADD";
+    /// A server received a new supporter boost
+    pub const SERVER_BOOST: &str = "SERVER_BOOST";
+    /// A server's boost tier changed
+    pub const SERVER_TIER_UPDATE: &str = "SERVER_TIER_UPDATE";
 }
 
 /// Events broadcast through the gateway to connected clients.

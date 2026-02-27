@@ -58,6 +58,12 @@ pub struct Server {
     /// Maximum identical messages allowed per user within `spam_window_secs`.
     pub spam_max_messages: i32,
 
+    /// Current supporter tier (0 = none, 1/2/3 = boosted) — v0.15
+    pub boost_tier: i16,
+
+    /// Live active-booster count — v0.15
+    pub booster_count: i32,
+
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

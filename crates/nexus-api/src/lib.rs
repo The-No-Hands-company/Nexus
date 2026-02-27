@@ -97,6 +97,10 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::events::router())                          // server events + RSVP
         .merge(routes::stickers::router())                        // sticker packs
         .merge(routes::inline_query::router())                    // inline bot suggestions
+        // v0.15 Community Ecosystem
+        .merge(routes::badges::router())                          // user badges
+        .merge(routes::boosters::router())                        // server supporter tiers
+        .merge(routes::canvas::router())                          // canvas document channels
         // Make Arc<AppState> available as an Axum Extension so that
         // `combined_auth_middleware` can perform DB lookups for bot tokens
         // without requiring `from_fn_with_state` on every sub-router.

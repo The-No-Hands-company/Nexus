@@ -239,6 +239,55 @@ function mapStickerPack(p: Raw) {
   };
 }
 
+// ── v0.15 Community Ecosystem mappers ─────────────────────────────────
+
+function mapUserBadge(b: Raw) {
+  return {
+    id: b.id as string,
+    userId: b.user_id as string,
+    badgeType: b.badge_type as string,
+    serverId: (b.server_id as string | undefined) ?? undefined,
+    awardedBy: (b.awarded_by as string | undefined) ?? undefined,
+    awardedAt: b.awarded_at as string,
+    label: (b.label as string | undefined) ?? undefined,
+    iconUrl: (b.icon_url as string | undefined) ?? undefined,
+  };
+}
+
+function mapBoosterEntry(b: Raw) {
+  return {
+    id: b.id as string,
+    userId: b.user_id as string,
+    serverId: b.server_id as string,
+    slot: b.slot as number,
+    startedAt: b.started_at as string,
+    expiresAt: (b.expires_at as string | undefined) ?? undefined,
+  };
+}
+
+function mapBoostTierInfo(t: Raw) {
+  return {
+    tier: t.tier as number,
+    boosterCount: t.booster_count as number,
+    extraEmojiSlots: t.extra_emoji_slots as number,
+    uploadLimitBytes: t.upload_limit_bytes as number,
+    vanityUrlAvailable: t.vanity_url_available as boolean,
+    currentVanityCode: (t.current_vanity_code as string | undefined) ?? undefined,
+  };
+}
+
+function mapCanvasBlock(b: Raw) {
+  return {
+    id: b.id as string,
+    channelId: b.channel_id as string,
+    blockType: b.block_type as string,
+    content: b.content as Record<string, unknown>,
+    position: b.position as number,
+    updatedBy: (b.updated_by as string | undefined) ?? undefined,
+    updatedAt: b.updated_at as string,
+  };
+}
+
 // ── Command dispatch ──────────────────────────────────────────────────────────
 
 async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
@@ -813,7 +862,80 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
       return apiFetch<T>("GET", `/api/v1/channels/${args.channelId}/bots/inline-triggers`);
     }
 
-    default:
+    // ── Phase 15: User Badges ───────────────────────────────────────────────
+    case "list_user_badges": {
+      const rows = await apiFetch<Raw[]>("GET", `/api/v1/users/${args.userId}/badges`);
+      return rows.map(mapUserBadge) as unknown as T;
+    }
+
+    case "award_badge": {
+      const raw = await apiFetch<Raw>("POST", `/api/v1/admin/users/${args.userId}/badges`, {
+        badge_type: args.badgeType,
+        server_id: args.serverId ?? undefined,
+        label: args.label ?? undefined,
+        icon_url: args.iconUrl ?? undefined,
+      });
+      return mapUserBadge(raw) as unknown as T;
+    }
+
+    case "revoke_badge": {
+      return apiFetch<T>("DELETE", `/api/v1/admin/users/${args.userId}/badges`, {
+        badge_type: args.badgeType,
+      });
+    }
+
+    // ── Phase 15: Server Boosters ──────────────────────────────────────────
+    case "boost_server": {
+      const raw = await apiFetch<Raw>("POST", `/api/v1/servers/${args.serverId}/boost`);
+      return mapBoosterEntry(raw) as unknown as T;
+    }
+
+    case "remove_boost": {
+      return apiFetch<T>("DELETE", `/api/v1/servers/${args.serverId}/boost/${args.slot}`);
+    }
+
+    case "list_server_boosters": {
+      const rows = await apiFetch<Raw[]>("GET", `/api/v1/servers/${args.serverId}/boosters`);
+      return rows.map(mapBoosterEntry) as unknown as T;
+    }
+
+    case "get_server_boost_tier": {
+      const raw = await apiFetch<Raw>("GET", `/api/v1/servers/${args.serverId}/boost-tier`);
+      return mapBoostTierInfo(raw) as unknown as T;
+    }
+
+    case "set_vanity_url": {
+      return apiFetch<T>("PATCH", `/api/v1/servers/${args.serverId}/vanity-url`, {
+        code: args.code,
+      });
+    }
+
+    // ── Phase 15: Canvas ────────────────────────────────────────────────────────────
+    case "get_canvas": {
+      const rows = await apiFetch<Raw[]>("GET", `/api/v1/channels/${args.channelId}/canvas`);
+      return rows.map(mapCanvasBlock) as unknown as T;
+    }
+
+    case "upsert_canvas_block": {
+      const raw = await apiFetch<Raw>("PUT",
+        `/api/v1/channels/${args.channelId}/canvas/blocks/${args.blockId}`, {
+          block_type: args.blockType ?? "paragraph",
+          content: args.content,
+          position: args.position ?? undefined,
+        }
+      );
+      return mapCanvasBlock(raw) as unknown as T;
+    }
+
+    case "delete_canvas_block": {
+      return apiFetch<T>("DELETE", `/api/v1/channels/${args.channelId}/canvas/blocks/${args.blockId}`);
+    }
+
+    case "reorder_canvas_blocks": {
+      return apiFetch<T>("POST", `/api/v1/channels/${args.channelId}/canvas/blocks/reorder`, {
+        blocks: args.blocks,
+      });
+    }
       throw new Error(`[browser] Unhandled invoke command: "${cmd}"`);
   }
 }
