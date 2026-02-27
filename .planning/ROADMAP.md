@@ -455,7 +455,7 @@ Group DMs with name + icon to make persistent multi-person chats feel like prope
 
 ---
 
-## Phase 13: Engagement Features (v0.13) � Backend Complete — Desktop Pending
+## Phase 13: Engagement Features (v0.13) ✅ Complete
 
 > **Goal:** Surface-level features that dramatically increase daily active engagement. All require new DB migrations but no architectural changes.
 
@@ -470,7 +470,7 @@ Group DMs with name + icon to make persistent multi-person chats feel like prope
 - ✅ `POST /api/v1/channels/{id}/polls/{poll_id}/end` — end early (MANAGE_MESSAGES)
 - ✅ Background task: auto-end polls at `ends_at`, emit `POLL_ENDED` gateway event
 - ✅ Gateway: `POLL_VOTE_ADD`, `POLL_VOTE_REMOVE`, `POLL_ENDED` events
-- [ ] Desktop: `PollCard` component inline in chat; animated vote bars, timer countdown
+- ✅ Desktop: `PollCard` component inline in chat; animated vote bars, timer countdown
 
 ### 13-02: Scheduled Messages
 
@@ -480,7 +480,7 @@ Group DMs with name + icon to make persistent multi-person chats feel like prope
 - ✅ `PATCH /api/v1/channels/{id}/scheduled-messages/{id}` — edit content / reschedule
 - ✅ `DELETE /api/v1/channels/{id}/scheduled-messages/{id}` — cancel
 - ✅ Background task: fire scheduled messages at the appointed time, write to messages table, emit `MESSAGE_CREATE`
-- [ ] Desktop: "Schedule Send" option in message composer (date/time picker); scheduled message list in channel header dropdown
+- ✅ Desktop: "Schedule Send" option in message composer (date/time picker); scheduled message list in channel header dropdown
 
 ### 13-03: Message Bookmarks
 
@@ -488,7 +488,7 @@ Group DMs with name + icon to make persistent multi-person chats feel like prope
 - ✅ `POST /api/v1/users/@me/bookmarks` — add bookmark (`{ message_id, note? }`)
 - ✅ `DELETE /api/v1/users/@me/bookmarks/{message_id}` — remove
 - ✅ `GET /api/v1/users/@me/bookmarks` — list with full message hydration
-- [ ] Desktop: bookmark icon in message context menu; "Saved Messages" section in sidebar
+- ✅ Desktop: bookmark icon in message context menu; "Saved Messages" section in sidebar
 
 ### 13-04: Disappearing Messages
 
@@ -497,7 +497,7 @@ Group DMs with name + icon to make persistent multi-person chats feel like prope
 - ✅ Background task extension: purge expired messages (extend existing purge task)
 - ✅ `PATCH /api/v1/channels/{id}` — allow updating `disappear_after_seconds` (MANAGE_CHANNELS)
 - ✅ Gateway: `MESSAGE_DELETE` emitted when message expires (same event, no extra machinery)
-- [ ] Desktop: channel header shows "⏳ Xd/Xh timer" indicator; confirmation prompt when enabling
+- ✅ Desktop: channel header shows "⏳ Xd/Xh timer" indicator; confirmation prompt when enabling
 
 ### 13-05: Draft Messages
 
@@ -505,20 +505,20 @@ Group DMs with name + icon to make persistent multi-person chats feel like prope
 - ✅ `PUT /api/v1/channels/{id}/draft` — upsert draft (auto-saved client-side debounce)
 - ✅ `GET /api/v1/channels/{id}/draft` — fetch on channel open
 - ✅ `DELETE /api/v1/channels/{id}/draft` — clear on send
-- [ ] Desktop: draft indicator (pencil icon) on channel list items; content pre-filled on channel switch
+- ✅ Desktop: draft indicator (pencil icon) on channel list items; content pre-filled on channel switch
 
 ### 13-06: Note-to-Self Channel
 
 - ✅ On user creation: create a private `note_to_self` DM channel seeded with the user as both sender and recipient (or a sentinel bot ID)
 - ✅ Existing message API handles this transparently — just a DM with `recipient_id = self`
-- [ ] Desktop: permanent "Saved Notes" entry in DM list (pinned at top, distinct icon)
+- ✅ Desktop: permanent "Saved Notes" entry in DM list (pinned at top, distinct icon)
 
 ### 13-07: Status with Auto-Expiry
 
 - ✅ `custom_status_expires_at TIMESTAMPTZ` column on users — migration 00015
 - ✅ `PATCH /api/v1/users/@me/settings` — accept `custom_status_expires_at` (optional, nullable)
 - ✅ Background task extension: clear expired custom statuses + emit `PRESENCE_UPDATE` to relevant guilds
-- [ ] Desktop: expiry picker in status editor (1h, 4h, today, tomorrow, custom)
+- ✅ Desktop: expiry picker in status editor (1h, 4h, today, tomorrow, custom)
 
 ---
 
@@ -720,11 +720,11 @@ Phantom is an infant today. This phase will happen when it is ready, not before.
 | Announcement channels + crosspost | ✅ Complete | Phase 12 |
 | Stage channels (speaker + audience) | ✅ Complete | Phase 12 |
 | Group DM name + icon + member mgmt | ✅ Complete | Phase 12 |
-| Polls (multi-option, anonymous) | ✅ Backend Complete | Phase 13 |
-| Scheduled messages | ✅ Backend Complete | Phase 13 |
-| Message bookmarks / saved messages | ✅ Backend Complete | Phase 13 |
-| Status with auto-expiry | ✅ Backend Complete | Phase 13 |
-| Note-to-self / Saved Notes channel | ✅ Backend Complete | Phase 13 |
+| Polls (multi-option, anonymous) | ✅ Complete | Phase 13 |
+| Scheduled messages | ✅ Complete | Phase 13 |
+| Message bookmarks / saved messages | ✅ Complete | Phase 13 |
+| Status with auto-expiry | ✅ Complete | Phase 13 |
+| Note-to-self / Saved Notes channel | ✅ Complete | Phase 13 |
 
 #### Medium Priority (differentiation features)
 
@@ -733,8 +733,8 @@ Phantom is an infant today. This phase will happen when it is ready, not before.
 | Message forwarding | Not yet built | Phase 14 |
 | Server scheduled events + RSVP | Not yet built | Phase 14 |
 | Sticker packs | Not yet built | Phase 14 |
-| Disappearing messages | ✅ Backend Complete | Phase 13 |
-| Draft messages (auto-saved) | ✅ Backend Complete | Phase 13 |
+| Disappearing messages | ✅ Complete | Phase 13 |
+| Draft messages (auto-saved) | ✅ Complete | Phase 13 |
 | Stream / topic-threaded channels | Not yet built | Phase 14 |
 | Inline bot autocomplete | Not yet built | Phase 14 |
 

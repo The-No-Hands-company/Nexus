@@ -37,7 +37,7 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route(
             "/channels/{channel_id}/polls",
-            post(create_poll),
+            get(list_polls).post(create_poll),
         )
         .route(
             "/channels/{channel_id}/polls/{poll_id}/vote",
@@ -220,6 +220,35 @@ async fn require_manage_messages(
 // ============================================================
 // Handlers
 // ============================================================
+
+/// GET /api/v1/channels/{channel_id}/polls
+///
+/// Returns all open (or recently ended) polls in the channel, ordered by
+/// creation time ascending.  Clients load this once on channel open and
+/// then keep state up-to-date via `POLL_VOTE_ADD` / `POLL_ENDED` gateway events.
+async fn list_polls(
+    State(state): State<Arc<AppState>>,
+    Extension(_ctx): Extension<AuthContext>,
+    Path(channel_id): Path<Uuid>,
+) -> NexusResult<Json<Vec<Poll>>> {
+    let rows: Vec<PollRow> = sqlx::query_as(
+        r#"
+        SELECT id::text, channel_id::text, message_id::text, author_id::text,
+               question, options::text, ends_at::text, allow_multiselect, is_anonymous,
+               status, created_at::text, updated_at::text
+        FROM polls
+        WHERE channel_id = $1
+        ORDER BY created_at ASC
+        "#,
+    )
+    .bind(channel_id.to_string())
+    .fetch_all(&state.db.pool)
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
+
+    let polls: Result<Vec<Poll>, _> = rows.into_iter().map(Poll::try_from).collect();
+    Ok(Json(polls?))
+}
 
 /// POST /api/v1/channels/{channel_id}/polls
 async fn create_poll(

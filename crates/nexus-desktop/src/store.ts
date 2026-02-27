@@ -28,6 +28,7 @@ export interface Channel {
   name: string;
   kind: "text" | "voice" | "announcement";
   isE2ee?: boolean;
+  disappearAfterSeconds?: number;
 }
 
 export interface Message {
@@ -134,6 +135,65 @@ export interface UpdateInfo {
   body: string;
 }
 
+// ── Phase 13 engagement types ────────────────────────────────────────────────
+
+export interface Poll {
+  id: string;
+  channelId: string;
+  messageId?: string;
+  authorId: string;
+  question: string;
+  options: string[];
+  endsAt?: string;
+  allowMultiselect: boolean;
+  isAnonymous: boolean;
+  status: "open" | "ended";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PollOptionResult {
+  index: number;
+  label: string;
+  voteCount: number;
+  voterIds: string[];
+}
+
+export interface PollResults {
+  poll: Poll;
+  options: PollOptionResult[];
+  totalVoters: number;
+}
+
+export interface ScheduledMessage {
+  id: string;
+  channelId: string;
+  authorId: string;
+  content: string;
+  scheduledAt: string;
+  status: "pending" | "sent" | "failed" | "cancelled";
+  createdAt: string;
+}
+
+export interface BookmarkedMessagePreview {
+  id: string;
+  content: string;
+  authorId: string;
+  authorUsername: string;
+  channelId: string;
+  createdAt: string;
+}
+
+export interface Bookmark {
+  id: string;
+  userId: string;
+  messageId: string;
+  channelId: string;
+  note?: string;
+  createdAt: string;
+  message?: BookmarkedMessagePreview;
+}
+
 interface StoreState {
   // Auth
   session: Session | null;
@@ -218,6 +278,39 @@ interface StoreState {
   // Server members — keyed by serverId
   members: Record<string, ServerMember[]>;
   loadMembers: (serverId: string) => Promise<void>;
+
+  // Polls — keyed by channelId
+  channelPolls: Record<string, Poll[]>;
+  setChannelPolls: (channelId: string, polls: Poll[]) => void;
+  updatePoll: (channelId: string, pollId: string, updater: (p: Poll) => Poll) => void;
+
+  // Poll results — keyed by pollId
+  pollResults: Record<string, PollResults>;
+  setPollResults: (pollId: string, results: PollResults) => void;
+
+  // Drafts (mirrors localStorage for UI reactivity)
+  drafts: Record<string, string>;
+  setDraft: (channelId: string, text: string) => void;
+
+  // Bookmarks
+  bookmarks: Bookmark[];
+  setBookmarks: (bookmarks: Bookmark[]) => void;
+  addBookmark: (bookmark: Bookmark) => void;
+  removeBookmark: (messageId: string) => void;
+  loadBookmarks: () => Promise<void>;
+
+  // Note-to-self / Saved Notes
+  noteToSelfChannelId: string | null;
+  setNoteToSelfChannelId: (id: string | null) => void;
+  loadNoteToSelfChannel: () => Promise<void>;
+
+  // Saved Messages panel visibility
+  savedMessagesPanelOpen: boolean;
+  setSavedMessagesPanelOpen: (v: boolean) => void;
+
+  // Scheduled messages — keyed by channelId
+  channelScheduled: Record<string, ScheduledMessage[]>;
+  setChannelScheduled: (channelId: string, msgs: ScheduledMessage[]) => void;
 }
 
 // Module-level map so typing-clear timeouts survive re-renders
@@ -421,6 +514,13 @@ export const useStore = create<StoreState>((set, get) => ({
       members: {},
       inAppNotifications: [],
       unreadNotificationCount: 0,
+      channelPolls: {},
+      pollResults: {},
+      drafts: {},
+      bookmarks: [],
+      noteToSelfChannelId: null,
+      savedMessagesPanelOpen: false,
+      channelScheduled: {},
     });
   },
 
@@ -550,4 +650,85 @@ export const useStore = create<StoreState>((set, get) => ({
       console.error("loadMembers error", e);
     }
   },
+
+  // ─── Polls ────────────────────────────────────────────────────────────
+  channelPolls: {},
+  setChannelPolls: (channelId, polls) =>
+    set((s) => ({ channelPolls: { ...s.channelPolls, [channelId]: polls } })),
+  updatePoll: (channelId, pollId, updater) =>
+    set((s) => {
+      const existing = s.channelPolls[channelId];
+      if (!existing) return s;
+      return {
+        channelPolls: {
+          ...s.channelPolls,
+          [channelId]: existing.map((p) => (p.id === pollId ? updater(p) : p)),
+        },
+      };
+    }),
+  pollResults: {},
+  setPollResults: (pollId, results) =>
+    set((s) => ({ pollResults: { ...s.pollResults, [pollId]: results } })),
+
+  // ─── Drafts ───────────────────────────────────────────────────────────
+  drafts: (() => {
+    // Re-hydrate from localStorage on first load
+    const map: Record<string, string> = {};
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith("nexus:draft:")) {
+        const channelId = key.slice("nexus:draft:".length);
+        map[channelId] = localStorage.getItem(key) ?? "";
+      }
+    }
+    return map;
+  })(),
+  setDraft: (channelId, text) => {
+    if (text) {
+      localStorage.setItem(`nexus:draft:${channelId}`, text);
+    } else {
+      localStorage.removeItem(`nexus:draft:${channelId}`);
+    }
+    set((s) => ({ drafts: { ...s.drafts, [channelId]: text } }));
+  },
+
+  // ─── Bookmarks ────────────────────────────────────────────────────────
+  bookmarks: [],
+  setBookmarks: (bookmarks) => set({ bookmarks }),
+  addBookmark: (bookmark) =>
+    set((s) => {
+      if (s.bookmarks.some((b) => b.messageId === bookmark.messageId)) return s;
+      return { bookmarks: [bookmark, ...s.bookmarks] };
+    }),
+  removeBookmark: (messageId) =>
+    set((s) => ({ bookmarks: s.bookmarks.filter((b) => b.messageId !== messageId) })),
+  loadBookmarks: async () => {
+    try {
+      const raw = await invoke<Bookmark[]>("list_bookmarks");
+      set({ bookmarks: raw });
+    } catch (e) {
+      console.error("loadBookmarks error", e);
+    }
+  },
+
+  // ─── Note-to-self ─────────────────────────────────────────────────────
+  noteToSelfChannelId: null,
+  setNoteToSelfChannelId: (id) => set({ noteToSelfChannelId: id }),
+  loadNoteToSelfChannel: async () => {
+    try {
+      const res = await invoke<{ channelId: string }>("get_note_to_self_channel");
+      set({ noteToSelfChannelId: res.channelId });
+    } catch (e) {
+      console.error("loadNoteToSelfChannel error", e);
+    }
+  },
+
+  // ─── Saved Messages panel ─────────────────────────────────────────────
+  savedMessagesPanelOpen: false,
+  setSavedMessagesPanelOpen: (v) => set({ savedMessagesPanelOpen: v }),
+
+  // ─── Scheduled messages ───────────────────────────────────────────────
+  channelScheduled: {},
+  setChannelScheduled: (channelId, msgs) =>
+    set((s) => ({ channelScheduled: { ...s.channelScheduled, [channelId]: msgs } })),
 }));

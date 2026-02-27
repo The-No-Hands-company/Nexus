@@ -116,6 +116,7 @@ function mapChannel(c: Raw) {
     name: (c.name as string) ?? "",
     kind: c.channel_type,
     isE2ee: c.encrypted ?? false,
+    disappearAfterSeconds: (c.disappear_after_seconds as number) ?? 0,
   };
 }
 
@@ -135,6 +136,59 @@ function mapMessage(m: Raw) {
     })) ?? [],
     embeds: (m.embeds as Raw[] | undefined) ?? [],
     threadId: (m.thread_id as string | undefined) ?? undefined,
+  };
+}
+
+// ── Phase 13 mappers ──────────────────────────────────────────────────────────
+
+function mapPoll(p: Raw) {
+  return {
+    id: p.id as string,
+    channelId: p.channel_id as string,
+    messageId: (p.message_id as string | undefined) ?? undefined,
+    authorId: p.author_id as string,
+    question: p.question as string,
+    options: (p.options as string[]) ?? [],
+    endsAt: (p.ends_at as string | undefined) ?? undefined,
+    allowMultiselect: (p.allow_multiselect as boolean) ?? false,
+    isAnonymous: (p.is_anonymous as boolean) ?? false,
+    status: (p.status as "open" | "ended") ?? "open",
+    createdAt: p.created_at as string,
+    updatedAt: p.updated_at as string,
+  };
+}
+
+function mapScheduledMessage(m: Raw) {
+  return {
+    id: m.id as string,
+    channelId: m.channel_id as string,
+    authorId: m.author_id as string,
+    content: m.content as string,
+    scheduledAt: m.scheduled_at as string,
+    status: (m.status as "pending" | "sent" | "failed" | "cancelled") ?? "pending",
+    createdAt: m.created_at as string,
+  };
+}
+
+function mapBookmark(b: Raw) {
+  const msg = b.message as Raw | undefined;
+  return {
+    id: b.id as string,
+    userId: b.user_id as string,
+    messageId: b.message_id as string,
+    channelId: b.channel_id as string,
+    note: (b.note as string | undefined) ?? undefined,
+    createdAt: b.created_at as string,
+    message: msg
+      ? {
+          id: msg.id as string,
+          content: msg.content as string,
+          authorId: msg.author_id as string,
+          authorUsername: msg.author_username as string,
+          channelId: msg.channel_id as string,
+          createdAt: msg.created_at as string,
+        }
+      : undefined,
   };
 }
 
@@ -523,6 +577,113 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
     case "install_update":
       console.info("[browser] install_update is a no-op in the browser");
       return undefined as unknown as T;
+
+    // ── Phase 13: Polls ───────────────────────────────────────────────────
+    case "list_channel_polls": {
+      const raw = await apiFetch<Raw[]>("GET", `/api/v1/channels/${args.channelId}/polls`);
+      return raw.map(mapPoll) as unknown as T;
+    }
+
+    case "cast_poll_vote": {
+      return apiFetch<T>("POST", `/api/v1/channels/${args.channelId}/polls/${args.pollId}/vote`, {
+        option_indices: args.optionIndices,
+      });
+    }
+
+    case "retract_poll_vote": {
+      return apiFetch<T>("DELETE", `/api/v1/channels/${args.channelId}/polls/${args.pollId}/vote`);
+    }
+
+    case "get_poll_results": {
+      return apiFetch<T>("GET", `/api/v1/channels/${args.channelId}/polls/${args.pollId}/results`);
+    }
+
+    case "create_poll": {
+      const raw = await apiFetch<Raw>("POST", `/api/v1/channels/${args.channelId}/polls`, {
+        question: args.question,
+        options: args.options,
+        ends_at: args.endsAt ?? null,
+        allow_multiselect: args.allowMultiselect ?? false,
+        is_anonymous: args.isAnonymous ?? false,
+      });
+      return mapPoll(raw) as unknown as T;
+    }
+
+    // ── Phase 13: Bookmarks ───────────────────────────────────────────────
+    case "list_bookmarks": {
+      const raw = await apiFetch<Raw[]>("GET", "/api/v1/users/@me/bookmarks");
+      return raw.map(mapBookmark) as unknown as T;
+    }
+
+    case "add_bookmark": {
+      const raw = await apiFetch<Raw>("POST", "/api/v1/users/@me/bookmarks", {
+        message_id: args.messageId,
+        channel_id: args.channelId,
+        note: args.note ?? null,
+      });
+      return mapBookmark(raw) as unknown as T;
+    }
+
+    case "remove_bookmark": {
+      return apiFetch<T>("DELETE", `/api/v1/users/@me/bookmarks/${args.messageId}`);
+    }
+
+    // ── Phase 13: Drafts ──────────────────────────────────────────────────
+    case "get_draft": {
+      return apiFetch<T>("GET", `/api/v1/channels/${args.channelId}/draft`);
+    }
+
+    case "save_draft": {
+      return apiFetch<T>("PUT", `/api/v1/channels/${args.channelId}/draft`, {
+        content: args.content,
+      });
+    }
+
+    case "delete_draft": {
+      return apiFetch<T>("DELETE", `/api/v1/channels/${args.channelId}/draft`);
+    }
+
+    // ── Phase 13: Scheduled Messages ──────────────────────────────────────
+    case "list_scheduled_messages": {
+      const raw = await apiFetch<Raw[]>("GET", `/api/v1/channels/${args.channelId}/scheduled-messages`);
+      return raw.map(mapScheduledMessage) as unknown as T;
+    }
+
+    case "create_scheduled_message": {
+      const raw = await apiFetch<Raw>("POST", `/api/v1/channels/${args.channelId}/scheduled-messages`, {
+        content: args.content,
+        scheduled_at: args.scheduledAt,
+      });
+      return mapScheduledMessage(raw) as unknown as T;
+    }
+
+    case "update_scheduled_message": {
+      const raw = await apiFetch<Raw>("PATCH", `/api/v1/channels/${args.channelId}/scheduled-messages/${args.scheduledMessageId}`, {
+        content: args.content ?? undefined,
+        scheduled_at: args.scheduledAt ?? undefined,
+      });
+      return mapScheduledMessage(raw) as unknown as T;
+    }
+
+    case "cancel_scheduled_message": {
+      return apiFetch<T>("DELETE", `/api/v1/channels/${args.channelId}/scheduled-messages/${args.scheduledMessageId}`);
+    }
+
+    // ── Phase 13: Note-to-self ────────────────────────────────────────────
+    case "get_note_to_self_channel": {
+      const raw = await apiFetch<Raw>("GET", "/api/v1/users/@me/note-to-self");
+      return { channelId: raw.channel_id as string } as unknown as T;
+    }
+
+    // ── Phase 13: Presence / Status ───────────────────────────────────────
+    case "update_presence_status": {
+      return apiFetch<T>("POST", "/api/v1/users/@me/presence", {
+        presence: args.presence ?? null,
+        status: args.customStatus ?? null,
+        custom_status_emoji: args.customStatusEmoji ?? null,
+        custom_status_expires_at: args.expiresAt ?? null,
+      });
+    }
 
     default:
       throw new Error(`[browser] Unhandled invoke command: "${cmd}"`);

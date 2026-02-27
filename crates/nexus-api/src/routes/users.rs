@@ -13,7 +13,7 @@ use nexus_common::{
     validation::validate_request,
 };
 use nexus_db::repository::users;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -24,6 +24,7 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/users/@me", get(get_current_user).patch(update_current_user).delete(delete_account))
         .route("/users/@me/data-export", get(data_export))
+        .route("/users/@me/note-to-self", get(get_note_to_self_channel))
         .route("/users/{user_id}", get(get_user))
         .route("/users/{user_id}/profile", get(get_user_profile))
         .route_layer(middleware::from_fn(
@@ -318,5 +319,65 @@ async fn data_export(
             "data": messages,
         },
     })))
+}
+
+// ── Note-to-Self ─────────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+struct NoteToSelfResponse {
+    channel_id: String,
+}
+
+/// GET /api/v1/users/@me/note-to-self
+///
+/// Returns the channel ID of the authenticated user's note-to-self channel
+/// (a private DM the user has with themselves, shown as "Saved Notes" in the
+/// client — similar to Telegram's Saved Messages feature).
+///
+/// The channel is created automatically on account registration.  If for some
+/// reason it doesn't exist yet this handler creates it on the fly.
+async fn get_note_to_self_channel(
+    Extension(auth): Extension<AuthContext>,
+    State(state): State<Arc<AppState>>,
+) -> NexusResult<Json<NoteToSelfResponse>> {
+    // Look up existing association
+    let existing: Option<String> = sqlx::query_scalar(
+        "SELECT channel_id::text FROM note_to_self_channels WHERE user_id = $1",
+    )
+    .bind(auth.user_id.to_string())
+    .fetch_optional(&state.db.pool)
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
+
+    if let Some(channel_id) = existing {
+        return Ok(Json(NoteToSelfResponse { channel_id }));
+    }
+
+    // Not found — create channel + association on-the-fly (idempotent via ON CONFLICT)
+    let note_channel_id = nexus_common::snowflake::generate_id();
+    sqlx::query(
+        "INSERT INTO channels (id, channel_type, created_at, updated_at) \
+         VALUES ($1::uuid, 'dm', NOW(), NOW()) \
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(note_channel_id.to_string())
+    .execute(&state.db.pool)
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
+
+    sqlx::query(
+        "INSERT INTO note_to_self_channels (user_id, channel_id) \
+         VALUES ($1::uuid, $2::uuid) \
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(auth.user_id.to_string())
+    .bind(note_channel_id.to_string())
+    .execute(&state.db.pool)
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
+
+    Ok(Json(NoteToSelfResponse {
+        channel_id: note_channel_id.to_string(),
+    }))
 }
 

@@ -49,6 +49,14 @@ export default function SettingsPage() {
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileMsg, setProfileMsg] = useState<string | null>(null);
 
+  // Status section state
+  const [statusPresence, setStatusPresence] = useState<"online"|"idle"|"dnd"|"invisible">("online");
+  const [statusText, setStatusText] = useState("");
+  const [statusExpiry, setStatusExpiry] = useState<"none"|"1h"|"4h"|"today"|"tomorrow"|"custom">("none");
+  const [statusCustomExpiry, setStatusCustomExpiry] = useState("");
+  const [statusSaving, setStatusSaving] = useState(false);
+  const [statusMsg, setStatusMsg] = useState<string | null>(null);
+
   // ── Notification preferences (persisted to localStorage) ──────────────────
   const [notifEnabled, setNotifEnabled] = useState(
     () => localStorage.getItem("nexus:notif:enabled") !== "false"
@@ -200,6 +208,38 @@ export default function SettingsPage() {
     }
   };
 
+  const saveStatus = async () => {
+    setStatusSaving(true);
+    setStatusMsg(null);
+    try {
+      let expiresAt: string | null = null;
+      if (statusExpiry === "1h") {
+        expiresAt = new Date(Date.now() + 3600_000).toISOString();
+      } else if (statusExpiry === "4h") {
+        expiresAt = new Date(Date.now() + 4 * 3600_000).toISOString();
+      } else if (statusExpiry === "today") {
+        const d = new Date(); d.setHours(23, 59, 59, 999);
+        expiresAt = d.toISOString();
+      } else if (statusExpiry === "tomorrow") {
+        const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(23, 59, 59, 999);
+        expiresAt = d.toISOString();
+      } else if (statusExpiry === "custom" && statusCustomExpiry) {
+        expiresAt = new Date(statusCustomExpiry).toISOString();
+      }
+      await invoke("update_presence_status", {
+        presence: statusPresence,
+        customStatus: statusText.trim() || null,
+        expiresAt,
+      });
+      setStatusMsg("Status updated!");
+      setTimeout(() => setStatusMsg(null), 2500);
+    } catch (e) {
+      setStatusMsg(`Error: ${String(e)}`);
+    } finally {
+      setStatusSaving(false);
+    }
+  };
+
   const handleInstall = async () => {
     const url = urlInput.trim();
     if (!url) return;
@@ -281,6 +321,95 @@ export default function SettingsPage() {
           </div>
         </div>
       </section>
+
+      {/* ── Status ───────────────────────────────────────────── */}
+      <section className="mb-10">
+        <h2 className="text-base font-semibold mb-4 border-b border-bg-600 pb-2">Status</h2>
+        <div className="flex flex-col gap-4 max-w-md">
+          {/* Presence selector */}
+          <div>
+            <p className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Presence</p>
+            <div className="flex gap-2">
+              {(["online", "idle", "dnd", "invisible"] as const).map((p) => (
+                <button
+                  key={p}
+                  aria-pressed={statusPresence === p}
+                  onClick={() => setStatusPresence(p)}
+                  className={clsx(
+                    "flex-1 rounded-lg border py-2 text-xs font-medium capitalize transition-colors",
+                    statusPresence === p
+                      ? "border-accent-600 bg-accent-600/15 text-accent-300"
+                      : "border-bg-600/50 bg-bg-800 text-muted hover:text-fg"
+                  )}
+                >
+                  {p === "dnd" ? "Do Not Disturb" : p.charAt(0).toUpperCase() + p.slice(1)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Custom status text */}
+          <div>
+            <label className="block text-xs font-semibold text-muted uppercase tracking-wider mb-1">
+              Custom Status
+            </label>
+            <input
+              className="input w-full"
+              placeholder="What are you up to?"
+              value={statusText}
+              maxLength={128}
+              onChange={(e) => setStatusText(e.target.value)}
+            />
+          </div>
+
+          {/* Expiry presets */}
+          <div>
+            <p className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Clear after</p>
+            <div className="flex flex-wrap gap-2">
+              {(["none", "1h", "4h", "today", "tomorrow", "custom"] as const).map((opt) => (
+                <button
+                  key={opt}
+                  aria-pressed={statusExpiry === opt}
+                  onClick={() => setStatusExpiry(opt)}
+                  className={clsx(
+                    "rounded-lg border px-3 py-1 text-xs font-medium transition-colors",
+                    statusExpiry === opt
+                      ? "border-accent-600 bg-accent-600/15 text-accent-300"
+                      : "border-bg-600/50 bg-bg-800 text-muted hover:text-fg"
+                  )}
+                >
+                  {opt === "none" ? "Never" : opt === "1h" ? "1 hour" : opt === "4h" ? "4 hours" : opt === "today" ? "Today" : opt === "tomorrow" ? "Tomorrow" : "Custom"}
+                </button>
+              ))}
+            </div>
+            {statusExpiry === "custom" && (
+              <input
+                type="datetime-local"
+                value={statusCustomExpiry}
+                min={new Date(Date.now() + 60_000).toISOString().slice(0, 16)}
+                onChange={(e) => setStatusCustomExpiry(e.target.value)}
+                className="mt-2 input w-full"
+              />
+            )}
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={saveStatus}
+              disabled={statusSaving}
+              className="btn-primary disabled:opacity-50"
+            >
+              {statusSaving ? "Saving…" : "Update Status"}
+            </button>
+            {statusMsg && (
+              <span className={statusMsg.startsWith("Error") ? "text-dnd text-xs" : "text-green-400 text-xs"}>
+                {statusMsg}
+              </span>
+            )}
+          </div>
+        </div>
+      </section>
+
       <section className="mb-10">
         <h2 className="text-base font-semibold mb-5 border-b border-bg-600 pb-2">Appearance</h2>
 

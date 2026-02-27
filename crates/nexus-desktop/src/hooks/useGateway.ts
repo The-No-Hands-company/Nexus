@@ -11,7 +11,7 @@
  */
 import { useEffect, useRef } from "react";
 import { useStore, Message, VoiceParticipant } from "../store";
-import { isTauri } from "../invoke";
+import { isTauri, invoke } from "../invoke";
 
 let _sendNotification: ((title: string, body: string) => void) | null = null;
 
@@ -243,6 +243,35 @@ export function useGateway() {
         case "PTT_STOP":
           setPttActive(false);
           break;
+
+        case "POLL_VOTE_ADD":
+        case "POLL_VOTE_REMOVE": {
+          const raw = data as { poll_id: string; channel_id: string };
+          // Re-fetch results and push into store so PollCard re-renders
+          type RawResults = { poll: Record<string, unknown>; options: { index: number; label: string; vote_count: number; voter_ids: string[] }[]; total_voters: number };
+          invoke<RawResults>("get_poll_results", { channelId: raw.channel_id, pollId: raw.poll_id })
+            .then((res) => {
+              useStore.getState().setPollResults(raw.poll_id, {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                poll: res.poll as any,
+                options: res.options.map((o) => ({
+                  index: o.index,
+                  label: o.label,
+                  voteCount: o.vote_count,
+                  voterIds: o.voter_ids,
+                })),
+                totalVoters: res.total_voters,
+              });
+            })
+            .catch((e) => console.warn("[gateway] poll results refresh failed", e));
+          break;
+        }
+
+        case "POLL_ENDED": {
+          const raw = data as { id: string; channel_id: string };
+          useStore.getState().updatePoll(raw.channel_id, raw.id, (p) => ({ ...p, status: "ended" as const }));
+          break;
+        }
 
         default:
           break;

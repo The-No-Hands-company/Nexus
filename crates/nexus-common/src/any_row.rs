@@ -230,6 +230,7 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for Channel {
             auto_archive_duration: row.try_get("auto_archive_duration")?,
             archived: row.try_get("archived")?,
             locked: row.try_get("locked")?,
+            disappear_after_seconds: row.try_get("disappear_after_seconds").unwrap_or(0),
             created_at: dt(row, "created_at")?,
             updated_at: dt(row, "updated_at")?,
         })

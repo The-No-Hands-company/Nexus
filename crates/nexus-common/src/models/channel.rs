@@ -64,6 +64,10 @@ pub struct Channel {
     /// Whether the thread is locked (no new messages)
     pub locked: bool,
 
+    /// Messages auto-delete after this many seconds (0 = off).
+    /// Set on the channel; the background task deletes expired rows.
+    pub disappear_after_seconds: i32,
+
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

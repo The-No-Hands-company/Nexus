@@ -40,7 +40,7 @@ pub const CHANNEL_COLS: &str =
      rate_limit_per_user, bitrate, user_limit, encrypted, \
      permission_overwrites::text AS permission_overwrites, \
      last_message_id::text AS last_message_id, auto_archive_duration, \
-     archived, locked, \
+     archived, locked, disappear_after_seconds, \
      created_at::text AS created_at, updated_at::text AS updated_at";
 
 /// Same as `CHANNEL_COLS` but with `c.` table-alias prefix for JOIN queries.
@@ -50,7 +50,7 @@ pub const CHANNEL_COLS_C: &str =
      c.rate_limit_per_user, c.bitrate, c.user_limit, c.encrypted, \
      c.permission_overwrites::text AS permission_overwrites, \
      c.last_message_id::text AS last_message_id, c.auto_archive_duration, \
-     c.archived, c.locked, \
+     c.archived, c.locked, c.disappear_after_seconds, \
      c.created_at::text AS created_at, c.updated_at::text AS updated_at";
 
 // ── members ───────────────────────────────────────────────────────────────────

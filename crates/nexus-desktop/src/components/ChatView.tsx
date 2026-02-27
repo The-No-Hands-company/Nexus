@@ -6,20 +6,41 @@ import { invoke } from "../invoke";
 import MessageInput from "./MessageInput";
 import MemberList from "./MemberList";
 import ThreadPanel from "./ThreadPanel";
+import PollCard from "./PollCard";
+import SavedMessagesPanel from "./SavedMessagesPanel";
 import { useFocusTrap } from "../hooks/useFocusTrap";
 import { formatDistanceToNow, format, isToday, isYesterday } from "date-fns";
 import clsx from "clsx";
 
 export default function ChatView() {
   const { channelId } = useParams<{ channelId: string }>();
-  const { messages, channels, session, loadMessages, activeServerId, isHomeMode } = useStore();
+  const {
+    messages, channels, session, loadMessages, activeServerId, isHomeMode,
+    channelPolls, setChannelPolls, addBookmark, savedMessagesPanelOpen, setSavedMessagesPanelOpen,
+  } = useStore();
   const [showMembers, setShowMembers] = useState(true);
   const [openThread, setOpenThread] = useState<{ id: string; title: string } | null>(null);
   const [startingThread, setStartingThread] = useState<{ msgId: string; msgContent: string } | null>(null);
   const [newThreadTitle, setNewThreadTitle] = useState("");
+  const [showScheduled, setShowScheduled] = useState(false);
+  const [scheduledMsgs, setScheduledMsgs] = useState<import("../store").ScheduledMessage[]>([]);
+  const [confirmDisappear, setConfirmDisappear] = useState(false);
 
   const msgs: Message[] = channelId ? (messages[channelId] ?? []) : [];
   const channel = channels.find((c) => c.id === channelId);
+  const polls = channelId ? (channelPolls[channelId] ?? []) : [];
+
+  // Build a unified timeline of messages and standalone polls sorted by createdAt
+  type TimelineItem =
+    | { type: "message"; data: Message }
+    | { type: "poll"; data: import("../store").Poll };
+
+  const timeline: TimelineItem[] = [
+    ...msgs.map((m) => ({ type: "message" as const, data: m })),
+    ...polls
+      .filter((p) => !p.messageId) // standalone polls only; attached polls render inside MessageRow
+      .map((p) => ({ type: "poll" as const, data: p })),
+  ].sort((a, b) => new Date(a.data.createdAt).getTime() - new Date(b.data.createdAt).getTime());
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const startThreadTrapRef = useFocusTrap<HTMLDivElement>(!!startingThread);
@@ -29,6 +50,14 @@ export default function ChatView() {
       loadMessages(channelId);
     }
   }, [channelId, loadMessages]);
+
+  // Load polls for the active channel
+  useEffect(() => {
+    if (!channelId) return;
+    invoke<import("../store").Poll[]>("list_channel_polls", { channelId })
+      .then((polls) => setChannelPolls(channelId, polls))
+      .catch(() => {}); // best-effort — polls section just won't render
+  }, [channelId, setChannelPolls]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -59,6 +88,68 @@ export default function ChatView() {
             <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/>
           </svg>
           <span className="font-semibold text-fg text-sm flex-1">{channel?.name}</span>
+          {/* Disappearing messages timer */}
+          {channel?.disappearAfterSeconds != null && channel.disappearAfterSeconds > 0 && (
+            <button
+              title={`Disappearing messages: ${formatDisappearTimer(channel.disappearAfterSeconds)}`}
+              onClick={() => setConfirmDisappear(true)}
+              className="text-xs text-muted hover:text-fg transition-colors flex items-center gap-1"
+            >
+              ⏳ {formatDisappearTimer(channel.disappearAfterSeconds)}
+            </button>
+          )}
+          {/* Schedule Messages indicator */}
+          <div className="relative">
+            <button
+              onClick={async () => {
+                if (!channelId) return;
+                if (!showScheduled) {
+                  const msgs = await invoke<import("../store").ScheduledMessage[]>(
+                    "list_scheduled_messages", { channelId }
+                  ).catch(() => []);
+                  setScheduledMsgs(msgs);
+                }
+                setShowScheduled((v) => !v);
+              }}
+              title="Scheduled messages"
+              className={clsx(
+                "p-1.5 rounded transition-colors text-sm",
+                showScheduled ? "text-accent-400 bg-bg-600/60" : "text-muted hover:text-fg hover:bg-bg-700/60"
+              )}
+            >
+              🗓️
+            </button>
+            {showScheduled && (
+              <div className="absolute right-0 top-full mt-1 z-20 w-80 rounded-lg border border-bg-600/50 bg-bg-700 shadow-xl p-3 text-sm">
+                <p className="text-[10px] uppercase tracking-widest text-muted mb-2">Scheduled Messages</p>
+                {scheduledMsgs.length === 0 ? (
+                  <p className="text-xs text-muted text-center py-4">No scheduled messages</p>
+                ) : (
+                  <div className="flex flex-col gap-2 max-h-64 overflow-y-auto">
+                    {scheduledMsgs.map((sm) => (
+                      <div key={sm.id} className="flex items-start justify-between gap-2 rounded bg-bg-600/40 p-2">
+                        <div className="min-w-0">
+                          <p className="text-xs text-fg truncate">{sm.content}</p>
+                          <p className="text-[10px] text-muted mt-0.5">
+                            {format(new Date(sm.scheduledAt), "MMM d, HH:mm")}
+                          </p>
+                        </div>
+                        <button
+                          onClick={async () => {
+                            await invoke("cancel_scheduled_message", { channelId, scheduledMessageId: sm.id }).catch(() => null);
+                            setScheduledMsgs((prev) => prev.filter((m) => m.id !== sm.id));
+                          }}
+                          className="text-[10px] text-dnd hover:text-red-400 shrink-0"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
           {channel?.isE2ee && (
             <span className="text-xs bg-green-900/40 text-green-400 px-1.5 py-0.5 rounded font-medium">
               E2EE
@@ -92,21 +183,39 @@ export default function ChatView() {
           aria-relevant="additions"
           className="nexus-msg-list flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-0.5"
         >
-          {msgs.length === 0 && (
+          {timeline.length === 0 && (
             <p className="text-muted text-sm text-center mt-16">
               No messages yet. Be the first!
             </p>
           )}
-          {msgs.map((msg, i) => {
-            const prevMsg = msgs[i - 1];
+          {timeline.map((item, i) => {
+            if (item.type === "poll") {
+              return (
+                <PollCard
+                  key={`poll-${item.data.id}`}
+                  poll={item.data}
+                  channelId={channelId!}
+                  currentUserId={session?.userId ?? ""}
+                />
+              );
+            }
+
+            const msg = item.data;
+            const prevItem = timeline[i - 1];
+            const prevMsg = prevItem?.type === "message" ? prevItem.data : null;
             const grouped =
-              prevMsg?.authorId === msg.authorId &&
+              !!prevMsg &&
+              prevMsg.authorId === msg.authorId &&
               new Date(msg.createdAt).getTime() -
                 new Date(prevMsg.createdAt).getTime() <
                 5 * 60 * 1000;
             // Date separator when the calendar day changes
-            const newDay = !prevMsg ||
-              new Date(msg.createdAt).toDateString() !== new Date(prevMsg.createdAt).toDateString();
+            const newDay = !prevItem ||
+              new Date(msg.createdAt).toDateString() !== new Date(prevItem.data.createdAt).toDateString();
+
+            // Attached poll for this message (if any)
+            const attachedPoll = polls.find((p) => p.messageId === msg.id);
+
             return (
               <>
                 {newDay && <DateSeparator key={`sep-${msg.id}`} date={new Date(msg.createdAt)} />}
@@ -118,7 +227,26 @@ export default function ChatView() {
                   isOwn={msg.authorId === session?.userId}
                   onOpenThread={(tId, title) => { setOpenThread({ id: tId, title }); setShowMembers(false); }}
                   onStartThread={(msgId, content) => { setStartingThread({ msgId, msgContent: content }); setNewThreadTitle(""); }}
+                  onBookmark={async () => {
+                    try {
+                      const bm = await invoke<import("../store").Bookmark>("add_bookmark", {
+                        messageId: msg.id,
+                        channelId,
+                      });
+                      addBookmark(bm);
+                    } catch (e) {
+                      console.error("[bookmark]", e);
+                    }
+                  }}
                 />
+                {attachedPoll && (
+                  <PollCard
+                    key={`poll-attached-${attachedPoll.id}`}
+                    poll={attachedPoll}
+                    channelId={channelId!}
+                    currentUserId={session?.userId ?? ""}
+                  />
+                )}
               </>
             );
           })}
@@ -132,8 +260,13 @@ export default function ChatView() {
         <MessageInput channelId={channelId} isE2ee={!!channel?.isE2ee} />
       </div>
 
+      {/* Saved Messages panel (replaces member list when open) */}
+      {savedMessagesPanelOpen && (
+        <SavedMessagesPanel onClose={() => setSavedMessagesPanelOpen(false)} />
+      )}
+
       {/* Member list sidebar */}
-      {isServerChannel && showMembers && !openThread && (
+      {isServerChannel && showMembers && !openThread && !savedMessagesPanelOpen && (
         <MemberList serverId={activeServerId!} />
       )}
 
@@ -218,8 +351,34 @@ export default function ChatView() {
           </div>
         </div>
       )}
+      {/* Confirm disappearing messages info */}
+      {confirmDisappear && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="w-80 rounded-xl bg-bg-700 p-6 shadow-2xl">
+            <h2 className="mb-2 text-base font-semibold text-fg">Disappearing Messages</h2>
+            <p className="text-sm text-muted mb-4">
+              Messages in this channel auto-delete after{" "}
+              {channel ? formatDisappearTimer(channel.disappearAfterSeconds ?? 0) : "a set time"}.
+              This setting is managed by the server admin.
+            </p>
+            <button
+              onClick={() => setConfirmDisappear(false)}
+              className="rounded-lg bg-bg-600 px-4 py-2 text-sm text-fg hover:bg-bg-500 transition-colors"
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+// ── Disappear timer helper ────────────────────────────────────────────────────
+function formatDisappearTimer(secs: number): string {
+  if (secs < 3600) return `${Math.floor(secs / 60)}m`;
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h`;
+  return `${Math.floor(secs / 86400)}d`;
 }
 
 // ── Date separator ────────────────────────────────────────────────────────────
@@ -273,6 +432,7 @@ function MessageRow({
   isOwn,
   onOpenThread,
   onStartThread,
+  onBookmark,
 }: {
   msg: Message;
   channelId: string;
@@ -280,6 +440,7 @@ function MessageRow({
   isOwn: boolean;
   onOpenThread?: (threadId: string, title: string) => void;
   onStartThread?: (msgId: string, content: string) => void;
+  onBookmark?: () => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
@@ -421,6 +582,16 @@ function MessageRow({
                 title="Start thread"
               >
                 🧵
+              </button>
+            )}
+            {/* Bookmark button */}
+            {onBookmark && (
+              <button
+                onClick={onBookmark}
+                className="inline-flex items-center justify-center h-5 px-1.5 rounded border border-bg-600/50 bg-bg-700/40 text-muted hover:text-fg hover:bg-bg-600/60 transition-colors text-xs opacity-0 group-hover:opacity-100"
+                title="Bookmark message"
+              >
+                🔖
               </button>
             )}
           </div>

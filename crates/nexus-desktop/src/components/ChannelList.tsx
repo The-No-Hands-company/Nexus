@@ -1,4 +1,4 @@
-import { useState, KeyboardEvent } from "react";
+import { useState, useEffect, KeyboardEvent } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { useStore } from "../store";
 import clsx from "clsx";
@@ -7,8 +7,13 @@ import NotificationTray from "./NotificationTray";
 
 export default function ChannelList() {
   const { channels, activeChannelId, setActiveChannel, activeServerId, servers, createChannel, unreadChannels,
-    isHomeMode, dmChannels } =
+    isHomeMode, dmChannels, drafts, noteToSelfChannelId, loadNoteToSelfChannel, setSavedMessagesPanelOpen } =
     useStore();
+
+  // Load note-to-self channel when entering home mode
+  useEffect(() => {
+    if (isHomeMode) loadNoteToSelfChannel();
+  }, [isHomeMode]);
   const navigate = useNavigate();
   const location = useLocation();
   const { channelId } = useParams();
@@ -83,6 +88,27 @@ export default function ChannelList() {
         <div className="h-px bg-bg-600/40 mx-3 shrink-0" />
 
         <div className="flex-1 overflow-y-auto px-2 py-2 flex flex-col gap-px">
+          {/* Saved Notes (note-to-self) */}
+          {noteToSelfChannelId && (
+            <button
+              onClick={() => { setActiveChannel(noteToSelfChannelId); navigate(`/channel/${noteToSelfChannelId}`); }}
+              aria-label="Saved Notes"
+              aria-current={activeChannelId === noteToSelfChannelId ? "page" : undefined}
+              className={clsx("channel-item w-full text-left", activeChannelId === noteToSelfChannelId && "active")}
+            >
+              <span className="shrink-0">📝</span>
+              <span className="truncate text-sm flex-1">Saved Notes</span>
+            </button>
+          )}
+          {/* Saved Messages (bookmarks) */}
+          <button
+            onClick={() => setSavedMessagesPanelOpen(true)}
+            aria-label="Saved Messages"
+            className="channel-item w-full text-left"
+          >
+            <span className="shrink-0">🔖</span>
+            <span className="truncate text-sm flex-1">Saved Messages</span>
+          </button>
           {/* Friends nav item */}
           <button
             onClick={() => navigate("/home")}
@@ -216,6 +242,9 @@ export default function ChannelList() {
             >
               <TextChannelIcon />
               <span className="truncate text-sm flex-1">{ch.name}</span>
+              {drafts[ch.id] && (
+                <span className="text-[10px] text-yellow-400/80" title="Draft saved">✏️</span>
+              )}
               {ch.isE2ee && (
                 <span className="text-[10px] text-green-400/80" title="End-to-end encrypted">
                   E2E
