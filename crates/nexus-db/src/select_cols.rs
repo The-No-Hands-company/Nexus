@@ -6,10 +6,10 @@
 //!
 //! # Usage
 //!
-//! ```rust
+//! ```rust,ignore
 //! use crate::select_cols::USER_COLS;
 //! let q = format!("SELECT {USER_COLS} FROM users WHERE id = $1");
-//! sqlx::query_as::<_, User>(&q).bind(id).fetch_optional(pool).await
+//! // sqlx::query_as::<_, User>(&q).bind(id).fetch_optional(pool).await
 //! ```
 
 // ── users ─────────────────────────────────────────────────────────────────────

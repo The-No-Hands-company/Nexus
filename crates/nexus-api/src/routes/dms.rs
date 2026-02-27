@@ -6,16 +6,17 @@
 use axum::{
     extract::{Extension, Path, State},
     middleware,
-    routing::get,
+    routing::{delete, get, post, put},
     Json, Router,
 };
 use nexus_common::{
     error::{NexusError, NexusResult},
     models::channel::Channel,
     snowflake,
+    gateway_event::GatewayEvent,
 };
 use nexus_db::{repository::channels, select_cols::CHANNEL_COLS_C};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -30,7 +31,17 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         .route(
             "/users/@me/channels/{channel_id}",
-            get(get_dm_channel),
+            get(get_dm_channel).patch(update_group_dm),
+        )
+        // Group DM recipient management
+        .route(
+            "/users/@me/channels/{channel_id}/recipients/{user_id}",
+            post(add_recipient).delete(remove_recipient),
+        )
+        // Transfer group DM ownership
+        .route(
+            "/users/@me/channels/{channel_id}/owner",
+            put(transfer_dm_owner),
         )
         .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
 }
@@ -272,5 +283,260 @@ async fn get_dm_channel(
         "recipients": users,
         "last_message_id": channel.last_message_id,
         "updated_at": channel.updated_at,
+    })))
+}
+
+// ============================================================
+// Group DM management — name, icon, recipients, ownership
+// ============================================================
+
+#[derive(Debug, Deserialize)]
+struct UpdateGroupDmRequest {
+    name: Option<String>,
+    icon: Option<String>, // base64-encoded image or null to clear
+}
+
+#[derive(Debug, Deserialize)]
+struct TransferOwnerRequest {
+    user_id: Uuid,
+}
+
+/// Ensure the channel is a group DM and the caller is a participant.
+async fn require_group_dm_participant(
+    state: &AppState,
+    channel_id: Uuid,
+    user_id: Uuid,
+) -> NexusResult<()> {
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT c.id::text FROM channels c \
+         INNER JOIN dm_participants dp ON dp.channel_id = c.id \
+         WHERE c.id = $1::uuid AND dp.user_id = $2::uuid \
+           AND c.channel_type = 'group_dm'",
+    )
+    .bind(channel_id.to_string())
+    .bind(user_id.to_string())
+    .fetch_optional(&state.db.pool)
+    .await?;
+
+    row.ok_or(NexusError::NotFound { resource: "Channel".into() })?;
+    Ok(())
+}
+
+/// Get the current owner of a group DM channel (owner_id column, nullable).
+/// Falls back to the first participant if no owner is set.
+async fn get_dm_owner(state: &AppState, channel_id: Uuid) -> Option<Uuid> {
+    let row: Option<(Option<String>,)> = sqlx::query_as(
+        "SELECT owner_id::text FROM channels WHERE id = $1::uuid",
+    )
+    .bind(channel_id.to_string())
+    .fetch_optional(&state.db.pool)
+    .await
+    .ok()
+    .flatten();
+
+    row.and_then(|(s,)| s).and_then(|s| s.parse().ok())
+}
+
+/// PATCH /api/v1/users/@me/channels/:channel_id — Update group DM name and/or icon.
+async fn update_group_dm(
+    Extension(auth): Extension<AuthContext>,
+    State(state): State<Arc<AppState>>,
+    Path(channel_id): Path<Uuid>,
+    Json(body): Json<UpdateGroupDmRequest>,
+) -> NexusResult<Json<serde_json::Value>> {
+    require_group_dm_participant(&state, channel_id, auth.user_id).await?;
+
+    if let Some(ref name) = body.name {
+        if name.len() > 100 {
+            return Err(NexusError::Validation {
+                message: "Group DM name must be at most 100 characters".into(),
+            });
+        }
+    }
+
+    // Update name if provided
+    if let Some(ref name) = body.name {
+        sqlx::query("UPDATE channels SET name = $1, updated_at = NOW() WHERE id = $2::uuid")
+            .bind(name.as_str())
+            .bind(channel_id.to_string())
+            .execute(&state.db.pool)
+            .await?;
+    }
+
+    // Update icon if provided (null string clears the icon)
+    if let Some(ref icon) = body.icon {
+        let icon_val: Option<&str> = if icon.is_empty() { None } else { Some(icon.as_str()) };
+        sqlx::query("UPDATE channels SET icon = $1, updated_at = NOW() WHERE id = $2::uuid")
+            .bind(icon_val)
+            .bind(channel_id.to_string())
+            .execute(&state.db.pool)
+            .await?;
+    }
+
+    // Fetch the updated channel row
+    let row: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT id::text, name, icon FROM channels WHERE id = $1::uuid",
+    )
+    .bind(channel_id.to_string())
+    .fetch_optional(&state.db.pool)
+    .await?;
+
+    let (id_str, name, icon) = row.ok_or(NexusError::NotFound { resource: "Channel".into() })?;
+
+    let _ = state.gateway_tx.send(GatewayEvent {
+        event_type: nexus_common::gateway_event::event_types::CHANNEL_UPDATE.to_string(),
+        data: serde_json::json!({ "id": id_str, "name": name, "icon": icon }),
+        server_id: None,
+        channel_id: Some(channel_id),
+        user_id: Some(auth.user_id),
+    });
+
+    Ok(Json(serde_json::json!({
+        "id": id_str,
+        "channel_type": "group_dm",
+        "name": name,
+        "icon": icon,
+    })))
+}
+
+/// POST /api/v1/users/@me/channels/:channel_id/recipients/:user_id
+/// Add a user to a group DM (owner only, max 10 total).
+async fn add_recipient(
+    Extension(auth): Extension<AuthContext>,
+    State(state): State<Arc<AppState>>,
+    Path((channel_id, target_user_id)): Path<(Uuid, Uuid)>,
+) -> NexusResult<Json<serde_json::Value>> {
+    require_group_dm_participant(&state, channel_id, auth.user_id).await?;
+
+    // Only the owner may add recipients
+    let owner = get_dm_owner(&state, channel_id).await;
+    if owner.map(|o| o != auth.user_id).unwrap_or(false) {
+        return Err(NexusError::MissingPermission {
+            permission: "group_dm_owner".into(),
+        });
+    }
+
+    // Check participant count (max 10)
+    let count: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM dm_participants WHERE channel_id = $1::uuid",
+    )
+    .bind(channel_id.to_string())
+    .fetch_one(&state.db.pool)
+    .await?;
+
+    if count.0 >= 10 {
+        return Err(NexusError::Validation {
+            message: "Group DM can have at most 10 participants".into(),
+        });
+    }
+
+    // Verify target user exists
+    nexus_db::repository::users::find_by_id(&state.db.pool, target_user_id)
+        .await?
+        .ok_or(NexusError::NotFound { resource: "User".into() })?;
+
+    sqlx::query(
+        "INSERT INTO dm_participants (channel_id, user_id) \
+         VALUES ($1::uuid, $2::uuid) ON CONFLICT DO NOTHING",
+    )
+    .bind(channel_id.to_string())
+    .bind(target_user_id.to_string())
+    .execute(&state.db.pool)
+    .await?;
+
+    let _ = state.gateway_tx.send(GatewayEvent {
+        event_type: nexus_common::gateway_event::event_types::CHANNEL_RECIPIENT_ADD.to_string(),
+        data: serde_json::json!({ "channel_id": channel_id, "user_id": target_user_id }),
+        server_id: None,
+        channel_id: Some(channel_id),
+        user_id: Some(target_user_id),
+    });
+
+    Ok(Json(serde_json::json!({ "channel_id": channel_id, "user_id": target_user_id })))
+}
+
+/// DELETE /api/v1/users/@me/channels/:channel_id/recipients/:user_id
+/// Remove a recipient from a group DM (self-leave, or owner removing another).
+async fn remove_recipient(
+    Extension(auth): Extension<AuthContext>,
+    State(state): State<Arc<AppState>>,
+    Path((channel_id, target_user_id)): Path<(Uuid, Uuid)>,
+) -> NexusResult<Json<serde_json::Value>> {
+    require_group_dm_participant(&state, channel_id, auth.user_id).await?;
+
+    // Allow self-leave always. Owner may remove others. Non-owner may only remove themselves.
+    let is_self = target_user_id == auth.user_id;
+    if !is_self {
+        let owner = get_dm_owner(&state, channel_id).await;
+        if owner.map(|o| o != auth.user_id).unwrap_or(true) {
+            return Err(NexusError::MissingPermission {
+                permission: "group_dm_owner".into(),
+            });
+        }
+    }
+
+    sqlx::query(
+        "DELETE FROM dm_participants WHERE channel_id = $1::uuid AND user_id = $2::uuid",
+    )
+    .bind(channel_id.to_string())
+    .bind(target_user_id.to_string())
+    .execute(&state.db.pool)
+    .await?;
+
+    let _ = state.gateway_tx.send(GatewayEvent {
+        event_type: nexus_common::gateway_event::event_types::CHANNEL_RECIPIENT_REMOVE.to_string(),
+        data: serde_json::json!({ "channel_id": channel_id, "user_id": target_user_id }),
+        server_id: None,
+        channel_id: Some(channel_id),
+        user_id: Some(target_user_id),
+    });
+
+    Ok(Json(serde_json::json!({ "channel_id": channel_id, "user_id": target_user_id, "removed": true })))
+}
+
+/// PUT /api/v1/users/@me/channels/:channel_id/owner
+/// Transfer group DM ownership to another participant (current owner only).
+async fn transfer_dm_owner(
+    Extension(auth): Extension<AuthContext>,
+    State(state): State<Arc<AppState>>,
+    Path(channel_id): Path<Uuid>,
+    Json(body): Json<TransferOwnerRequest>,
+) -> NexusResult<Json<serde_json::Value>> {
+    require_group_dm_participant(&state, channel_id, auth.user_id).await?;
+
+    // Only current owner may transfer
+    let owner = get_dm_owner(&state, channel_id).await;
+    // If owner is not set, the caller implicitly becomes the owner by being first
+    if owner.map(|o| o != auth.user_id).unwrap_or(false) {
+        return Err(NexusError::MissingPermission {
+            permission: "group_dm_owner".into(),
+        });
+    }
+
+    // New owner must be a participant
+    let is_participant: Option<(String,)> = sqlx::query_as(
+        "SELECT channel_id::text FROM dm_participants \
+         WHERE channel_id = $1::uuid AND user_id = $2::uuid",
+    )
+    .bind(channel_id.to_string())
+    .bind(body.user_id.to_string())
+    .fetch_optional(&state.db.pool)
+    .await?;
+
+    if is_participant.is_none() {
+        return Err(NexusError::Validation {
+            message: "New owner must be a participant of this group DM".into(),
+        });
+    }
+
+    sqlx::query("UPDATE channels SET owner_id = $1::uuid, updated_at = NOW() WHERE id = $2::uuid")
+        .bind(body.user_id.to_string())
+        .bind(channel_id.to_string())
+        .execute(&state.db.pool)
+        .await?;
+
+    Ok(Json(serde_json::json!({
+        "channel_id": channel_id,
+        "owner_id": body.user_id,
     })))
 }

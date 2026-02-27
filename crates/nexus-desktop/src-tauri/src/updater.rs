@@ -13,7 +13,7 @@ use tokio::time::{interval, Duration};
 /// Spawn a background task that polls for updates on a fixed interval.
 ///
 /// Call from `app.setup()`:
-/// ```rust
+/// ```rust,ignore
 /// updater::schedule_check(app.handle().clone());
 /// ```
 pub fn schedule_check(app: AppHandle) {

@@ -28,6 +28,25 @@ pub mod event_types {
     pub const APPLICATION_COMMAND_CREATE: &str = "APPLICATION_COMMAND_CREATE";
     pub const APPLICATION_COMMAND_UPDATE: &str = "APPLICATION_COMMAND_UPDATE";
     pub const APPLICATION_COMMAND_DELETE: &str = "APPLICATION_COMMAND_DELETE";
+    // v0.12 — Channel type completion
+    /// A new forum post (thread) was created in a forum channel.
+    pub const FORUM_POST_CREATE: &str = "FORUM_POST_CREATE";
+    /// A forum post's title or tags were updated.
+    pub const FORUM_POST_UPDATE: &str = "FORUM_POST_UPDATE";
+    /// A forum post was deleted.
+    pub const FORUM_POST_DELETE: &str = "FORUM_POST_DELETE";
+    /// A stage instance was created on a stage channel.
+    pub const STAGE_INSTANCE_CREATE: &str = "STAGE_INSTANCE_CREATE";
+    /// A stage instance's topic or privacy was updated.
+    pub const STAGE_INSTANCE_UPDATE: &str = "STAGE_INSTANCE_UPDATE";
+    /// A stage instance ended.
+    pub const STAGE_INSTANCE_DELETE: &str = "STAGE_INSTANCE_DELETE";
+    /// The speaker list or hand-raised list on a stage changed.
+    pub const STAGE_SPEAKER_UPDATE: &str = "STAGE_SPEAKER_UPDATE";
+    /// A user was added to a group DM.
+    pub const CHANNEL_RECIPIENT_ADD: &str = "CHANNEL_RECIPIENT_ADD";
+    /// A user was removed from a group DM.
+    pub const CHANNEL_RECIPIENT_REMOVE: &str = "CHANNEL_RECIPIENT_REMOVE";
 }
 
 /// Events broadcast through the gateway to connected clients.

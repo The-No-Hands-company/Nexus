@@ -84,6 +84,9 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::email_verification::router()) // email verify + resend
         // v0.9.8 Moderation & Safety
         .merge(routes::moderation::router())       // audit log, kick, ban, timeout, reports, word filters
+        // v0.12 Channel Type Completion
+        .merge(routes::forum::router())            // forum posts + tags
+        .merge(routes::stages::router())           // stage instances + speaker management
         // Make Arc<AppState> available as an Axum Extension so that
         // `combined_auth_middleware` can perform DB lookups for bot tokens
         // without requiring `from_fn_with_state` on every sub-router.

@@ -16,7 +16,7 @@ use nexus_common::{
     validation::validate_request,
 };
 use chrono::Utc;
-use nexus_db::repository::{channels, members, messages, moderation, reactions, read_states};
+use nexus_db::repository::{channels, members, messages, moderation, reactions, read_states, servers};
 use nexus_common::gateway_event::GatewayEvent;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -72,6 +72,16 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         // Search
         .route("/channels/{channel_id}/search", get(search_messages))
+        // Announcement channel — publish (crosspost) a message
+        .route(
+            "/channels/{channel_id}/messages/{message_id}/crosspost",
+            post(crosspost_message),
+        )
+        // Announcement channel follower — subscribe a channel to this announcement channel
+        .route(
+            "/channels/{channel_id}/followers",
+            put(add_channel_follower),
+        )
         // All routes require authentication
         .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
 }
@@ -956,4 +966,262 @@ async fn get_user_reactions(
         }
     }
     my_reactions
+}
+
+// ============================================================
+// Announcement channel: crosspost + follower management
+// ============================================================
+
+/// POST /api/v1/channels/:channel_id/messages/:message_id/crosspost
+///
+/// Publish a message from an announcement channel.  The message is
+/// delivered to all channels that have followed this announcement channel
+/// (via `channel_followers` table).  A message can only be published once.
+async fn crosspost_message(
+    Extension(auth): Extension<AuthContext>,
+    State(state): State<Arc<AppState>>,
+    Path((channel_id, message_id)): Path<(Uuid, Uuid)>,
+) -> NexusResult<Json<serde_json::Value>> {
+    // Verify the channel is an announcement channel
+    let channel = channels::find_by_id(&state.db.pool, channel_id)
+        .await?
+        .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
+
+    if !matches!(
+        channel.channel_type,
+        nexus_common::models::channel::ChannelType::Announcement
+    ) {
+        return Err(NexusError::Validation {
+            message: "Channel is not an announcement channel".into(),
+        });
+    }
+
+    // Only someone with SEND_MESSAGES (for the OP) or MANAGE_MESSAGES may crosspost
+    let server_id = channel.server_id.ok_or(NexusError::MissingPermission {
+        permission: "SEND_MESSAGES".into(),
+    })?;
+    let server = servers::find_by_id(&state.db.pool, server_id)
+        .await?
+        .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+
+    // Check that the caller is server owner or has SEND_MESSAGES
+    if auth.user_id != server.owner_id {
+        use nexus_db::repository::{members, roles};
+        let member = members::find_member(&state.db.pool, auth.user_id, server_id)
+            .await
+            .map_err(|e| NexusError::Internal(e.into()))?
+            .ok_or(NexusError::MissingPermission { permission: "SEND_MESSAGES".into() })?;
+
+        let all_roles = roles::list_server_roles(&state.db.pool, server_id)
+            .await
+            .map_err(|e| NexusError::Internal(e.into()))?;
+
+        let base = all_roles
+            .iter()
+            .find(|r| r.is_default)
+            .map(|r| nexus_common::permissions::Permissions::from_bits_truncate(r.permissions))
+            .unwrap_or_else(nexus_common::permissions::Permissions::empty);
+
+        let effective = all_roles
+            .iter()
+            .filter(|r| !r.is_default && member.roles.contains(&r.id))
+            .map(|r| nexus_common::permissions::Permissions::from_bits_truncate(r.permissions))
+            .fold(base, |acc, rp| acc | rp);
+
+        if !effective.has(nexus_common::permissions::Permissions::SEND_MESSAGES)
+            && !effective.has(nexus_common::permissions::Permissions::MANAGE_MESSAGES)
+        {
+            return Err(NexusError::MissingPermission {
+                permission: "SEND_MESSAGES or MANAGE_MESSAGES".into(),
+            });
+        }
+    }
+
+    // Load the message and verify it belongs to this channel
+    let msg = messages::find_by_id(&state.db.pool, message_id)
+        .await?
+        .ok_or(NexusError::NotFound { resource: "Message".into() })?;
+
+    if msg.channel_id != channel_id {
+        return Err(NexusError::NotFound { resource: "Message".into() });
+    }
+
+    // Mark the message as crossposted (flags bit 1)
+    let current_flags = msg.flags;
+
+    if current_flags & 1 != 0 {
+        return Err(NexusError::Validation {
+            message: "Message has already been published".into(),
+        });
+    }
+
+    sqlx::query("UPDATE messages SET flags = flags | 1, updated_at = NOW() WHERE id = $1::uuid")
+        .bind(message_id.to_string())
+        .execute(&state.db.pool)
+        .await?;
+
+    // Fetch all follower channels and relay the message
+    #[derive(sqlx::FromRow)]
+    struct FollowerRow {
+        target_channel_id: String,
+    }
+
+    let followers: Vec<FollowerRow> = sqlx::query_as(
+        "SELECT target_channel_id::text FROM channel_followers \
+         WHERE source_channel_id = $1::uuid",
+    )
+    .bind(channel_id.to_string())
+    .fetch_all(&state.db.pool)
+    .await
+    .unwrap_or_default();
+
+    let mut delivered_to = Vec::new();
+
+    for follower in &followers {
+        let target_channel_id: Uuid = match follower.target_channel_id.parse() {
+            Ok(id) => id,
+            Err(_) => continue,
+        };
+
+        // Insert a crosspost copy of the message in the target channel
+        // Flag bit 2 = IS_CROSSPOST
+        let relay_msg_id = snowflake::generate_id();
+        let relay_result = sqlx::query(
+            "INSERT INTO messages \
+             (id, channel_id, author_id, content, flags, created_at, updated_at) \
+             VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 2, NOW(), NOW())",
+        )
+        .bind(relay_msg_id.to_string())
+        .bind(target_channel_id.to_string())
+        .bind(msg.author_id.to_string())
+        .bind(&msg.content)
+        .execute(&state.db.pool)
+        .await;
+
+        if relay_result.is_ok() {
+            delivered_to.push(target_channel_id);
+
+            let _ = state.gateway_tx.send(GatewayEvent {
+                event_type: nexus_common::gateway_event::event_types::MESSAGE_CREATE.to_string(),
+                data: serde_json::json!({
+                    "id": relay_msg_id,
+                    "channel_id": target_channel_id,
+                    "author_id": msg.author_id,
+                    "content": msg.content,
+                    "flags": 2,
+                    "crosspost_source": {
+                        "channel_id": channel_id,
+                        "message_id": message_id,
+                    },
+                }),
+                server_id: None,
+                channel_id: Some(target_channel_id),
+                user_id: Some(auth.user_id),
+            });
+        }
+    }
+
+    Ok(Json(serde_json::json!({
+        "message_id": message_id,
+        "channel_id": channel_id,
+        "flags": current_flags | 1,
+        "delivered_to": delivered_to,
+    })))
+}
+
+/// PUT /api/v1/channels/:channel_id/followers
+///
+/// Subscribe a target channel to this announcement channel.
+/// Body: `{ "webhook_channel_id": "<uuid>" }` — the local channel that should
+/// receive crossposted messages.
+async fn add_channel_follower(
+    Extension(auth): Extension<AuthContext>,
+    State(state): State<Arc<AppState>>,
+    Path(channel_id): Path<Uuid>,
+    Json(body): Json<serde_json::Value>,
+) -> NexusResult<Json<serde_json::Value>> {
+    // Source must be an announcement channel
+    let src_channel = channels::find_by_id(&state.db.pool, channel_id)
+        .await?
+        .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
+
+    if !matches!(
+        src_channel.channel_type,
+        nexus_common::models::channel::ChannelType::Announcement
+    ) {
+        return Err(NexusError::Validation {
+            message: "Can only follow announcement channels".into(),
+        });
+    }
+
+    let target_channel_id: Uuid = body
+        .get("webhook_channel_id")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse().ok())
+        .ok_or(NexusError::Validation {
+            message: "webhook_channel_id is required".into(),
+        })?;
+
+    // Verify target channel exists
+    let target_channel = channels::find_by_id(&state.db.pool, target_channel_id)
+        .await?
+        .ok_or(NexusError::NotFound { resource: "Target channel".into() })?;
+
+    // Caller must have MANAGE_WEBHOOKS in the target channel's server
+    if let Some(target_server_id) = target_channel.server_id {
+        let target_server = servers::find_by_id(&state.db.pool, target_server_id)
+            .await?
+            .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+
+        if auth.user_id != target_server.owner_id {
+            use nexus_db::repository::{members, roles};
+            let member = members::find_member(&state.db.pool, auth.user_id, target_server_id)
+                .await
+                .map_err(|e| NexusError::Internal(e.into()))?
+                .ok_or(NexusError::MissingPermission {
+                    permission: "MANAGE_WEBHOOKS".into(),
+                })?;
+
+            let all_roles = roles::list_server_roles(&state.db.pool, target_server_id)
+                .await
+                .map_err(|e| NexusError::Internal(e.into()))?;
+
+            let base = all_roles
+                .iter()
+                .find(|r| r.is_default)
+                .map(|r| nexus_common::permissions::Permissions::from_bits_truncate(r.permissions))
+                .unwrap_or_else(nexus_common::permissions::Permissions::empty);
+
+            let effective = all_roles
+                .iter()
+                .filter(|r| !r.is_default && member.roles.contains(&r.id))
+                .map(|r| nexus_common::permissions::Permissions::from_bits_truncate(r.permissions))
+                .fold(base, |acc, rp| acc | rp);
+
+            if !effective.has(nexus_common::permissions::Permissions::MANAGE_WEBHOOKS) {
+                return Err(NexusError::MissingPermission {
+                    permission: "MANAGE_WEBHOOKS".into(),
+                });
+            }
+        }
+    }
+
+    let follower_id = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO channel_followers \
+         (id, source_channel_id, target_channel_id, target_guild_id) \
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid) \
+         ON CONFLICT (source_channel_id, target_channel_id) DO NOTHING",
+    )
+    .bind(follower_id.to_string())
+    .bind(channel_id.to_string())
+    .bind(target_channel_id.to_string())
+    .bind(target_channel.server_id.map(|u| u.to_string()).unwrap_or_default())
+    .execute(&state.db.pool)
+    .await?;
+
+    Ok(Json(serde_json::json!({
+        "source_channel_id": channel_id,
+        "target_channel_id": target_channel_id,
+    })))
 }

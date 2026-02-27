@@ -8,7 +8,7 @@
 //! Matrix homeservers, allowing users on different servers to join shared
 //! channels, exchange messages, and resolve identities.
 //!
-//! ```
+//! ```text
 //!  nexus.example.com          nexus.other.tld          matrix.org
 //!       │                           │                      │
 //!       ├─── PUT /send/{txnId} ──►  │                      │

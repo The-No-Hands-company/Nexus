@@ -398,6 +398,225 @@ The UX should feel immediately familiar. Servers, channels, voice, bots, rich em
 - ✅ Apply filter on message edit — same block/warn logic before persisting the edit
 - ✅ Configurable spam threshold via server settings — `spam_window_secs` (1–300 s) and `spam_max_messages` (1–20) per-server columns; editable in Server Settings Moderation panel
 
+## Phase 12: Channel Type Completion (v0.12) 🔲 Planned
+
+> **Goal:** The DB schema already contains `channel_type` values for `forum`, `announcement`, `stage`, and `group_dm`. Phase 12 exposes these as first-class API surfaces. Zero new schema migrations are needed for most of these — they are fast wins.
+
+### 12-01: Forum Channels
+
+Forum channels are structured thread boards: every conversation is a titled post with optional tags, rather than a flat chat flow.
+
+- [ ] `GET /api/v1/channels/{id}/posts` — paginated list of forum posts (threads with `type=forum_post`)
+- [ ] `POST /api/v1/channels/{id}/posts` — create a forum post (title, content, tag_ids[], media)
+- [ ] `PATCH /api/v1/channels/{id}/posts/{thread_id}` — edit post title or tags (OP or MANAGE_THREADS)
+- [ ] `POST /api/v1/channels/{id}/posts/{thread_id}/lock` / `unlock` — mod lock/unlock
+- [ ] `GET /api/v1/channels/{id}/tags` — list available forum tags for this channel
+- [ ] `POST/PATCH/DELETE /api/v1/channels/{id}/tags` — CRUD forum tags (MANAGE_CHANNELS)
+- [ ] Gateway: `FORUM_POST_CREATE`, `FORUM_POST_UPDATE`, `FORUM_POST_DELETE` events
+- [ ] Desktop: `ForumView` component — post list, tag filter bar, "New Post" button, post detail view
+
+### 12-02: Announcement Channels
+
+Announcement channels allow moderators to "publish" messages, cross-posting them to subscribing servers via federation.
+
+- [ ] `POST /api/v1/channels/{id}/messages/{msg_id}/crosspost` — publish a message (SEND_MESSAGES in announcement channel or MANAGE_MESSAGES)
+- [ ] `PUT /api/v1/channels/{id}/followers` — subscribe server channel to this announcement channel (`webhook_channel_id` body)
+- [ ] Cross-post delivery: on publish, relay message to all follower channels via the federation layer (or direct insert for local followers)
+- [ ] `channel_followers` DB table (source_channel_id, target_channel_id, target_guild_id) — migration 00014
+- [ ] Gateway: `MESSAGE_CROSSPOST` event with `flags` bit indicating published status
+- [ ] Desktop: announcement badge on channel icon; "Publish" button appears for eligible messages in announcement channels
+
+### 12-03: Stage Channels
+
+Stage channels are speaker + audience voice rooms: a few speakers broadcast while the audience can request to speak.
+
+- [ ] `stage_instances` DB table (channel_id, topic, privacy_level, speaker_ids uuid[], hand_raised_ids uuid[], started_at, ended_at) — migration 00014
+- [ ] `POST /api/v1/channels/{id}/stage-instance` — create stage (topic, privacy: `guild_only` | `public`)
+- [ ] `PATCH /api/v1/channels/{id}/stage-instance` — update topic / privacy
+- [ ] `DELETE /api/v1/channels/{id}/stage-instance` — end stage
+- [ ] `POST /api/v1/channels/{id}/stage-instance/speakers/{uid}` — invite user to speak (MUTE_MEMBERS)
+- [ ] `DELETE /api/v1/channels/{id}/stage-instance/speakers/{uid}` — move speaker to audience (MUTE_MEMBERS)
+- [ ] `POST /api/v1/channels/{id}/stage-instance/raise-hand` — audience member requests to speak (authenticated user)
+- [ ] `DELETE /api/v1/channels/{id}/stage-instance/raise-hand` — retract request
+- [ ] Gateway: `STAGE_INSTANCE_CREATE`, `STAGE_INSTANCE_UPDATE`, `STAGE_INSTANCE_DELETE`, `STAGE_SPEAKER_UPDATE`
+- [ ] Desktop: `StageView` — speaker podium row, audience gallery, hand-raise button, mod tools
+
+### 12-04: Group DMs — Name & Icon
+
+Group DMs with name + icon to make persistent multi-person chats feel like proper rooms.
+
+- [ ] Ensure `channels` table has `name TEXT` and `icon TEXT` columns for `group_dm` type (add via migration 00014 if absent)
+- [ ] `PATCH /api/v1/channels/{id}` — update group DM name and/or icon (any member)
+- [ ] `POST /api/v1/channels/{id}/recipients/{user_id}` — add member (up to 10 members per group DM; owner only)
+- [ ] `DELETE /api/v1/channels/{id}/recipients/{user_id}` — remove member (self-leave or owner removing another)
+- [ ] `PUT /api/v1/channels/{id}/owner` — transfer group DM ownership (`{ user_id }` body; current owner only)
+- [ ] Gateway: `CHANNEL_RECIPIENT_ADD`, `CHANNEL_RECIPIENT_REMOVE` events
+- [ ] Desktop: group DM header shows name + avatar; edit name/icon inline; member management popover
+
+---
+
+## Phase 13: Engagement Features (v0.13) 🔲 Planned
+
+> **Goal:** Surface-level features that dramatically increase daily active engagement. All require new DB migrations but no architectural changes.
+
+### 13-01: Polls
+
+- [ ] `polls` DB table (channel_id, message_id, question, options jsonb[], ends_at, allow_multiselect, is_anonymous) — migration 00015
+- [ ] `poll_votes` DB table (poll_id, user_id, option_index, voted_at) — unique (poll_id, user_id, option_index)
+- [ ] `POST /api/v1/channels/{id}/polls` — create poll (embedded in message or standalone)
+- [ ] `POST /api/v1/channels/{id}/polls/{poll_id}/vote` — cast vote (body: `{ option_indices: [n] }`)
+- [ ] `DELETE /api/v1/channels/{id}/polls/{poll_id}/vote` — retract vote (if poll allows)
+- [ ] `GET /api/v1/channels/{id}/polls/{poll_id}/results` — results (voter list hidden if anonymous)
+- [ ] `POST /api/v1/channels/{id}/polls/{poll_id}/end` — end early (MANAGE_MESSAGES)
+- [ ] Background task: auto-end polls at `ends_at`, emit `POLL_ENDED` gateway event
+- [ ] Gateway: `POLL_VOTE_ADD`, `POLL_VOTE_REMOVE`, `POLL_ENDED` events
+- [ ] Desktop: `PollCard` component inline in chat; animated vote bars, timer countdown
+
+### 13-02: Scheduled Messages
+
+- [ ] `scheduled_messages` DB table (channel_id, author_id, content, attachments jsonb, scheduled_at, status: pending|sent|cancelled) — migration 00015
+- [ ] `POST /api/v1/channels/{id}/scheduled-messages` — create (scheduled_at in future, SEND_MESSAGES)
+- [ ] `GET /api/v1/channels/{id}/scheduled-messages` — list pending scheduled messages
+- [ ] `PATCH /api/v1/channels/{id}/scheduled-messages/{id}` — edit content / reschedule
+- [ ] `DELETE /api/v1/channels/{id}/scheduled-messages/{id}` — cancel
+- [ ] Background task: fire scheduled messages at the appointed time, write to messages table, emit `MESSAGE_CREATE`
+- [ ] Desktop: "Schedule Send" option in message composer (date/time picker); scheduled message list in channel header dropdown
+
+### 13-03: Message Bookmarks
+
+- [ ] `message_bookmarks` DB table (user_id, message_id, channel_id, note TEXT, created_at) — migration 00015
+- [ ] `POST /api/v1/users/@me/bookmarks` — add bookmark (`{ message_id, note? }`)
+- [ ] `DELETE /api/v1/users/@me/bookmarks/{message_id}` — remove
+- [ ] `GET /api/v1/users/@me/bookmarks` — list with full message hydration
+- [ ] Desktop: bookmark icon in message context menu; "Saved Messages" section in sidebar
+
+### 13-04: Disappearing Messages
+
+- [ ] `disappear_after_seconds INT` column on channels (opt-in per-channel setting, 0 = off) — migration 00015
+- [ ] On message create: if channel has `disappear_after_seconds > 0`, set `expires_at = now() + interval`
+- [ ] Background task extension: purge expired messages (extend existing purge task)
+- [ ] `PATCH /api/v1/channels/{id}` — allow updating `disappear_after_seconds` (MANAGE_CHANNELS)
+- [ ] Gateway: `MESSAGE_DELETE` emitted when message expires (same event, no extra machinery)
+- [ ] Desktop: channel header shows "⏳ Xd/Xh timer" indicator; confirmation prompt when enabling
+
+### 13-05: Draft Messages
+
+- [ ] `message_drafts` DB table (user_id, channel_id, content TEXT, attachments jsonb, updated_at) — unique (user_id, channel_id) — migration 00015
+- [ ] `PUT /api/v1/channels/{id}/draft` — upsert draft (auto-saved client-side debounce)
+- [ ] `GET /api/v1/channels/{id}/draft` — fetch on channel open
+- [ ] `DELETE /api/v1/channels/{id}/draft` — clear on send
+- [ ] Desktop: draft indicator (pencil icon) on channel list items; content pre-filled on channel switch
+
+### 13-06: Note-to-Self Channel
+
+- [ ] On user creation: create a private `note_to_self` DM channel seeded with the user as both sender and recipient (or a sentinel bot ID)
+- [ ] Existing message API handles this transparently — just a DM with `recipient_id = self`
+- [ ] Desktop: permanent "Saved Notes" entry in DM list (pinned at top, distinct icon)
+
+### 13-07: Status with Auto-Expiry
+
+- [ ] `custom_status_expires_at TIMESTAMPTZ` column on users — migration 00015
+- [ ] `PATCH /api/v1/users/@me/settings` — accept `custom_status_expires_at` (optional, nullable)
+- [ ] Background task extension: clear expired custom statuses + emit `PRESENCE_UPDATE` to relevant guilds
+- [ ] Desktop: expiry picker in status editor (1h, 4h, today, tomorrow, custom)
+
+---
+
+## Phase 14: Platform Differentiation (v0.14) 🔲 Planned
+
+> **Goal:** Features that no single competitor does well — making Nexus the uniquely attractive choice.
+
+### 14-01: Message Forwarding
+
+Forward a message to any channel or DM, preserving attribution.
+
+- [ ] `POST /api/v1/messages/{msg_id}/forward` — body: `{ target_channel_ids: [uuid] }` (SEND_MESSAGES in each target)
+- [ ] `forwarded_from_message_id` and `forwarded_from_channel_id` columns on messages — migration 00016
+- [ ] Desktop: "Forward" in message context menu → channel picker modal
+
+### 14-02: Server Events
+
+Scheduled events with RSVP, reminder notifications, and optional voice/stream stage integration.
+
+- [ ] `server_events` DB table (server_id, creator_id, title, description, starts_at, ends_at, location TEXT, channel_id nullable, cover_image, status: scheduled|active|completed|cancelled, interested_user_ids uuid[]) — migration 00016
+- [ ] `POST /api/v1/servers/{id}/events` — create event (MANAGE_EVENTS permission or new `CREATE_EVENTS` bit)
+- [ ] `PATCH /api/v1/servers/{id}/events/{eid}` — update
+- [ ] `DELETE /api/v1/servers/{id}/events/{eid}` — cancel
+- [ ] `PUT /api/v1/servers/{id}/events/{eid}/interested` — RSVP (authenticated user)
+- [ ] `DELETE /api/v1/servers/{id}/events/{eid}/interested` — un-RSVP
+- [ ] `GET /api/v1/servers/{id}/events` — list upcoming + past (`?status=scheduled|active|completed`)
+- [ ] Background task: fire `GUILD_SCHEDULED_EVENT_START` gateway event at `starts_at`; send OS notification to interested members
+- [ ] Gateway: `GUILD_SCHEDULED_EVENT_CREATE`, `_UPDATE`, `_DELETE`, `_USER_ADD`, `_USER_REMOVE`
+- [ ] Desktop: events panel in server sidebar; event card with attendee count, one-click RSVP
+
+### 14-03: Sticker Packs
+
+Custom sticker packs beyond emoji — large-format expressive images.
+
+- [ ] `sticker_packs` DB table (name, description, cover_sticker_id, server_id nullable, is_premium bool) — migration 00016
+- [ ] `stickers` DB table (pack_id, name, description, asset_url, type: png|apng|lottie) — migration 00016
+- [ ] `POST /api/v1/servers/{id}/stickers` — upload sticker (MANAGE_EMOJIS_AND_STICKERS, max 60 per server)
+- [ ] `GET /api/v1/sticker-packs` — list public packs (Nexus default packs)
+- [ ] Sticker field on message create (`sticker_ids: [uuid]`)
+- [ ] Desktop: sticker picker tab in message composer; stickers rendered large in chat
+
+### 14-04: Inline Bot Suggestions (Smart Compose)
+
+Context-aware bot suggestions as users type, without leaving the message box.
+
+- [ ] Bot registration: bots can declare `inline_triggers: [{ prefix: "/", description: "..." }]`
+- [ ] `GET /api/v1/channels/{id}/inline-query?query=…&bot_id=…` — proxy query to bot callback URL; bot responds with suggestion list
+- [ ] Desktop: autocomplete overlay above message box when trigger prefix typed; keyboard navigation
+
+### 14-05: Stream + Zulip-Style Topic Threading
+
+Optional per-channel "stream mode": messages are grouped by topic (like Zulip topics or Slack threads without the noise).
+
+- [ ] `topic TEXT` column on messages (nullable, stream-mode channels only) — migration 00016
+- [ ] `is_stream bool` column on channels — migration 00016
+- [ ] `POST /api/v1/channels/{id}/messages` — accept `topic` field when channel `is_stream=true`
+- [ ] `GET /api/v1/channels/{id}/topics` — list active topics (distinct topic values, last message time, unread count)
+- [ ] Desktop: stream channel shows topic bars (collapsed/expanded) instead of flat timeline
+
+---
+
+## Phase 15: Community Ecosystem (v0.15) 🔲 Planned
+
+> **Goal:** Retention, identity, and creator economy features.
+
+### 15-01: User Badges & Profile Enrichment
+
+- [ ] `user_badges` DB table (user_id, badge_type, awarded_at, awarded_by nullable) — migration 00017
+- [ ] Badge types: `early_adopter`, `active_contributor`, `verified_developer`, `server_booster`, `custom` (server-specific)
+- [ ] `GET /api/v1/users/{id}/badges` — public
+- [ ] `POST /api/v1/admin/users/{id}/badges` — admin-only award
+- [ ] Desktop: badges rendered on user profile cards
+
+### 15-02: Server Supporter Tiers
+
+Community-funded servers with tiered perks (extra emoji slots, higher upload limits, vanity invite URLs).
+
+- [ ] `server_supporter_tiers` DB table (server_id, tier_level: 1|2|3, booster_count, perks jsonb, updated_at) — migration 00017
+- [ ] `server_boosters` DB table (user_id, server_id, tier, started_at, expires_at) — migration 00017
+- [ ] `POST /api/v1/servers/{id}/boost` — start boost (creates `server_booster` record; payment stub)
+- [ ] Perk enforcement: extra emoji slots (tier 1: +50, tier 2: +100, tier 3: +200); upload limit (tier 1: 25MB, tier 2: 50MB, tier 3: 100MB); vanity URL at tier 2+
+- [ ] `PATCH /api/v1/servers/{id}/vanity-url` — set vanity invite code (MANAGE_GUILD, tier 2+)
+- [ ] Desktop: boost button in server header; tier progress bar; boosters list in server settings
+
+### 15-03: Rich Document Channels (Canvas)
+
+A simple block-based document editor embedded in a dedicated channel type — for wikis, onboarding docs, and pinned knowledge.
+
+- [ ] `canvas_blocks` DB table (channel_id, block_id uuid, block_type: heading|paragraph|image|code|divider|table, content jsonb, position int, updated_by, updated_at) — migration 00017
+- [ ] `GET /api/v1/channels/{id}/canvas` — fetch full document as ordered block list
+- [ ] `PUT /api/v1/channels/{id}/canvas/blocks/{block_id}` — upsert block (SEND_MESSAGES or MANAGE_MESSAGES)
+- [ ] `DELETE /api/v1/channels/{id}/canvas/blocks/{block_id}` — remove block
+- [ ] `POST /api/v1/channels/{id}/canvas/blocks/reorder` — update block positions
+- [ ] Gateway: `CANVAS_BLOCK_UPDATE`, `CANVAS_BLOCK_DELETE` events for real-time collaborative editing
+- [ ] Desktop: `CanvasView` — block editor with slash commands (`/heading`, `/code`, `/image`), drag-to-reorder
+
+---
+
 ## Phase 10: Mobile (v1.0) 🔲 Planned
 
 - [ ] React Native iOS + Android
@@ -432,3 +651,113 @@ Phantom is an infant today. This phase will happen when it is ready, not before.
 - [ ] "Phantom mode" toggle per-server (routes traffic through the anonymous network)
 - [ ] Verifiable privacy: users can independently verify that traffic is being handled correctly
 - [ ] Threat model documentation that users can actually read and understand
+
+---
+
+## Appendix: Platform Comparison & Competitive Positioning
+
+> Reference document for feature prioritisation. Updated after full audit of Nexus vs. IRC, Discord, Telegram, Slack, Microsoft Teams, Signal, WhatsApp, Zulip, and Guilded.
+
+### What Nexus Already Has (from IRC)
+
+| IRC feature | Nexus equivalent |
+|---|---|
+| Channel-based communication with topics | Servers + channels with topic field |
+| Persistent nick / identity | Full accounts (email, password, OAuth) |
+| Op / channel permissions | Roles system with 41-bit permission bitfield |
+| Invites + access control | Invite codes with expiry and max-uses |
+| Server linking | Matrix-protocol federation (Phase 8) |
+| Bot framework | Full bot application API + slash commands |
+| DCC file transfer | HTTP file upload to S3/MinIO with CDN delivery |
+
+### What Nexus Already Has (from Discord)
+
+- Servers with channels, categories, roles, and hierarchical permissions
+- Text channels, voice channels (WebRTC SFU), DMs and basic group DMs
+- Rich embeds + link previews (`embed_cache` table, `EmbedCard` renderer)
+- Emoji reactions, Threads, Webhooks, Slash commands + bot interactions
+- Custom server emoji (animated GIF, WebP, PNG — up to 50 slots)
+- Audit log with filter-by-action and actor
+- Bans, kicks, timeouts, word filters, spam detection, message reports
+- Full-text search (MeiliSearch + Tantivy fallback)
+- File attachments with S3/MinIO storage and per-server upload limits
+- Invites with expiry + max uses; vanity URL stubs
+- TOTP 2FA with backup codes; server-level 2FA requirement
+- Presence (online, idle, DND, invisible) + custom status
+- Read state tracking + unread indicators
+- Bots with `Bot <token>` auth scheme + dedicated gateway `IDENTIFY`
+- Client plugins + themes marketplace (sandboxed, CSS-based)
+- Server verification system stubs
+- Federation (S2S Nexus protocol + Matrix bridge)
+- E2EE (full Signal Protocol infrastructure — Double Ratchet, X3DH, device management)
+- Self-hosting (Docker/Podman, single-binary lite mode)
+- GDPR data export + account deletion
+
+### What Nexus Does Better
+
+| Discord / IRC weakness | Nexus solution |
+|---|---|
+| Discord collects all message data | Full E2EE (opt-in per channel, Signal Protocol) |
+| Closed ecosystem; no interop | Matrix federation + open S2S Nexus protocol |
+| Electron client (~200 MB RAM) | Tauri client (~30 MB, native WebView performance) |
+| Discord username extortion ($) | Free usernames, no # discriminators |
+| Vendor lock-in, no data export | Full JSON archive export + account deletion flow |
+| No self-hosting | First-class Docker/Podman stack + lite single binary |
+| Metered bot API | Open bot API, webhooks, plugins — no artificial limits |
+| IRC: no message history | Persistent history with full-text search |
+| IRC: no rich media | Attachments, embeds, emoji, reactions, stickers |
+| Discord: proprietary everything | Every API surface is open and documented |
+| Centralised moderation only | Per-server word filters, reports, and user-controlled privacy |
+| No modern key exchange | Kyber-1024 / X25519 hybrid KEM (Phase 11) |
+
+### Feature Gap Analysis (Priority)
+
+#### High Priority (community most-wanted, straightforward to add)
+
+| Feature | Status | Phase |
+|---|---|---|
+| Forum channels (titled posts + tags) | Schema exists, API missing | Phase 12 |
+| Announcement channels + crosspost | Schema exists, crosspost API missing | Phase 12 |
+| Stage channels (speaker + audience) | Schema exists, stage_instances missing | Phase 12 |
+| Group DM name + icon + member mgmt | Schema partially exists | Phase 12 |
+| Polls (multi-option, anonymous) | Not yet built | Phase 13 |
+| Scheduled messages | Not yet built | Phase 13 |
+| Message bookmarks / saved messages | Not yet built | Phase 13 |
+| Status with auto-expiry | Column missing, trivial add | Phase 13 |
+| Note-to-self / Saved Notes channel | Not yet built | Phase 13 |
+
+#### Medium Priority (differentiation features)
+
+| Feature | Status | Phase |
+|---|---|---|
+| Message forwarding | Not yet built | Phase 14 |
+| Server scheduled events + RSVP | Not yet built | Phase 14 |
+| Sticker packs | Not yet built | Phase 14 |
+| Disappearing messages | Not yet built | Phase 13 |
+| Draft messages (auto-saved) | Not yet built | Phase 13 |
+| Stream / topic-threaded channels | Not yet built | Phase 14 |
+| Inline bot autocomplete | Not yet built | Phase 14 |
+
+#### Lower Priority (engagement / creator economy)
+
+| Feature | Status | Phase |
+|---|---|---|
+| User badges + achievements | Not yet built | Phase 15 |
+| Server supporter tiers (boost) | Not yet built | Phase 15 |
+| Rich document channels (Canvas) | Not yet built | Phase 15 |
+| Mobile clients (iOS + Android) | Not yet built | Phase 10 |
+| Voice video grid (Brady Bunch view) | SFU ready, UI missing | Phase 10 |
+| Screen share on mobile | Not yet built | Phase 10 |
+
+### Community Most-Wanted Top 10
+
+1. **Forum channels** — GitHub, ProductHunt, and Discord-alternative communities consistently call this out
+2. **Polls** — universally requested across Discord, Telegram, and Slack user surveys
+3. **Group DM management** — name, icon, add/remove members
+4. **Message scheduling** — power users and community managers
+5. **Server events + RSVP** — gaming and community servers
+6. **Sticker packs** — casual / younger user engagement
+7. **Disappearing messages** — privacy-focused users
+8. **Message bookmarks** — knowledge workers
+9. **Stage channels** — AMAs, town halls, podcasts
+10. **Rich document channels (Canvas)** — teams and educational communities
