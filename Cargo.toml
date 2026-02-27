@@ -46,6 +46,8 @@ argon2 = "0.5"
 jsonwebtoken = "9.3"
 rand = "0.9"
 uuid = { version = "1.11", features = ["v4", "v7", "serde"] }
+# TOTP (RFC 6238) — 2FA secret generation and code verification
+totp-rs = { version = "5", features = ["gen_secret", "otpauth"] }
 
 # Time
 chrono = { version = "0.4", features = ["serde"] }
@@ -53,6 +55,10 @@ chrono = { version = "0.4", features = ["serde"] }
 # Logging & Tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Metrics
+metrics = "0.24"
+metrics-exporter-prometheus = "0.16"
 
 # Error handling
 thiserror = "2.0"
@@ -111,7 +117,7 @@ nnnoiseless = "0.5"
 systemstat = "0.2"
 
 # HTTP client (desktop / tauri commands)
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart"] }
 
 # Tauri desktop
 tauri = { version = "2", features = ["tray-icon", "rustls-tls"] }

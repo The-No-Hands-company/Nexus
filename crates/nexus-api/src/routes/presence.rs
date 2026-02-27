@@ -92,7 +92,7 @@ async fn update_presence(
                 status = COALESCE($3, status),
                 custom_status_emoji = COALESCE($4, custom_status_emoji),
                 updated_at = NOW()
-            WHERE id = $1
+            WHERE id = $1::uuid
             "#,
         )
         .bind(auth.user_id.to_string())
@@ -112,7 +112,7 @@ async fn update_presence(
                 state, url, large_image, small_image,
                 started_at, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+            VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
             ON CONFLICT (user_id) DO UPDATE SET
                 activity_type = EXCLUDED.activity_type,
                 name = EXCLUDED.name,
@@ -156,7 +156,7 @@ async fn update_presence(
         })?;
 
     let custom_emoji = sqlx::query_as::<_, UserCustomEmojiRow>(
-        "SELECT custom_status_emoji FROM users WHERE id = $1",
+        "SELECT custom_status_emoji FROM users WHERE id = $1::uuid",
     )
     .bind(auth.user_id.to_string())
     .fetch_optional(&state.db.pool)
@@ -210,7 +210,7 @@ async fn get_user_presence(
         })?;
 
     let custom_emoji = sqlx::query_as::<_, UserCustomEmojiRow>(
-        "SELECT custom_status_emoji FROM users WHERE id = $1",
+        "SELECT custom_status_emoji FROM users WHERE id = $1::uuid",
     )
     .bind(user_id.to_string())
     .fetch_optional(&state.db.pool)
@@ -221,7 +221,7 @@ async fn get_user_presence(
         r#"
         SELECT activity_type, name, details, state, url, large_image, small_image
         FROM user_activities
-        WHERE user_id = $1
+        WHERE user_id = $1::uuid
         "#,
     )
     .bind(user_id.to_string())

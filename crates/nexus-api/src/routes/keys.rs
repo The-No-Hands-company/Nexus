@@ -19,6 +19,7 @@ use axum::{
 use nexus_common::{
     crypto::{validate_identity_key, validate_signature, validate_x25519_key},
     error::{NexusError, NexusResult},
+    gateway_event::GatewayEvent,
     models::crypto::{
         Device, E2eeSession, KeyBundle, OtpkCountResponse, RegisterDeviceRequest,
         RotateSignedPreKeyRequest, UpdateSessionRequest, UploadOtpkRequest,
@@ -420,6 +421,10 @@ async fn delete_session(
 // GET /users/:user_id/key-bundle — All bundles for a user's devices
 // ============================================================
 
+/// Remaining OTPKs below which we fire a LOW_PREKEYS gateway event.
+/// Signal clients typically replenish when stock drops to ≤ 5.
+const LOW_PREKEYS_THRESHOLD: i64 = 5;
+
 async fn get_all_key_bundles(
     Extension(_auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
@@ -428,6 +433,32 @@ async fn get_all_key_bundles(
     let bundles = keystore::get_all_key_bundles(&state.db.pool, user_id)
         .await
         .map_err(|e| NexusError::Internal(e))?;
+
+    // After atomically consuming OTPKs, check remaining stock per device and
+    // fire a LOW_PREKEYS gateway event if below threshold.  The owner can then
+    // proactively upload more OTPKs before they are exhausted.  We ignore
+    // errors here — key replenishment notifications are best-effort.
+    for bundle in &bundles {
+        if bundle.one_time_pre_key.is_some() {
+            let remaining = keystore::count_one_time_pre_keys(&state.db.pool, bundle.device_id)
+                .await
+                .unwrap_or(i64::MAX);
+            if remaining < LOW_PREKEYS_THRESHOLD {
+                let _ = state.gateway_tx.send(GatewayEvent {
+                    event_type: "LOW_PREKEYS".into(),
+                    data: serde_json::json!({
+                        "device_id": bundle.device_id,
+                        "remaining": remaining,
+                        "threshold": LOW_PREKEYS_THRESHOLD,
+                    }),
+                    server_id: None,
+                    channel_id: None,
+                    user_id: Some(bundle.user_id),
+                });
+            }
+        }
+    }
+
     Ok(Json(bundles))
 }
 
@@ -446,5 +477,26 @@ async fn get_device_key_bundle(
         .ok_or(NexusError::NotFound {
             resource: "Device".into(),
         })?;
+
+    // If an OTPK was consumed, notify the owner if remaining stock is low.
+    if bundle.one_time_pre_key.is_some() {
+        let remaining = keystore::count_one_time_pre_keys(&state.db.pool, device_id)
+            .await
+            .unwrap_or(i64::MAX);
+        if remaining < LOW_PREKEYS_THRESHOLD {
+            let _ = state.gateway_tx.send(GatewayEvent {
+                event_type: "LOW_PREKEYS".into(),
+                data: serde_json::json!({
+                    "device_id": device_id,
+                    "remaining": remaining,
+                    "threshold": LOW_PREKEYS_THRESHOLD,
+                }),
+                server_id: None,
+                channel_id: None,
+                user_id: Some(bundle.user_id),
+            });
+        }
+    }
+
     Ok(Json(bundle))
 }

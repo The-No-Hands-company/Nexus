@@ -17,6 +17,9 @@ export interface Server {
   name: string;
   icon?: string;
   ownerId: string;
+  require2fa?: boolean;
+  spamWindowSecs?: number;
+  spamMaxMessages?: number;
 }
 
 export interface Channel {
@@ -100,6 +103,17 @@ export interface DmChannel {
     displayName?: string;
     avatar?: string;
   }[];
+}
+
+export interface InAppNotification {
+  id: string;
+  channelId: string;
+  channelName?: string;
+  authorId: string;
+  authorUsername: string;
+  content: string;
+  createdAt: string;
+  read: boolean;
 }
 
 export interface ServerMember {
@@ -193,6 +207,13 @@ interface StoreState {
   appendDmChannel: (dm: DmChannel) => void;
   loadRelationships: () => Promise<void>;
   loadDmChannels: () => Promise<void>;
+
+  // In-app notifications (@mentions)
+  inAppNotifications: InAppNotification[];
+  unreadNotificationCount: number;
+  addInAppNotification: (notif: Omit<InAppNotification, 'read'>) => void;
+  markNotificationsRead: () => void;
+  clearNotifications: () => void;
 
   // Server members — keyed by serverId
   members: Record<string, ServerMember[]>;
@@ -398,6 +419,8 @@ export const useStore = create<StoreState>((set, get) => ({
       relationships: [],
       dmChannels: [],
       members: {},
+      inAppNotifications: [],
+      unreadNotificationCount: 0,
     });
   },
 
@@ -482,6 +505,27 @@ export const useStore = create<StoreState>((set, get) => ({
       console.error("loadDmChannels error", e);
     }
   },
+
+  // ─── In-app notifications ─────────────────────────────────────────────
+  inAppNotifications: [],
+  unreadNotificationCount: 0,
+  addInAppNotification: (notif) =>
+    set((s) => {
+      const full: InAppNotification = { ...notif, read: false };
+      // Cap at 100 most recent notifications
+      const updated = [full, ...s.inAppNotifications].slice(0, 100);
+      return {
+        inAppNotifications: updated,
+        unreadNotificationCount: s.unreadNotificationCount + 1,
+      };
+    }),
+  markNotificationsRead: () =>
+    set((s) => ({
+      inAppNotifications: s.inAppNotifications.map((n) => ({ ...n, read: true })),
+      unreadNotificationCount: 0,
+    })),
+  clearNotifications: () =>
+    set({ inAppNotifications: [], unreadNotificationCount: 0 }),
 
   // ─── Server members ───────────────────────────────────────────────────
   members: {},

@@ -1,7 +1,8 @@
-//! User routes — profile management, user lookup.
+//! User routes — profile management, user lookup, account lifecycle.
 
 use axum::{
     extract::{Extension, Path, State},
+    http::StatusCode,
     middleware,
     routing::get,
     Json, Router,
@@ -12,15 +13,17 @@ use nexus_common::{
     validation::validate_request,
 };
 use nexus_db::repository::users;
+use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{auth, middleware::AuthContext, AppState};
 
 /// User routes (all require authentication).
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/users/@me", get(get_current_user).patch(update_current_user))
+        .route("/users/@me", get(get_current_user).patch(update_current_user).delete(delete_account))
+        .route("/users/@me/data-export", get(data_export))
         .route("/users/{user_id}", get(get_user))
         .route("/users/{user_id}/profile", get(get_user_profile))
         .route_layer(middleware::from_fn(
@@ -68,6 +71,7 @@ async fn update_current_user(
         body.display_name.as_deref(),
         body.bio.as_deref(),
         body.status.as_deref(),
+        body.avatar.as_deref(),
     )
     .await?;
 
@@ -174,3 +178,145 @@ async fn get_user_profile(
         "mutual_friends": mutual_friends,
     })))
 }
+
+// ── Account lifecycle (09.7-04) ───────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct DeleteAccountBody {
+    /// Current account password — required as a security confirmation.
+    password: String,
+}
+
+/// DELETE /api/v1/users/@me
+///
+/// Request account deletion.  Sets a 30-day grace period (`scheduled_deletion_at`).
+/// The account remains accessible during this window.  A background purge job
+/// (not yet scheduled — placeholder) executes the final deletion after 30 days.
+///
+/// This is the canonical GDPR "right to erasure" flow.
+async fn delete_account(
+    Extension(auth_ctx): Extension<AuthContext>,
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<DeleteAccountBody>,
+) -> NexusResult<StatusCode> {
+    let user = users::find_by_id(&state.db.pool, auth_ctx.user_id)
+        .await?
+        .ok_or(NexusError::NotFound { resource: "User".into() })?;
+
+    // Require password confirmation to prevent accidental/hijacked deletions
+    let valid = auth::verify_password(&body.password, &user.password_hash)
+        .map_err(|_| NexusError::InvalidCredentials)?;
+    if !valid {
+        return Err(NexusError::InvalidCredentials);
+    }
+
+    // Schedule deletion 30 days from now
+    sqlx::query(
+        "UPDATE users SET scheduled_deletion_at = NOW() + INTERVAL '30 days', \
+         updated_at = NOW() WHERE id = $1::uuid",
+    )
+    .bind(user.id.to_string())
+    .execute(&state.db.pool)
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
+
+    tracing::info!(user_id = %user.id, "Account deletion scheduled (30-day grace period)");
+    Ok(StatusCode::ACCEPTED)
+}
+
+// ── GDPR data export (09.7-04) ───────────────────────────────────────────────
+
+/// GET /api/v1/users/@me/data-export
+///
+/// Generate a JSON archive of the authenticated user's data (GDPR Art. 20).
+///
+/// Includes:
+///   - Account profile
+///   - Servers the user belongs to
+///   - Last 1 000 messages authored by the user
+///
+/// Note: attachment binaries are NOT included — only metadata + CDN URLs.
+async fn data_export(
+    Extension(auth_ctx): Extension<AuthContext>,
+    State(state): State<Arc<AppState>>,
+) -> NexusResult<Json<serde_json::Value>> {
+    use sqlx::Row;
+
+    let user = users::find_by_id(&state.db.pool, auth_ctx.user_id)
+        .await?
+        .ok_or(NexusError::NotFound { resource: "User".into() })?;
+
+    // Servers the user is a member of
+    let server_rows = sqlx::query(
+        "SELECT s.id::text AS id, s.name, s.icon, m.joined_at::text AS joined_at \
+         FROM servers s \
+         JOIN members m ON m.server_id = s.id AND m.user_id = $1::uuid \
+         ORDER BY m.joined_at ASC",
+    )
+    .bind(user.id.to_string())
+    .fetch_all(&state.db.pool)
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
+
+    let servers: Vec<serde_json::Value> = server_rows
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "id": r.try_get::<String, _>("id").unwrap_or_default(),
+                "name": r.try_get::<String, _>("name").unwrap_or_default(),
+                "icon": r.try_get::<Option<String>, _>("icon").unwrap_or(None),
+                "joined_at": r.try_get::<String, _>("joined_at").unwrap_or_default(),
+            })
+        })
+        .collect();
+
+    // Last 1 000 messages authored by the user
+    let msg_rows = sqlx::query(
+        "SELECT id::text AS id, channel_id::text AS channel_id, content, \
+                created_at::text AS created_at \
+         FROM messages \
+         WHERE author_id = $1::uuid \
+         ORDER BY created_at DESC LIMIT 1000",
+    )
+    .bind(user.id.to_string())
+    .fetch_all(&state.db.pool)
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
+
+    let messages: Vec<serde_json::Value> = msg_rows
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "id": r.try_get::<String, _>("id").unwrap_or_default(),
+                "channel_id": r.try_get::<String, _>("channel_id").unwrap_or_default(),
+                "content": r.try_get::<Option<String>, _>("content").unwrap_or(None),
+                "created_at": r.try_get::<String, _>("created_at").unwrap_or_default(),
+            })
+        })
+        .collect();
+
+    tracing::info!(user_id = %user.id, "Data export generated");
+
+    let user_resp = UserResponse::from(user.clone());
+    Ok(Json(serde_json::json!({
+        "export_version": "1.0",
+        "generated_at": chrono::Utc::now().to_rfc3339(),
+        "user": {
+            "id": user_resp.id,
+            "username": user_resp.username,
+            "display_name": user_resp.display_name,
+            "email": user.email,
+            "bio": user_resp.bio,
+            "avatar": user_resp.avatar,
+            "banner": user_resp.banner,
+            "created_at": user_resp.created_at,
+        },
+        "servers": servers,
+        "messages": {
+            "count": messages.len(),
+            "note": "Last 1000 messages. Contact support for a full archive.",
+            "data": messages,
+        },
+    })))
+}
+

@@ -35,7 +35,7 @@ interface WireMessage {
 }
 
 export function useGateway() {
-  const { session, appendMessage, setVoiceParticipants, setPttActive, setTyping, updateMessageReaction } =
+  const { session, appendMessage, setVoiceParticipants, setPttActive, setTyping, updateMessageReaction, addInAppNotification } =
     useStore();
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -164,18 +164,34 @@ export function useGateway() {
           };
           appendMessage(msg.channelId, msg);
 
-          // OS notification for @mentions when the window is not focused
+          // In-app + OS notification for @mentions
           const currentUserId = useStore.getState().session?.userId;
           const currentUsername = useStore.getState().session?.username ?? "";
           const isMention =
             currentUserId != null &&
             (raw.author_id !== currentUserId) &&
             (raw.content.includes(`@${currentUsername}`) || raw.content.includes(`@everyone`));
-          if (isMention && document.hidden) {
-            sendOsNotification(
-              `${raw.author_username ?? "Someone"} mentioned you`,
-              raw.content.length > 120 ? raw.content.slice(0, 120) + "…" : raw.content
-            );
+          if (isMention) {
+            // Always push to the in-app notification tray
+            const channelName = useStore.getState().channels.find(
+              (c) => c.id === raw.channel_id
+            )?.name;
+            addInAppNotification({
+              id: raw.id,
+              channelId: raw.channel_id,
+              channelName,
+              authorId: raw.author_id,
+              authorUsername: raw.author_username ?? "Unknown",
+              content: raw.content,
+              createdAt: raw.created_at,
+            });
+            // Also fire OS notification when window is hidden
+            if (document.hidden) {
+              sendOsNotification(
+                `${raw.author_username ?? "Someone"} mentioned you`,
+                raw.content.length > 120 ? raw.content.slice(0, 120) + "…" : raw.content
+              );
+            }
           }
           break;
         }
@@ -241,5 +257,5 @@ export function useGateway() {
       if (heartbeatTimer.current) clearInterval(heartbeatTimer.current);
       wsRef.current?.close();
     };
-  }, [session, appendMessage, setVoiceParticipants, setPttActive, setTyping, updateMessageReaction]);
+  }, [session, appendMessage, setVoiceParticipants, setPttActive, setTyping, updateMessageReaction, addInAppNotification]);
 }

@@ -52,6 +52,8 @@ pub fn init() -> Result<&'static AppConfig, config::ConfigError> {
         .set_default("limits.max_attachment_count", 10)?
         .set_default("scylla.nodes", "127.0.0.1:9042")?
         .set_default("scylla.keyspace", "nexus")?
+        // Self-hosting feature flags
+        .set_default("features.require_email_verification", true)?
         // Optional config file
         .add_source(config::File::with_name("config").required(false))
         // Environment variables (NEXUS_SERVER__HOST, NEXUS_DATABASE__URL, etc.)
@@ -76,6 +78,7 @@ pub struct AppConfig {
     pub storage: StorageConfig,
     pub search: SearchConfig,
     pub limits: LimitsConfig,
+    pub features: FeaturesConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -153,4 +156,17 @@ pub struct LimitsConfig {
     pub max_message_length: u32,
     pub max_file_size_bytes: u64,
     pub max_attachment_count: u32,
+}
+
+/// Self-hosting and deployment feature flags.
+///
+/// These allow operators to tune behaviour for their deployment.
+/// Set via environment variables: `NEXUS__FEATURES__REQUIRE_EMAIL_VERIFICATION=false`
+/// or `features.require_email_verification = false` in `config.toml`.
+#[derive(Debug, Deserialize, Clone)]
+pub struct FeaturesConfig {
+    /// When `true` (default), users must verify their email before accessing
+    /// any protected API route.  Self-hosters who are not running an SMTP
+    /// service can set this to `false` to allow unverified access.
+    pub require_email_verification: bool,
 }

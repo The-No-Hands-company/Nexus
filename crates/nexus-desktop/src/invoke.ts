@@ -103,6 +103,9 @@ function mapServer(s: Raw) {
     icon: s.icon ?? null,
     memberCount: s.member_count ?? null,
     ownerId: s.owner_id,
+    require2fa: (s.require_2fa as boolean) ?? false,
+    spamWindowSecs: (s.spam_window_secs as number) ?? 30,
+    spamMaxMessages: (s.spam_max_messages as number) ?? 3,
   };
 }
 
@@ -203,6 +206,9 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
         description: args.description ?? undefined,
         is_public: args.isPublic ?? undefined,
         region: args.region ?? undefined,
+        require_2fa: args.require2fa ?? undefined,
+        spam_window_secs: args.spamWindowSecs ?? undefined,
+        spam_max_messages: args.spamMaxMessages ?? undefined,
       });
       return mapServer(raw) as T;
     }
@@ -478,6 +484,39 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
 
     case "get_user_profile": {
       return apiFetch<T>("GET", `/api/v1/users/${args.userId}/profile`);
+    }
+
+    // ── Moderation ────────────────────────────────────────────────────────
+    case "get_audit_log": {
+      const params = new URLSearchParams();
+      if (args.action) params.set("action", String(args.action));
+      if (args.actorId) params.set("actor", String(args.actorId));
+      if (args.limit) params.set("limit", String(args.limit));
+      const qs = params.toString();
+      return apiFetch<T>(
+        "GET",
+        `/api/v1/servers/${args.serverId}/audit-log${qs ? "?" + qs : ""}`
+      );
+    }
+
+    // ── Session management ────────────────────────────────────────────────
+    case "list_sessions": {
+      return apiFetch<T>("GET", `/api/v1/auth/sessions`);
+    }
+
+    case "revoke_session": {
+      return apiFetch<T>("DELETE", `/api/v1/auth/sessions/${args.sessionId}`);
+    }
+
+    case "revoke_all_sessions": {
+      return apiFetch<T>("DELETE", `/api/v1/auth/sessions`);
+    }
+
+    // ── Server ownership transfer ─────────────────────────────────────────
+    case "transfer_server_ownership": {
+      return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/transfer-ownership`, {
+        new_owner_id: args.newOwnerId,
+      });
     }
 
     // ── Desktop-only commands (no-ops in browser) ─────────────────────────

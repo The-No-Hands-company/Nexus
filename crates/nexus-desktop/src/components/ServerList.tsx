@@ -30,13 +30,17 @@ export default function ServerList() {
 
   return (
     <>
-      <div className="w-14 bg-bg-900 border-r border-bg-600/50 flex flex-col items-center py-2 overflow-y-auto shrink-0 no-select">
+      <nav
+        aria-label="Servers"
+        className="w-14 bg-bg-900 border-r border-bg-600/50 flex flex-col items-center py-2 overflow-y-auto shrink-0 no-select"
+      >
 
         {/* Nexus home */}
         <SpaceButton
           active={isHomeMode}
           onClick={handleHome}
           title="Home / Friends"
+          aria-current={isHomeMode ? "true" : undefined}
         >
           <span className="text-xs font-bold tracking-tight">NX</span>
         </SpaceButton>
@@ -56,6 +60,8 @@ export default function ServerList() {
             <button
               onClick={() => handleSelectServer(srv.id)}
               title={srv.name}
+              aria-label={srv.name}
+              aria-current={activeServerId === srv.id ? "true" : undefined}
               className={clsx(
                 "w-9 h-9 rounded-lg flex items-center justify-center transition-colors duration-150 overflow-hidden",
                 activeServerId === srv.id
@@ -87,6 +93,7 @@ export default function ServerList() {
           active={false}
           onClick={() => setShowCreate(true)}
           title="Create Server"
+          aria-label="Create Server"
           muted
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -99,6 +106,7 @@ export default function ServerList() {
           active={false}
           onClick={() => setShowJoin(true)}
           title="Join a Server"
+          aria-label="Join a Server"
           muted
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
@@ -114,6 +122,7 @@ export default function ServerList() {
           onClick={() => navigate("/settings")}
           className="w-8 h-8 rounded flex items-center justify-center text-muted hover:text-fg hover:bg-bg-700 transition-colors mb-1"
           title="Settings"
+          aria-label="Settings"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
             <path d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/>
@@ -125,6 +134,7 @@ export default function ServerList() {
           <div
             className="w-8 h-8 rounded-full bg-accent-500 flex items-center justify-center text-xs font-bold text-white cursor-default overflow-hidden"
             title={session?.username}
+            aria-label={session?.username ? `Logged in as ${session.username}` : undefined}
           >
             {session?.avatar ? (
               <img src={session.avatar} alt="" className="w-full h-full object-cover" />
@@ -136,13 +146,14 @@ export default function ServerList() {
             onClick={logout}
             className="w-8 h-6 rounded flex items-center justify-center text-muted hover:text-red-400 transition-colors"
             title="Logout"
+            aria-label="Logout"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
               <path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5-5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z" />
             </svg>
           </button>
         </div>
-      </div>
+      </nav>
 
       {showCreate && (
         <CreateServerModal onClose={() => setShowCreate(false)} />
@@ -168,12 +179,16 @@ function SpaceButton({
   title,
   muted = false,
   children,
+  "aria-label": ariaLabel,
+  "aria-current": ariaCurrent,
 }: {
   active: boolean;
   onClick: () => void;
   title: string;
   muted?: boolean;
   children: ReactNode;
+  "aria-label"?: string;
+  "aria-current"?: "true" | "page" | undefined;
 }) {
   return (
     <div className="group relative w-full flex items-center justify-center my-0.5">
@@ -187,6 +202,8 @@ function SpaceButton({
       <button
         onClick={onClick}
         title={title}
+        aria-label={ariaLabel ?? title}
+        aria-current={ariaCurrent}
         className={clsx(
           "w-9 h-9 rounded-lg flex items-center justify-center transition-colors duration-150 overflow-hidden",
           active

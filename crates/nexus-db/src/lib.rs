@@ -94,6 +94,21 @@ impl Database {
         Ok(Self { pool, redis, backend })
     }
 
+    /// Probe Redis connectivity.
+    ///
+    /// Returns `None` when Redis is not configured (lite mode / no `REDIS_URL`).
+    /// Returns `Some(true)` on a successful PING, `Some(false)` on any error.
+    pub async fn health_redis(&self) -> Option<bool> {
+        let conn = self.redis.as_ref()?;
+        let mut c = conn.clone();
+        let ok: bool = redis::cmd("PING")
+            .query_async::<String>(&mut c)
+            .await
+            .map(|s| s == "PONG")
+            .unwrap_or(false);
+        Some(ok)
+    }
+
     /// Run migrations appropriate for the active backend.
     pub async fn migrate(&self) -> Result<()> {
         tracing::info!("Running database migrations…");

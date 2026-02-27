@@ -6,6 +6,7 @@ import { invoke } from "../invoke";
 import MessageInput from "./MessageInput";
 import MemberList from "./MemberList";
 import ThreadPanel from "./ThreadPanel";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 import { formatDistanceToNow, format, isToday, isYesterday } from "date-fns";
 import clsx from "clsx";
 
@@ -21,6 +22,7 @@ export default function ChatView() {
   const channel = channels.find((c) => c.id === channelId);
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const startThreadTrapRef = useFocusTrap<HTMLDivElement>(!!startingThread);
 
   useEffect(() => {
     if (channelId) {
@@ -66,6 +68,8 @@ export default function ChatView() {
             <button
               onClick={() => setShowMembers((v) => !v)}
               title={showMembers ? "Hide members" : "Show members"}
+              aria-label={showMembers ? "Hide member list" : "Show member list"}
+              aria-pressed={showMembers}
               className={clsx(
                 "p-1.5 rounded transition-colors",
                 showMembers ? "text-fg bg-bg-600/60" : "text-muted hover:text-fg hover:bg-bg-700/60"
@@ -82,7 +86,11 @@ export default function ChatView() {
         <div
           ref={containerRef}
           onScroll={handleScroll}
-          className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-0.5"
+          role="log"
+          aria-live="polite"
+          aria-label={channel ? `Messages in ${channel.name}` : "Messages"}
+          aria-relevant="additions"
+          className="nexus-msg-list flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-0.5"
         >
           {msgs.length === 0 && (
             <p className="text-muted text-sm text-center mt-16">
@@ -141,8 +149,14 @@ export default function ChatView() {
       {/* Start-thread overlay */}
       {startingThread && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="w-96 rounded-xl bg-bg-700 p-6 shadow-2xl">
-            <h2 className="mb-1 text-base font-semibold text-fg">Start a thread</h2>
+          <div
+            ref={startThreadTrapRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="start-thread-title"
+            className="w-96 rounded-xl bg-bg-700 p-6 shadow-2xl"
+          >
+            <h2 id="start-thread-title" className="mb-1 text-base font-semibold text-fg">Start a thread</h2>
             <p className="mb-4 truncate text-xs text-muted">{startingThread.msgContent}</p>
             <label className="mb-1 block text-xs font-medium uppercase tracking-widest text-muted">
               Thread title
@@ -151,6 +165,7 @@ export default function ChatView() {
               autoFocus
               value={newThreadTitle}
               onChange={(e) => setNewThreadTitle(e.target.value)}
+              aria-label="Thread title"
               onKeyDown={async (e) => {
                 if (e.key === "Enter" && newThreadTitle.trim() && channelId) {
                   e.preventDefault();
@@ -296,7 +311,7 @@ function MessageRow({
   return (
     <div
       className={clsx(
-        "flex gap-3 px-1 py-0.5 rounded group hover:bg-bg-700/50 transition-colors",
+        "nexus-msg flex gap-3 px-1 py-0.5 rounded group hover:bg-bg-700/50 transition-colors",
         grouped ? "mt-0" : "mt-3"
       )}
     >

@@ -13,7 +13,7 @@ use nexus_common::{
     validation::validate_request,
 };
 use nexus_common::permissions::Permissions;
-use nexus_db::repository::{channels, members, roles, servers};
+use nexus_db::repository::{audit_log, channels, members, roles, servers};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -146,6 +146,19 @@ async fn create_channel(
         "Channel created"
     );
 
+    let _ = audit_log::write_entry(
+        &state.db.pool,
+        snowflake::generate_id(),
+        server_id,
+        Some(auth.user_id),
+        "CHANNEL_CREATE",
+        Some("channel"),
+        Some(channel_id),
+        &serde_json::json!({ "name": body.name, "type": channel_type_str }),
+        None,
+    )
+    .await;
+
     Ok(Json(channel))
 }
 
@@ -208,6 +221,19 @@ async fn update_channel(
     )
     .await?;
 
+    let _ = audit_log::write_entry(
+        &state.db.pool,
+        snowflake::generate_id(),
+        server_id,
+        Some(auth.user_id),
+        "CHANNEL_UPDATE",
+        Some("channel"),
+        Some(channel_id),
+        &serde_json::json!({ "name": body.name, "topic": body.topic }),
+        None,
+    )
+    .await;
+
     Ok(Json(updated))
 }
 
@@ -243,6 +269,19 @@ async fn delete_channel(
     .await?;
 
     channels::delete_channel(&state.db.pool, channel_id).await?;
+
+    let _ = audit_log::write_entry(
+        &state.db.pool,
+        snowflake::generate_id(),
+        server_id,
+        Some(auth.user_id),
+        "CHANNEL_DELETE",
+        Some("channel"),
+        Some(channel_id),
+        &serde_json::json!({ "name": channel.name }),
+        None,
+    )
+    .await;
 
     tracing::info!(channel_id = %channel_id, "Channel deleted");
 

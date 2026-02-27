@@ -26,8 +26,13 @@ use crate::{middleware::AuthContext, AppState};
 
 /// Bot application routes.
 pub fn router() -> Router<Arc<AppState>> {
-    Router::new()
-        // Developer portal — requires user auth
+    // Public routes — no auth required
+    let public = Router::new()
+        .route("/bots/{bot_id}", get(get_public_bot_info));
+
+    // Authenticated routes — require user or bot auth
+    let authenticated = Router::new()
+        // Developer portal
         .route("/applications", post(create_application).get(list_applications))
         .route(
             "/applications/{app_id}",
@@ -45,7 +50,9 @@ pub fn router() -> Router<Arc<AppState>> {
             "/servers/{server_id}/integrations/{bot_id}",
             delete(uninstall_bot),
         )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware));
+
+    Router::new().merge(public).merge(authenticated)
 }
 
 // ============================================================================
@@ -261,4 +268,42 @@ async fn uninstall_bot(
 ) -> NexusResult<axum::http::StatusCode> {
     bots::uninstall_bot_from_server(&state.db.pool, bot_id, server_id).await?;
     Ok(axum::http::StatusCode::NO_CONTENT)
+}
+
+// ============================================================================
+// Public Endpoints (no auth required)
+// ============================================================================
+
+/// Public view of a bot — only non-sensitive fields returned, only for public bots.
+#[derive(serde::Serialize)]
+pub struct PublicBotInfo {
+    pub id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub avatar: Option<String>,
+    pub verified: bool,
+}
+
+/// GET /api/v1/bots/{bot_id} — Fetch public info for a bot application.
+/// Returns the bot name / description / avatar so server admins can verify
+/// the bot they are about to install.  Only works for bots with `is_public = true`.
+async fn get_public_bot_info(
+    State(state): State<Arc<AppState>>,
+    Path(bot_id): Path<Uuid>,
+) -> NexusResult<Json<PublicBotInfo>> {
+    let bot = bots::get_bot(&state.db.pool, bot_id)
+        .await?
+        .ok_or(NexusError::NotFound { resource: "bot".to_string() })?;
+
+    if !bot.is_public {
+        return Err(NexusError::NotFound { resource: "bot".to_string() });
+    }
+
+    Ok(Json(PublicBotInfo {
+        id: bot.id,
+        name: bot.name,
+        description: bot.description,
+        avatar: bot.avatar,
+        verified: bot.verified,
+    }))
 }

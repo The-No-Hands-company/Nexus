@@ -29,3 +29,4 @@ sqlx = { workspace = true }
 uuid = { workspace = true }
 rand = { workspace = true }
 hex = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }

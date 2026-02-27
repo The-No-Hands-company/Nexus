@@ -16,6 +16,7 @@
 //! - No Docker, no MinIO, no MeiliSearch required.
 
 use clap::{Parser, Subcommand};
+use metrics_exporter_prometheus::PrometheusBuilder;
 use nexus_api::{build_router, AppState};
 use nexus_common::gateway_event::GatewayEvent;
 use nexus_db::{
@@ -121,30 +122,58 @@ async fn run_server(
     let config = nexus_common::config::init()?;
 
     // ── Tracing ───────────────────────────────────────────────────────────────
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "nexus=info,tower_http=info".into()),
-        )
-        .with_target(!lite)          // less noisy in lite mode
-        .with_thread_ids(false)
-        .init();
+    // Format selection:
+    //   NEXUS_LOG_FORMAT=json  → structured JSON (default in non-lite/production)
+    //   NEXUS_LOG_FORMAT=pretty → human-readable (default in lite / dev mode)
+    let log_format = std::env::var("NEXUS_LOG_FORMAT")
+        .unwrap_or_else(|_| if lite { "pretty".into() } else { "json".into() });
+
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "nexus=info,tower_http=info,axum=info".into());
+
+    if log_format == "json" {
+        tracing_subscriber::fmt()
+            .json()
+            .with_env_filter(env_filter)
+            // Standard JSON fields: timestamp, level, target, fields, span
+            .with_current_span(true)
+            .with_span_list(false)
+            .with_file(false)
+            .with_line_number(false)
+            .init();
+    } else {
+        tracing_subscriber::fmt()
+            .with_env_filter(env_filter)
+            .with_target(!lite) // less noisy in lite mode
+            .with_thread_ids(false)
+            .init();
+    }
+
+    // ── Prometheus metrics recorder ───────────────────────────────────────────
+    // Install the global metrics recorder; the handle is stored in AppState so
+    // the /metrics endpoint can call handle.render() to produce scrape output.
+    let prometheus_handle = PrometheusBuilder::new()
+        .install_recorder()
+        .map_err(|e| anyhow::anyhow!("failed to install Prometheus recorder: {e}"))?;
 
     if lite {
-        tracing::info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        tracing::info!("  Nexus v{}  —  Lite Mode", env!("CARGO_PKG_VERSION"));
-        tracing::info!("  No Docker required. Data stored locally.");
-        tracing::info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        tracing::info!(
+            version = env!("CARGO_PKG_VERSION"),
+            mode = "lite",
+            "nexus starting — no Docker required, data stored locally"
+        );
     } else {
-        tracing::info!("🚀 Starting Nexus v{}", env!("CARGO_PKG_VERSION"));
-        tracing::info!("   Privacy-first. Community-owned. No ID required.");
-        tracing::info!("   ─────────────────────────────────────────────");
+        tracing::info!(
+            version = env!("CARGO_PKG_VERSION"),
+            mode = "full",
+            "nexus starting — privacy-first, community-owned"
+        );
     }
 
     // ── Database ──────────────────────────────────────────────────────────────
     let db = Database::connect(config).await?;
     db.migrate().await?;
-    tracing::info!("✅ Database ready");
+    tracing::info!(subsystem = "database", "database ready");
 
     // ── Event bus ─────────────────────────────────────────────────────────────
     let (gateway_tx, _) = broadcast::channel::<GatewayEvent>(10_000);
@@ -160,7 +189,7 @@ async fn run_server(
 
     let storage = if lite || config.storage.endpoint.is_empty() {
         let data_dir = &config.storage.data_dir;
-        tracing::info!("📁 Local file storage at {data_dir}");
+        tracing::info!(subsystem = "storage", backend = "local", path = %data_dir, "local file storage ready");
         StorageClient::new_local(data_dir, format!("{public_base}/files"))?
     } else {
         let s = StorageClient::new(&DbStorageConfig {
@@ -172,7 +201,7 @@ async fn run_server(
             public_url: None,
         })?;
         s.ensure_bucket().await?;
-        tracing::info!("📦 Object storage ready (bucket: {})", config.storage.bucket);
+        tracing::info!(subsystem = "storage", backend = "s3", bucket = %config.storage.bucket, "object storage ready");
         s
     };
 
@@ -180,11 +209,11 @@ async fn run_server(
     let search = if !lite && !config.search.url.is_empty() {
         let s = SearchClient::new(&config.search.url, &config.search.api_key);
         s.bootstrap_indexes().await?;
-        tracing::info!("🔍 MeiliSearch ready at {}", config.search.url);
+        tracing::info!(subsystem = "search", backend = "meilisearch", url = %config.search.url, "search ready");
         s
     } else if lite {
         let data_dir = &config.storage.data_dir;
-        tracing::info!("🔍 Tantivy embedded search (lite mode)");
+        tracing::info!(subsystem = "search", backend = "tantivy", mode = "embedded", "search ready");
         SearchClient::new_tantivy(data_dir)?
     } else {
         SearchClient::disabled()
@@ -192,7 +221,7 @@ async fn run_server(
 
     // ── Federation ────────────────────────────────────────────────────────────
     let federation_key = KeyManager::new(db.pool.clone()).load_or_generate().await?;
-    tracing::info!("🔑 Federation signing key ready: {}", federation_key.key_id);
+    tracing::info!(subsystem = "federation", key_id = %federation_key.key_id, "federation signing key ready");
     let federation_client = Arc::new(FederationClient::new(
         &config.server.name,
         federation_key.clone(),
@@ -209,6 +238,7 @@ async fn run_server(
         federation_key,
         federation_client,
         started_at: std::time::Instant::now(),
+        prometheus: prometheus_handle,
     };
     let api_router = build_router(api_state);
     let host: std::net::IpAddr = "0.0.0.0".parse()?;
@@ -224,38 +254,142 @@ async fn run_server(
     let voice_router = voice_server.build_router();
 
     if lite {
-        tracing::info!("");
-        tracing::info!("  ✅  Nexus is running!");
-        tracing::info!("  🌐  API:     http://127.0.0.1:{port}");
-        tracing::info!("  🔌  Gateway: ws://127.0.0.1:{gateway_port}");
-        tracing::info!("  🎙️   Voice:   ws://127.0.0.1:{voice_port}");
-        tracing::info!("");
-        tracing::info!("  Open your desktop client and connect to:");
-        tracing::info!("  http://127.0.0.1:{port}");
-        tracing::info!("");
+        tracing::info!(
+            api = format!("http://127.0.0.1:{port}"),
+            gateway = format!("ws://127.0.0.1:{gateway_port}"),
+            voice = format!("ws://127.0.0.1:{voice_port}"),
+            mode = "lite",
+            "nexus ready"
+        );
     } else {
-        tracing::info!("📡 REST API      → http://{api_addr}");
-        tracing::info!("🔌 Gateway       → ws://{gateway_addr}");
-        tracing::info!("🎙️  Voice server  → ws://{voice_addr}");
+        tracing::info!(
+            api = %api_addr,
+            gateway = %gateway_addr,
+            voice = %voice_addr,
+            mode = "full",
+            "nexus ready"
+        );
     }
+
+    // ── Graceful shutdown ─────────────────────────────────────────────────────
+    // A broadcast channel fans out the shutdown signal to all three servers.
+    // When SIGTERM or SIGINT is received we stop accepting new connections and
+    // wait for Axum to drain in-flight requests before exiting.
+    let (shutdown_tx, _) = tokio::sync::broadcast::channel::<()>(1);
+    let shutdown_tx = Arc::new(shutdown_tx);
+
+    {
+        // OS signal handler — runs in a background task.
+        let tx = shutdown_tx.clone();
+        tokio::spawn(async move {
+            let ctrl_c = tokio::signal::ctrl_c();
+
+            #[cfg(unix)]
+            let sigterm = async {
+                tokio::signal::unix::signal(
+                    tokio::signal::unix::SignalKind::terminate(),
+                )
+                .expect("failed to install SIGTERM handler")
+                .recv()
+                .await;
+            };
+            #[cfg(not(unix))]
+            let sigterm = std::future::pending::<()>();
+
+            tokio::select! {
+                _ = ctrl_c => {
+                    tracing::info!(signal = "SIGINT", "shutdown signal received — draining connections");
+                }
+                _ = sigterm => {
+                    tracing::info!(signal = "SIGTERM", "shutdown signal received — draining connections");
+                }
+            }
+
+            // Broadcast to all servers; ignore error if all receivers already dropped.
+            let _ = tx.send(());
+        });
+    }
+
+    // ── Moderation background sweep ───────────────────────────────────────────
+    // Periodically lift expired bans and timeouts so users are not kept in a
+    // timed-out state past the expiry they were given.  Runs every 5 minutes;
+    // shuts down cleanly on the same signal as the HTTP servers.
+    {
+        let pool = db.pool.clone();
+        let mut sweep_rx = shutdown_tx.subscribe();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(
+                tokio::time::Duration::from_secs(5 * 60),
+            );
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        match nexus_db::repository::moderation::purge_expired_timeouts(&pool).await {
+                            Ok(n) if n > 0 => tracing::info!(
+                                count = n, subsystem = "moderation", "lifted expired timeouts"
+                            ),
+                            Err(e) => tracing::warn!(
+                                error = %e, subsystem = "moderation", "failed to purge expired timeouts"
+                            ),
+                            _ => {}
+                        }
+                        match nexus_db::repository::moderation::purge_expired_bans(&pool).await {
+                            Ok(n) if n > 0 => tracing::info!(
+                                count = n, subsystem = "moderation", "purged expired bans"
+                            ),
+                            Err(e) => tracing::warn!(
+                                error = %e, subsystem = "moderation", "failed to purge expired bans"
+                            ),
+                            _ => {}
+                        }
+                    }
+                    _ = sweep_rx.recv() => {
+                        tracing::debug!(subsystem = "moderation", "sweep task shutting down");
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    // Pre-subscribe each server before spawning so they receive the signal even
+    // if it fires before the async block starts.
+    let api_shutdown_rx     = shutdown_tx.subscribe();
+    let gateway_shutdown_rx = shutdown_tx.subscribe();
+    let voice_shutdown_rx   = shutdown_tx.subscribe();
 
     tokio::try_join!(
         async {
             let listener = tokio::net::TcpListener::bind(api_addr).await?;
-            axum::serve(listener, api_router).await?;
+            let mut rx = api_shutdown_rx;
+            axum::serve(listener, api_router)
+                .with_graceful_shutdown(async move { let _ = rx.recv().await; })
+                .await?;
+            tracing::info!(server = "api", "server drained and stopped");
             Ok::<_, anyhow::Error>(())
         },
         async {
             let listener = tokio::net::TcpListener::bind(gateway_addr).await?;
-            axum::serve(listener, gateway_router).await?;
+            let mut rx = gateway_shutdown_rx;
+            axum::serve(listener, gateway_router)
+                .with_graceful_shutdown(async move { let _ = rx.recv().await; })
+                .await?;
+            tracing::info!(server = "gateway", "server drained and stopped");
             Ok::<_, anyhow::Error>(())
         },
         async {
             let listener = tokio::net::TcpListener::bind(voice_addr).await?;
-            axum::serve(listener, voice_router).await?;
+            let mut rx = voice_shutdown_rx;
+            axum::serve(listener, voice_router)
+                .with_graceful_shutdown(async move { let _ = rx.recv().await; })
+                .await?;
+            tracing::info!(server = "voice", "server drained and stopped");
             Ok::<_, anyhow::Error>(())
         },
     )?;
+
+    tracing::info!("nexus shut down cleanly");
 
     Ok(())
 }

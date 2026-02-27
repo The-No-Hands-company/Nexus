@@ -12,10 +12,11 @@ export default function MessageInput({ channelId, isE2ee }: Props) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
-  const { pttActive, appendMessage } = useStore();
+  const { pttActive, appendMessage, channels } = useStore();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Throttle typing notifications to once every 3 s
   const lastTypingSent = useRef<number>(0);
+  const channelName = channels.find((c) => c.id === channelId)?.name;
 
   const send = async () => {
     const content = text.trim();
@@ -110,6 +111,14 @@ export default function MessageInput({ channelId, isE2ee }: Props) {
           onKeyDown={handleKeyDown}
           onInput={handleInput}
           placeholder={isE2ee ? "Message (encrypted)…" : "Message…"}
+          aria-label={
+            channelName
+              ? `Message ${isE2ee ? "(encrypted) " : ""}in ${channelName}`
+              : isE2ee
+              ? "Send an encrypted message"
+              : "Send a message"
+          }
+          aria-multiline="true"
           className="flex-1 bg-transparent resize-none outline-none text-sm text-white placeholder-muted max-h-48 leading-relaxed"
           style={{ minHeight: "24px" }}
         />
@@ -118,6 +127,7 @@ export default function MessageInput({ channelId, isE2ee }: Props) {
           disabled={!text.trim() || sending}
           className="text-accent-400 hover:text-accent-300 disabled:text-muted transition-colors mb-0.5 shrink-0"
           title="Send (Enter)"
+          aria-label="Send message"
         >
           <SendIcon />
         </button>

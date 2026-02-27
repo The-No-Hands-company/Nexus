@@ -2,18 +2,22 @@
 
 use axum::{
     extract::{Extension, Path, State},
+    http::StatusCode,
     middleware,
-    routing::{get, post},
+    routing::{get, patch, post},
     Json, Router,
 };
 use nexus_common::{
     error::{NexusError, NexusResult},
-    models::server::{CreateServerRequest, Invite, ServerResponse, UpdateServerRequest},
+    models::{
+        role::{CreateRoleRequest, Role, UpdateRoleRequest},
+        server::{CreateServerRequest, Invite, ServerResponse, UpdateServerRequest},
+    },
     permissions::Permissions,
     snowflake,
     validation::validate_request,
 };
-use nexus_db::repository::{channels, members, roles, servers};
+use nexus_db::repository::{audit_log, channels, members, roles, servers, users};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -30,6 +34,11 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/servers/{server_id}/invites", get(list_invites_route).post(create_invite_route))
         .route("/invites/{code}", get(get_invite_route))
         .route("/invites/{code}/join", post(join_via_invite_route))
+        .route("/servers/{server_id}/roles", get(list_roles_route).post(create_role_route))
+        .route("/servers/{server_id}/roles/{role_id}",
+            patch(update_role_route).delete(delete_role_route),
+        )
+        .route("/servers/{server_id}/transfer-ownership", post(transfer_ownership_route))
         .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
 }
 
@@ -177,6 +186,9 @@ async fn update_server(
         body.name.as_deref(),
         body.description.as_deref(),
         body.is_public,
+        body.require_2fa,
+        body.spam_window_secs,
+        body.spam_max_messages,
     )
     .await?;
 
@@ -270,6 +282,18 @@ async fn join_server(
         return Err(NexusError::Forbidden);
     }
 
+    // If the server requires 2FA, the joining user must have TOTP enabled.
+    if server.require_2fa {
+        let user = users::find_by_id(&state.db.pool, auth.user_id)
+            .await?
+            .ok_or(NexusError::Unauthorized)?;
+        if !user.totp_enabled {
+            return Err(NexusError::Validation {
+                message: "This server requires two-factor authentication (TOTP) to join.".into(),
+            });
+        }
+    }
+
     // Check if already a member
     if members::is_member(&state.db.pool, auth.user_id, server_id).await? {
         return Err(NexusError::AlreadyExists {
@@ -355,6 +379,19 @@ async fn create_invite_route(
     )
     .await?;
 
+    let _ = audit_log::write_entry(
+        &state.db.pool,
+        snowflake::generate_id(),
+        server_id,
+        Some(auth.user_id),
+        "INVITE_CREATE",
+        Some("invite"),
+        None,
+        &serde_json::json!({ "code": invite.code }),
+        None,
+    )
+    .await;
+
     Ok(Json(serde_json::json!({ "code": invite.code })))
 }
 
@@ -423,6 +460,21 @@ async fn join_via_invite_route(
         })));
     }
 
+    // If the server requires 2FA, the joining user must have TOTP enabled.
+    let server = servers::find_by_id(&state.db.pool, server_id)
+        .await?
+        .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+    if server.require_2fa {
+        let user = users::find_by_id(&state.db.pool, auth.user_id)
+            .await?
+            .ok_or(NexusError::Unauthorized)?;
+        if !user.totp_enabled {
+            return Err(NexusError::Validation {
+                message: "This server requires two-factor authentication (TOTP) to join.".into(),
+            });
+        }
+    }
+
     members::add_member(&state.db.pool, auth.user_id, server_id).await?;
     servers::use_invite(&state.db.pool, &code).await?;
     servers::increment_member_count(&state.db.pool, server_id).await?;
@@ -434,4 +486,261 @@ async fn join_via_invite_route(
     Ok(Json(serde_json::json!({
         "server": { "id": server.id, "name": server.name }
     })))
+}
+
+// ─── Role management ────────────────────────────────────────────────────────
+
+/// GET /api/v1/servers/:server_id/roles — List all roles for a server.
+async fn list_roles_route(
+    Extension(auth): Extension<AuthContext>,
+    State(state): State<Arc<AppState>>,
+    Path(server_id): Path<Uuid>,
+) -> NexusResult<Json<Vec<Role>>> {
+    if !members::is_member(&state.db.pool, auth.user_id, server_id).await? {
+        return Err(NexusError::Forbidden);
+    }
+
+    let server_roles = roles::list_server_roles(&state.db.pool, server_id).await?;
+    Ok(Json(server_roles))
+}
+
+/// POST /api/v1/servers/:server_id/roles — Create a new role.
+async fn create_role_route(
+    Extension(auth): Extension<AuthContext>,
+    State(state): State<Arc<AppState>>,
+    Path(server_id): Path<Uuid>,
+    Json(body): Json<CreateRoleRequest>,
+) -> NexusResult<Json<Role>> {
+    validate_request(&body)?;
+
+    let server = servers::find_by_id(&state.db.pool, server_id)
+        .await?
+        .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+
+    // Only the server owner can manage roles
+    if server.owner_id != auth.user_id {
+        return Err(NexusError::Forbidden);
+    }
+
+    let role_id = snowflake::generate_id();
+    let permissions = body.permissions.unwrap_or(0);
+    let position = body.position.unwrap_or(1);
+
+    let role = roles::create_role(
+        &state.db.pool,
+        role_id,
+        server_id,
+        &body.name,
+        body.color,
+        permissions,
+        position,
+        false,
+    )
+    .await?;
+
+    tracing::info!(
+        role_id = %role_id,
+        server_id = %server_id,
+        name = %body.name,
+        "Role created"
+    );
+
+    let _ = audit_log::write_entry(
+        &state.db.pool,
+        snowflake::generate_id(),
+        server_id,
+        Some(auth.user_id),
+        "ROLE_CREATE",
+        Some("role"),
+        Some(role_id),
+        &serde_json::json!({ "name": body.name, "permissions": permissions }),
+        None,
+    )
+    .await;
+
+    Ok(Json(role))
+}
+
+/// PATCH /api/v1/servers/:server_id/roles/:role_id — Update a role.
+async fn update_role_route(
+    Extension(auth): Extension<AuthContext>,
+    State(state): State<Arc<AppState>>,
+    Path((server_id, role_id)): Path<(Uuid, Uuid)>,
+    Json(body): Json<UpdateRoleRequest>,
+) -> NexusResult<Json<Role>> {
+    validate_request(&body)?;
+
+    let server = servers::find_by_id(&state.db.pool, server_id)
+        .await?
+        .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+
+    if server.owner_id != auth.user_id {
+        return Err(NexusError::Forbidden);
+    }
+
+    let role = roles::find_by_id(&state.db.pool, role_id)
+        .await?
+        .ok_or(NexusError::NotFound { resource: "Role".into() })?;
+
+    // Ensure the role belongs to this server
+    if role.server_id != server_id {
+        return Err(NexusError::NotFound { resource: "Role".into() });
+    }
+
+    let updated = roles::update_role(
+        &state.db.pool,
+        role_id,
+        body.name.as_deref(),
+        body.color,
+        body.permissions,
+        body.position,
+        body.hoist,
+        body.mentionable,
+    )
+    .await?;
+
+    let _ = audit_log::write_entry(
+        &state.db.pool,
+        snowflake::generate_id(),
+        server_id,
+        Some(auth.user_id),
+        "ROLE_UPDATE",
+        Some("role"),
+        Some(role_id),
+        &serde_json::json!({ "name": body.name, "permissions": body.permissions }),
+        None,
+    )
+    .await;
+
+    Ok(Json(updated))
+}
+
+/// DELETE /api/v1/servers/:server_id/roles/:role_id — Delete a role.
+async fn delete_role_route(
+    Extension(auth): Extension<AuthContext>,
+    State(state): State<Arc<AppState>>,
+    Path((server_id, role_id)): Path<(Uuid, Uuid)>,
+) -> NexusResult<StatusCode> {
+    let server = servers::find_by_id(&state.db.pool, server_id)
+        .await?
+        .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+
+    if server.owner_id != auth.user_id {
+        return Err(NexusError::Forbidden);
+    }
+
+    let role = roles::find_by_id(&state.db.pool, role_id)
+        .await?
+        .ok_or(NexusError::NotFound { resource: "Role".into() })?;
+
+    if role.server_id != server_id {
+        return Err(NexusError::NotFound { resource: "Role".into() });
+    }
+
+    if role.is_default {
+        return Err(NexusError::Validation {
+            message: "Cannot delete the @everyone role.".into(),
+        });
+    }
+
+    roles::delete_role(&state.db.pool, role_id).await?;
+
+    let _ = audit_log::write_entry(
+        &state.db.pool,
+        snowflake::generate_id(),
+        server_id,
+        Some(auth.user_id),
+        "ROLE_DELETE",
+        Some("role"),
+        Some(role_id),
+        &serde_json::json!({ "name": role.name }),
+        None,
+    )
+    .await;
+
+    tracing::info!(role_id = %role_id, server_id = %server_id, "Role deleted");
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ── Ownership transfer ────────────────────────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+struct TransferOwnershipRequest {
+    new_owner_id: Uuid,
+}
+
+/// POST /api/v1/servers/:server_id/transfer-ownership
+///
+/// Transfer the server ownership to another existing member.  The caller must
+/// be the current owner.  If the server has `require_2fa` enabled the new
+/// owner must also have TOTP configured.
+async fn transfer_ownership_route(
+    Extension(auth): Extension<AuthContext>,
+    State(state): State<Arc<AppState>>,
+    Path(server_id): Path<Uuid>,
+    Json(body): Json<TransferOwnershipRequest>,
+) -> NexusResult<Json<ServerResponse>> {
+    let server = servers::find_by_id(&state.db.pool, server_id)
+        .await?
+        .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+
+    // Only the current owner may transfer.
+    if server.owner_id != auth.user_id {
+        return Err(NexusError::Forbidden);
+    }
+
+    // Cannot transfer to yourself.
+    if body.new_owner_id == auth.user_id {
+        return Err(NexusError::Validation {
+            message: "New owner must be a different user.".into(),
+        });
+    }
+
+    // New owner must already be a member of the server.
+    if !members::is_member(&state.db.pool, body.new_owner_id, server_id).await? {
+        return Err(NexusError::Validation {
+            message: "The new owner must already be a member of this server.".into(),
+        });
+    }
+
+    // If the server requires 2FA, enforce it on the incoming owner too.
+    if server.require_2fa {
+        let new_owner = users::find_by_id(&state.db.pool, body.new_owner_id)
+            .await?
+            .ok_or(NexusError::NotFound { resource: "User".into() })?;
+        if !new_owner.totp_enabled {
+            return Err(NexusError::Validation {
+                message: "The new owner must have two-factor authentication enabled.".into(),
+            });
+        }
+    }
+
+    let updated = servers::transfer_ownership(&state.db.pool, server_id, body.new_owner_id)
+        .await?;
+
+    let _ = audit_log::write_entry(
+        &state.db.pool,
+        snowflake::generate_id(),
+        server_id,
+        Some(auth.user_id),
+        "SERVER_TRANSFER_OWNERSHIP",
+        Some("server"),
+        None,
+        &serde_json::json!({
+            "old_owner_id": auth.user_id,
+            "new_owner_id": body.new_owner_id,
+        }),
+        None,
+    )
+    .await;
+
+    tracing::info!(
+        server_id = %server_id,
+        old_owner = %auth.user_id,
+        new_owner = %body.new_owner_id,
+        "Server ownership transferred"
+    );
+
+    Ok(Json(updated.into()))
 }

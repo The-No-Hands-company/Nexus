@@ -49,6 +49,15 @@ pub struct Server {
     /// Max file upload size override (server admins can set this)
     pub max_file_size: Option<i64>,
 
+    /// Whether members must have TOTP 2FA enabled to join this server.
+    pub require_2fa: bool,
+
+    /// Rolling window (seconds) for per-user duplicate-message spam detection.
+    pub spam_window_secs: i32,
+
+    /// Maximum identical messages allowed per user within `spam_window_secs`.
+    pub spam_max_messages: i32,
+
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -78,6 +87,17 @@ pub struct UpdateServerRequest {
     pub is_public: Option<bool>,
 
     pub region: Option<String>,
+
+    /// Require members to have TOTP 2FA enabled.
+    pub require_2fa: Option<bool>,
+
+    /// Spam detection rolling window in seconds (1-300).
+    #[validate(range(min = 1, max = 300))]
+    pub spam_window_secs: Option<i32>,
+
+    /// Maximum identical messages per user per window (1-20).
+    #[validate(range(min = 1, max = 20))]
+    pub spam_max_messages: Option<i32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -92,6 +112,9 @@ pub struct ServerResponse {
     pub is_public: bool,
     pub vanity_code: Option<String>,
     pub member_count: i32,
+    pub require_2fa: bool,
+    pub spam_window_secs: i32,
+    pub spam_max_messages: i32,
     pub created_at: DateTime<Utc>,
 }
 
@@ -108,6 +131,9 @@ impl From<Server> for ServerResponse {
             is_public: s.is_public,
             vanity_code: s.vanity_code,
             member_count: s.member_count,
+            require_2fa: s.require_2fa,
+            spam_window_secs: s.spam_window_secs,
+            spam_max_messages: s.spam_max_messages,
             created_at: s.created_at,
         }
     }

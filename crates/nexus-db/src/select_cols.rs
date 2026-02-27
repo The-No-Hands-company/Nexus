@@ -15,14 +15,14 @@
 // ── users ─────────────────────────────────────────────────────────────────────
 pub const USER_COLS: &str =
     "id::text AS id, username, display_name, email, password_hash, avatar, banner, \
-     bio, status, presence::text AS presence, flags, \
+     bio, status, presence::text AS presence, flags, totp_enabled, \
      created_at::text AS created_at, updated_at::text AS updated_at";
 
 // ── servers ───────────────────────────────────────────────────────────────────
 pub const SERVER_COLS: &str =
     "id::text AS id, name, description, icon, banner, owner_id::text AS owner_id, \
      region, is_public, features::text AS features, settings::text AS settings, \
-     vanity_code, member_count, max_file_size, \
+     vanity_code, member_count, max_file_size, require_2fa, spam_window_secs, spam_max_messages, \
      created_at::text AS created_at, updated_at::text AS updated_at";
 
 /// Same as `SERVER_COLS` but with `s.` table-alias prefix for JOIN queries.
@@ -30,7 +30,7 @@ pub const SERVER_COLS_S: &str =
     "s.id::text AS id, s.name, s.description, s.icon, s.banner, \
      s.owner_id::text AS owner_id, s.region, s.is_public, \
      s.features::text AS features, s.settings::text AS settings, \
-     s.vanity_code, s.member_count, s.max_file_size, \
+     s.vanity_code, s.member_count, s.max_file_size, s.require_2fa, s.spam_window_secs, s.spam_max_messages, \
      s.created_at::text AS created_at, s.updated_at::text AS updated_at";
 
 // ── channels ──────────────────────────────────────────────────────────────────

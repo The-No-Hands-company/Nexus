@@ -466,4 +466,25 @@ impl SearchClient {
             .set_searchable_attributes(["name", "description"]).await.context("meili server searchable")?;
         Ok(())
     }
+
+    // ── Health check ──────────────────────────────────────────────────────────
+
+    /// Probe the search backend.
+    ///
+    /// Returns `(is_ok, backend_name, optional_error_message)`.
+    pub async fn health_check(&self) -> (bool, &'static str, Option<String>) {
+        match &self.backend {
+            SearchBackend::Meilisearch(client) => {
+                if client.health().await.is_ok() {
+                    (true, "meilisearch", None)
+                } else {
+                    (false, "meilisearch", Some("MeiliSearch unreachable".into()))
+                }
+            }
+            // Tantivy is an in-process library — always reachable if the process is running.
+            SearchBackend::Tantivy(_) => (true, "tantivy", None),
+            // Disabled returns ok so it doesn't mark the server as degraded.
+            SearchBackend::Disabled => (true, "disabled", None),
+        }
+    }
 }

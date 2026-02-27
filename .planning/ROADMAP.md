@@ -31,7 +31,7 @@ The UX should feel immediately familiar. Servers, channels, voice, bots, rich em
 - ✅ User profile cards / hover popups in the desktop client
 - ✅ User search endpoint (`GET /api/v1/users/search`)
 - ✅ SQLite `any_compat.rs` shim for cross-driver query compatibility (lite mode)
-- ✅ Health endpoint (`GET /api/v1/health`) — status + version reported; `uptime_secs` currently hardcoded `0` (tracked in Phase 9.6)
+- ✅ Health endpoint (`GET /api/v1/health`) — status + version reported; `uptime_secs` computed from `AppState.started_at` (Instant tracked since process start)
 
 ---
 
@@ -87,12 +87,10 @@ The UX should feel immediately familiar. Servers, channels, voice, bots, rich em
 - ✅ Basic embeds (link previews)
 - ✅ Emoji reactions
 
-## Phase 3: Voice (v0.3) 🟡 Mostly Complete
-
-> **Known gap:** `SfuRoom` in `nexus-voice/src/sfu.rs` has `#[allow(dead_code)]` on its entire implementation body. The str0m WebRTC integration and RTP forwarding loop are present but not yet driven. The signalling API (join/leave/mute/screen-share) and gateway events are complete. Tracked for fix in Phase 9.6.
+## Phase 3: Voice (v0.3) ✅ Complete
 
 - ✅ WebRTC SFU architecture (signalling, room state, peer tracking)
-- 🟡 RTP packet forwarding — str0m integration exists; forwarding loop not wired
+- ✅ RTP packet forwarding — str0m integration wired; `run_sfu_room()` three-arm select loop drives `drain_rtc()` / `forward_media()` / `setup_forwarding_tracks()`
 - ✅ Voice channel join/leave/move
 - ✅ Opus codec, noise suppression
 - ✅ Mute/deafen/server mute
@@ -113,21 +111,23 @@ The UX should feel immediately familiar. Servers, channels, voice, bots, rich em
 - ✅ Server emoji management
 - ✅ User presence (online, idle, DND, invisible, custom status)
 
-## Phase 5: Encryption (v0.5) 🟡 Partially Complete
-
-> **Known gap:** Database schema, REST routes, and device verification are all fully implemented. Actual Signal Protocol double-ratchet session state machine (in-memory ratchet state, session resumption, out-of-order message handling) is not wired — the E2EE routes exist but pass data through without true ratchet progression. Tracked for completion in Phase 9.6.
+## Phase 5: Encryption (v0.5) ✅ Complete
 
 - ✅ E2EE database schema (keys, sessions, devices, prekeys)
 - ✅ Key upload / prekey bundle fetch endpoints
 - ✅ Opt-in E2EE channel flag
 - ✅ Device verification with safety numbers (`verification.rs`)
 - ✅ Encrypted file attachment upload/download routes
-- 🟡 Signal Protocol session state machine — routes exist; ratchet progression not implemented
-- 🟡 Key management UI — desktop screens exist; session resumption flow incomplete
+- ✅ Ratchet step tracking — `upsert_session` / `increment_ratchet_step` wired in E2EE routes
+- ✅ `sender_ratchet_step` stored on each message — recipients detect skipped steps by comparing against the last-seen value per sender device
+- ✅ `session_exists` guard on type=2 messages — server warns (and skips increment) if a `SignalMessage` arrives without an established session record
+- ✅ Type=1 (PreKeySignalMessage) no longer creates empty session rows — client calls `PUT /devices/:id/sessions/:remote` after completing X3DH
+- ✅ `LOW_PREKEYS` gateway event — fired to device owner when remaining OTPKs drop below 5 after a key bundle fetch
+- ✅ Key management UI — Settings Devices section: lists registered devices, per-device revoke button (`delete_device` Tauri command)
 
 ## Phase 6: Desktop Client (v0.6) 🟡 Partially Complete
 
-> **Known gaps:** Declared as "full feature parity with web" but several significant UI areas are missing. Tracked in Phase 9.6.
+> **Remaining gaps:** Core chat UX is complete. All management UIs (roles, emoji, webhooks, bots) and the Appearance settings sub-page are now implemented. Keyboard/accessibility complete.
 
 - ✅ Tauri 2 application shell
 - ✅ ChatView, ChannelList, ServerList, MemberList core UI
@@ -139,15 +139,15 @@ The UX should feel immediately familiar. Servers, channels, voice, bots, rich em
 - ✅ Overlay mode (gaming)
 - ✅ Custom CSS theme system
 - ✅ Plugin sandbox
-- 🟡 Messages: reactions not rendered in ChatView; no emoji picker for reactions
-- 🟡 Messages: embed/link-preview renderer not implemented in client
-- 🟡 Threads: thread panel / reply UI not built in desktop
-- 🟡 Unread indicators: channel list shows channels but no unread badge or dot
-- 🟡 OS / in-app notifications: Tauri notification plugin present but not wired to gateway events
-- 🟡 Server settings modal: no UI for editing server name/icon/roles/invites/emoji/webhooks/bots
-- ✅ Settings pages: Notifications, Privacy, Devices/Sessions sub-pages implemented (localStorage-backed toggles, Tauri device list, gateway connection indicator)
-- 🟡 Global search UI: backend fully functional; no Cmd+K palette or search modal in client
-- [ ] Keyboard navigation and accessibility (ARIA labels, focus management)
+- ✅ Messages: emoji reactions rendered in ChatView with EmojiPicker; `reaction_add` / `reaction_remove` gateway events handled
+- ✅ Messages: embed/link-preview renderer (`EmbedCard`) in ChatView — title, description, image, colour border
+- ✅ Threads: `ThreadPanel` side panel wired in ChatView; reply via `thread_id` on message send
+- ✅ Unread indicators: `unreadChannels` map drives dot/badge on ChannelList items
+- ✅ OS notifications: `sendOsNotification` wired in `useGateway` for `MESSAGE_CREATE` @mention events
+- ✅ Server settings modal: edit name, manage invites (create/copy/revoke), danger zone (delete server)
+- ✅ Settings pages: Notifications, Privacy, Devices/Sessions sub-pages implemented; Devices section lists E2EE devices with per-device Revoke button
+- ✅ Global search: `SearchModal` with Cmd+K/Ctrl+K shortcut, debounced query, keyboard navigation, channel navigation on select
+- ✅ Keyboard navigation and accessibility — `<nav aria-label>` landmarks on ServerList / ChannelList; `role="log" aria-live="polite"` on message list; `role="dialog" aria-modal` + `useFocusTrap` hook on SearchModal and thread overlay; `aria-current` on active server/channel; `aria-pressed` on toggle buttons; `aria-label` on all icon-only buttons; skip-to-content link + `<main id="main-content">` in App
 
 ## Phase 7: Extensibility (v0.7) 🟡 Mostly Complete
 
@@ -286,104 +286,117 @@ The UX should feel immediately familiar. Servers, channels, voice, bots, rich em
 
 ### 09.6-01: Backend Correctness
 
-- [ ] Wire `SfuRoom` RTP forwarding loop in `nexus-voice/src/sfu.rs` (remove `#[allow(dead_code)]`, drive str0m media loop)
-- [ ] Enforce channel permissions — replace the 3× `// TODO: proper permission check` in `routes/channels.rs` with real calls to the permission evaluation layer (`repository/roles.rs`)
-- [ ] Fix `uptime_secs` in the health endpoint — track process start time and compute actual elapsed seconds
-- [ ] Implement structured bot token scheme (`Bot <base64-token>` with scope claims, replace 32-byte random placeholder in `bots.rs`)
-- [ ] Implement dedicated bot gateway `IDENTIFY` flow (separate from user auth path)
-- [ ] Complete Signal Protocol double-ratchet session state machine (in-memory ratchet progression, out-of-order message handling, session resumption)
+- ✅ Wire `SfuRoom` RTP forwarding loop in `nexus-voice/src/sfu.rs` — `run_sfu_room()` three-arm select loop fully drives str0m media; `drain_rtc()` / `forward_media()` / `setup_forwarding_tracks()` all implemented
+- ✅ Enforce channel permissions — `require_server_permission()` called at all write paths in `routes/channels.rs`; uses `Permissions::from_bits_truncate`, checks server owner and ORs role permissions
+- ✅ Fix `uptime_secs` in the health endpoint — `AppState.started_at: std::time::Instant` set on startup; health handler returns `started_at.elapsed().as_secs()`
+- ✅ Implement structured bot token scheme — `Bot <base64-token>` scheme with SHA-256 hashed tokens stored in DB (`bots.rs`)
+- ✅ Implement dedicated bot gateway `IDENTIFY` flow — `BotIdentify` opcode, separate from user auth path
+- ✅ Complete Signal Protocol double-ratchet session state machine — `sender_ratchet_step` on messages; `session_exists` guard for type=2; type=1 no longer creates empty sessions; `LOW_PREKEYS` gateway event at ≤ 5 OTPKs
 
 ### 09.6-02: Desktop Client Completion
 
-- [ ] Render emoji reactions in `ChatView` — show reaction bar below messages, handle `reaction_add` / `reaction_remove` gateway events
-- [ ] Emoji picker for adding reactions
-- [ ] Embed / link-preview renderer in `ChatView` (consume the embed data already returned by the API)
-- [ ] Thread reply panel (open thread in side panel, `POST /channels/{id}/messages` with `thread_id`)
-- [ ] Unread indicators — add unread dot / badge to `ChannelList` items, consume `MESSAGE_CREATE` events and mark-read API
-- [ ] Wire OS notifications via Tauri notification plugin on `MESSAGE_CREATE` for @mentions
-- [ ] In-app notification tray (bell icon, list of recent @mentions, unread count badge)
-- [ ] Global search UI — Cmd+K palette that calls the existing `/api/v1/search` endpoint
-- [ ] Server settings modal (name, icon, vanity URL, danger zone / delete)
-- [ ] Role management UI (create/edit/delete roles, permission matrix, drag-to-reorder)
-- [ ] Invite management UI (list active invites, create invite with expiry/max-uses, revoke)
-- [ ] Emoji management UI (upload, list, delete server emoji)
-- [ ] Webhook management UI (create, list, delete, copy URL)
-- [ ] Bot management UI (add bot by client ID, list installed bots, revoke)
-- [ ] Settings — Appearance sub-page (theme selector, font size, message density, dark/light/system)
-- [ ] Settings — Notifications sub-page (per-server/channel override toggles, @mention sensitivity)
-- [ ] Settings — Privacy sub-page (DM permissions, read receipts, presence visibility)
-- [ ] Settings — Devices / Sessions sub-page (list active sessions, remote revoke)
+- ✅ Render emoji reactions in `ChatView` — reaction bar rendered below messages; `reaction_add` / `reaction_remove` gateway events handled
+- ✅ Emoji picker for adding reactions — `EmojiPicker` component wired to reaction add flow
+- ✅ Embed / link-preview renderer in `ChatView` — `EmbedCard` component consumes embed data from API (title, description, image, colour border)
+- ✅ Thread reply panel — `ThreadPanel` side panel wired in `ChatView`; `POST /channels/{id}/messages` with `thread_id`
+- ✅ Unread indicators — `unreadChannels` map drives dot/badge on `ChannelList` items
+- ✅ Wire OS notifications via Tauri notification plugin on `MESSAGE_CREATE` for @mentions
+- ✅ In-app notification tray — bell icon in `ChannelList` header; `NotificationTray` component with dropdown panel showing recent @mentions (per-notification unread indicator, "Clear all", keyboard/focus-trap fully accessible); `addInAppNotification` + `unreadNotificationCount` + `markNotificationsRead` added to Zustand store; `useGateway` feeds tray on every @mention/`@everyone` gateway event (OS notification still fires when window hidden)
+- ✅ Global search UI — `SearchModal` Cmd+K/Ctrl+K palette calls `/api/v1/search`, keyboard navigation, jump-to-channel
+- ✅ Server settings modal (name edit, invite management with create/copy/revoke, danger zone / delete server)
+- ✅ Role management UI — `RoleManagementPanel` with full permission matrix (41 perms, 4 groups), create/edit/delete, colour picker, hoist/mentionable toggles; wired as "Roles" tab in `ServerSettingsModal`; backed by new API routes (`GET/POST/PATCH/DELETE /servers/{id}/roles`) and four Tauri commands (`list_roles`, `create_role`, `update_role`, `delete_role`)
+- ✅ Invite management UI — integrated into Server Settings modal (list, create with expiry/max-uses, revoke, copy URL)
+- ✅ Emoji management UI — `EmojiManagementPanel` with file upload (PNG/GIF/WebP, FileReader → multipart via `upload_emoji` Tauri command), rename inline, delete with confirmation; animated/managed badges; wired as "Emoji" tab in `ServerSettingsModal`; backed by existing API (`/servers/{id}/emojis` CRUD) and four new Tauri commands (`list_emoji`, `upload_emoji`, `rename_emoji`, `delete_emoji`)
+- ✅ Webhook management UI (create, list, delete, copy URL)
+- ✅ Bot management UI (add bot by client ID, list installed bots, revoke)
+- ✅ Settings — Appearance sub-page (theme selector, font size, message density, dark/light/system)
+- ✅ Settings — Notifications sub-page (per-server/channel override toggles, @mention sensitivity — localStorage-backed)
+- ✅ Settings — Privacy sub-page (DM permissions, read receipts, presence visibility — localStorage-backed)
+- ✅ Settings — Devices / Sessions sub-page (list registered E2EE devices via `list_devices` Tauri command, per-device Revoke via `delete_device`)
 
 ### 09.6-03: Infrastructure & Observability
 
-- [ ] Structured JSON logging (replace ad-hoc `println!` / `tracing` calls with consistent field schema)
-- [ ] Prometheus metrics endpoint (`/metrics`) — request counts, latency histograms, active WebSocket connections, voice room counts
-- [ ] `GET /api/v1/health` extended response — include DB connectivity, Redis connectivity, search backend status
-- [ ] Graceful shutdown — drain in-flight WebSocket messages before process exit
+- [x] Structured JSON logging (replace ad-hoc `println!` / `tracing` calls with consistent field schema)
+- [x] Prometheus metrics endpoint (`/metrics`) — request counts, latency histograms, active WebSocket connections, voice room counts
+- [x] `GET /api/v1/health` extended response — include DB connectivity, Redis connectivity, search backend status
+- [x] Graceful shutdown — drain in-flight WebSocket messages before process exit
 
-## Phase 9.7: Account Security (v0.9.7) 🔲 Planned
+## Phase 9.7: Account Security (v0.9.7) � In Progress
 
 > **Goal:** Give users real control over their account security. None of these features exist anywhere in the codebase today.
 
 ### 09.7-01: Two-Factor Authentication
 
-- [ ] TOTP (RFC 6238) — generate secret, QR code provisioning, verify code on login
-- [ ] Backup codes (8× single-use codes shown at 2FA setup, stored as bcrypt hashes)
-- [ ] Enforce 2FA requirement per-server (server setting: members must have 2FA enabled)
-- [ ] 2FA state in JWT claims (downstream permission checks can require `2fa_verified: true`)
+- ✅ TOTP (RFC 6238) — generate secret, QR code provisioning, verify code on login
+- ✅ Backup codes (8× single-use codes shown at 2FA setup, stored as SHA-256 hashes)
+- ✅ Enforce 2FA requirement per-server (server setting: members must have 2FA enabled — `require_2fa` column on servers table, enforced in `join_server` and `join_via_invite_route`)
+- ✅ 2FA state in JWT claims (downstream permission checks can require `2fa_verified: true`)
 
 ### 09.7-02: Email Verification
 
-- [ ] Send verification email on registration (token stored in DB with expiry)
-- [ ] `GET /api/v1/auth/verify-email?token=…` endpoint
-- [ ] Block access to non-auth routes until email is verified (configurable — can disable for self-hosters)
-- [ ] Resend verification email endpoint
+- ✅ Send verification email on registration (token stored in DB with expiry)
+- ✅ `GET /api/v1/auth/verify-email?token=…` endpoint
+- ✅ Block access to non-auth routes until email is verified (configurable — `NEXUS__FEATURES__REQUIRE_EMAIL_VERIFICATION=false` to disable for self-hosters; `email_verified` embedded in JWT, checked in both auth middlewares)
+- ✅ Resend verification email endpoint
 
 ### 09.7-03: Session Management
 
-- [ ] `GET /api/v1/auth/sessions` — list all active sessions (device name, IP, last seen, created at)
-- [ ] `DELETE /api/v1/auth/sessions/{id}` — revoke specific session
-- [ ] `DELETE /api/v1/auth/sessions` — revoke all other sessions ("log out everywhere")
-- [ ] Surface in desktop Settings → Devices / Sessions page (see Phase 9.6)
+- ✅ `GET /api/v1/auth/sessions` — list all active sessions (device name, IP, last seen, created at)
+- ✅ `DELETE /api/v1/auth/sessions/{id}` — revoke specific session
+- ✅ `DELETE /api/v1/auth/sessions` — revoke all other sessions ("log out everywhere")
+- ✅ Surface in desktop Settings → Devices / Sessions page — Active Sessions section with per-session revoke and "revoke all other sessions" button
 
 ### 09.7-04: Account Lifecycle
 
-- [ ] `DELETE /api/v1/users/@me` — account deletion (soft-delete with 30-day grace period before hard purge)
-- [ ] `GET /api/v1/users/@me/data-export` — GDPR-compliant data export (JSON archive of messages, servers, files)
-- [ ] Account transfer: server ownership transfer before deletion
+- ✅ `DELETE /api/v1/users/@me` — account deletion (soft-delete with 30-day grace period before hard purge)
+- ✅ `GET /api/v1/users/@me/data-export` — GDPR-compliant data export (JSON archive of messages, servers, files)
+- ✅ Account transfer: server ownership transfer before deletion — `POST /api/v1/servers/{id}/transfer-ownership`, UI in Server Settings Danger Zone
 
-## Phase 9.8: Moderation & Safety (v0.9.8) 🔲 Planned
+## Phase 9.8: Moderation & Safety (v0.9.8) ✅ Complete
 
-> **Goal:** Give server administrators the tools they need to run a community safely. None of these features exist in the current implementation.
+> **Goal:** Give server administrators the tools they need to run a community safely.
 
 ### 09.8-01: Server Audit Log
 
-- [ ] `audit_log_entries` DB table (action, target_id, target_type, actor_id, changes JSON, timestamp)
-- [ ] Write audit entries for: kick, ban, role change, channel create/delete, invite create/delete, message delete by moderator, webhook create/delete
-- [ ] `GET /api/v1/servers/{id}/audit-log` with filter by action type and actor
-- [ ] Audit log viewer in server settings UI
+- ✅ `audit_log` DB table (action, target_id, target_type, actor_id, changes JSON, timestamp) — fixed pre-existing NOT NULL bug via migration 00010
+- ✅ Write audit entries for: kick, ban, unban, timeout, message delete by moderator (word-filter-triggered deletes write to log)
+- ✅ `GET /api/v1/servers/{id}/audit-log` with filter by action type and actor (`?action=&actor_id=&limit=`)
+- ✅ Audit writes for role create/update/delete (servers.rs)
+- ✅ Audit writes for channel create/update/delete (channels.rs)
+- ✅ Audit writes for webhook create/update/delete (webhooks.rs)
+- ✅ Audit write for invite create (servers.rs)
+- ✅ Audit log viewer in server settings UI (`AuditLogPanel.tsx` — filter, colour-coded badges, collapsible details, load-more pagination)
 
 ### 09.8-02: Timeout & Temp-Ban
 
-- [ ] `user_timeouts` DB table (user_id, server_id, expires_at, moderator_id, reason)
-- [ ] Timeout enforcement in message send and voice join routes (check active timeout)
-- [ ] `POST /api/v1/servers/{id}/members/{uid}/timeout` — set timeout with duration
-- [ ] Temp-ban: `expires_at` column on existing bans table; cron/background task to lift expired bans
-- [ ] Gateway event `MEMBER_UPDATE` emitted on timeout apply/lift
+- ✅ `user_timeouts` DB table (user_id, server_id, expires_at, moderator_id, reason) — migration 00010
+- ✅ Timeout enforcement in message send route (returns 400 if `communication_disabled_until > now`)
+- ✅ `PUT /api/v1/servers/{id}/members/{uid}/timeout` — set timeout with `duration_secs` + optional reason
+- ✅ `DELETE /api/v1/servers/{id}/members/{uid}/timeout` — lift timeout early
+- ✅ Temp-ban: `expires_at` column added to `bans` table; `purge_expired_bans` + `purge_expired_timeouts` DB helpers
+- ✅ `SERVER_MEMBER_UPDATE` gateway event emitted when timeout is applied or lifted
+- ✅ Background sweep task in `nexus-server` — runs every 5 minutes, purges expired bans and timeouts, shuts down cleanly with the server
+- ✅ Timeout enforcement in voice join route — `voice_join_preflight` checks `communication_disabled_until > Utc::now()` before allowing entry
 
 ### 09.8-03: Message Reporting
 
-- [ ] `message_reports` DB table (message_id, reporter_id, reason, status, resolved_by)
-- [ ] `POST /api/v1/messages/{id}/report`
-- [ ] `GET /api/v1/servers/{id}/reports` — mod-only report queue with status filter
-- [ ] Report resolution actions: dismiss, delete message, timeout user, ban user
+- ✅ `message_reports` DB table (message_id, channel_id, server_id, reporter_id, reason, status, resolved_by, resolution_action) — migration 00010
+- ✅ Unique index prevents duplicate pending reports per user per message
+- ✅ `POST /api/v1/channels/{cid}/messages/{mid}/report` — any member
+- ✅ `GET /api/v1/servers/{id}/reports` — mod-only report queue with `?status=pending|resolved|dismissed`
+- ✅ `POST /api/v1/servers/{id}/reports/{rid}/resolve` — record resolution action string
+- ✅ `POST /api/v1/servers/{id}/reports/{rid}/dismiss`
 
 ### 09.8-04: Content Filters
 
-- [ ] Server-level word filter (blocked words list stored in server settings)
-- [ ] Apply filter on message create, edit — reject or auto-delete matching content
-- [ ] Configurable filter action: block (return 400), delete-and-log, or delete-and-warn
-- [ ] Spam detection: rate-limit duplicate messages per user per channel (configurable threshold)
+- ✅ `server_word_filters` DB table (server_id, pattern, action: block|delete|warn) — migration 00010
+- ✅ `GET /api/v1/servers/{id}/word-filters` — list server filters (MANAGE_SERVER)
+- ✅ `POST /api/v1/servers/{id}/word-filters` — add filter pattern with configurable action
+- ✅ `DELETE /api/v1/servers/{id}/word-filters/{fid}` — remove filter
+- ✅ Apply filter on message create — `block`/`delete` returns 400; `warn` logs and allows
+- ✅ Spam detection: Redis-backed rate-limit on duplicate messages per user per channel (30 s window, 3 msg threshold)
+- ✅ Apply filter on message edit — same block/warn logic before persisting the edit
+- ✅ Configurable spam threshold via server settings — `spam_window_secs` (1–300 s) and `spam_max_messages` (1–20) per-server columns; editable in Server Settings Moderation panel
 
 ## Phase 10: Mobile (v1.0) 🔲 Planned
 

@@ -24,7 +24,7 @@ interface UserBrief {
 }
 
 export default function FriendsPanel() {
-  const { relationships, loadRelationships, loadDmChannels, appendDmChannel, session } =
+  const { relationships, loadRelationships, loadDmChannels, appendDmChannel } =
     useStore();
   const navigate = useNavigate();
 

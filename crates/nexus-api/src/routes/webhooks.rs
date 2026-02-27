@@ -18,7 +18,7 @@ use nexus_common::{
     },
     snowflake,
 };
-use nexus_db::repository::{channels, messages, webhooks};
+use nexus_db::repository::{audit_log, channels, messages, webhooks};
 use rand::distr::Alphanumeric;
 use rand::Rng;
 use std::sync::Arc;
@@ -39,6 +39,11 @@ pub fn router() -> Router<Arc<AppState>> {
         .route(
             "/servers/{server_id}/webhooks/outgoing",
             post(create_outgoing_webhook)
+                .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware)),
+        )
+        .route(
+            "/servers/{server_id}/webhooks",
+            get(get_server_webhooks_route)
                 .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware)),
         )
         .route(
@@ -108,6 +113,19 @@ async fn create_incoming_webhook(
     )
     .await?;
 
+    let _ = audit_log::write_entry(
+        &state.db.pool,
+        snowflake::generate_id(),
+        server_id,
+        Some(auth.user_id),
+        "WEBHOOK_CREATE",
+        Some("webhook"),
+        Some(id),
+        &serde_json::json!({ "name": body.name, "channel_id": channel_id }),
+        None,
+    )
+    .await;
+
     Ok(Json(wh))
 }
 
@@ -131,6 +149,19 @@ async fn create_outgoing_webhook(
         body.avatar.as_deref(),
     )
     .await?;
+
+    let _ = audit_log::write_entry(
+        &state.db.pool,
+        snowflake::generate_id(),
+        server_id,
+        Some(auth.user_id),
+        "WEBHOOK_CREATE",
+        Some("webhook"),
+        Some(id),
+        &serde_json::json!({ "name": body.name, "url": body.url }),
+        None,
+    )
+    .await;
 
     Ok(Json(wh))
 }
@@ -180,6 +211,21 @@ async fn modify_webhook(
     .await?
     .ok_or(NexusError::NotFound { resource: "webhook".to_string() })?;
 
+    if let Some(sid) = existing.server_id {
+        let _ = audit_log::write_entry(
+            &state.db.pool,
+            snowflake::generate_id(),
+            sid,
+            Some(auth.user_id),
+            "WEBHOOK_UPDATE",
+            Some("webhook"),
+            Some(webhook_id),
+            &serde_json::json!({ "name": body.name }),
+            None,
+        )
+        .await;
+    }
+
     Ok(Json(updated))
 }
 
@@ -197,6 +243,22 @@ async fn delete_webhook(
     }
 
     webhooks::delete_webhook(&state.db.pool, webhook_id).await?;
+
+    if let Some(sid) = existing.server_id {
+        let _ = audit_log::write_entry(
+            &state.db.pool,
+            snowflake::generate_id(),
+            sid,
+            Some(auth.user_id),
+            "WEBHOOK_DELETE",
+            Some("webhook"),
+            Some(webhook_id),
+            &serde_json::json!({ "name": existing.name }),
+            None,
+        )
+        .await;
+    }
+
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
@@ -276,4 +338,18 @@ async fn execute_webhook(
     });
 
     Ok(axum::http::StatusCode::NO_CONTENT)
+}
+
+// ============================================================================
+// GET /api/v1/servers/{server_id}/webhooks
+// ============================================================================
+
+/// GET /api/v1/servers/{server_id}/webhooks — List all webhooks for a server.
+async fn get_server_webhooks_route(
+    Extension(_auth): Extension<AuthContext>,
+    State(state): State<Arc<AppState>>,
+    Path(server_id): Path<Uuid>,
+) -> NexusResult<Json<Vec<Webhook>>> {
+    let hooks = webhooks::get_server_webhooks(&state.db.pool, server_id).await?;
+    Ok(Json(hooks))
 }

@@ -11,6 +11,10 @@ import UpdateBanner from "./components/UpdateBanner";
 import ThemeProvider from "./themes/ThemeProvider";
 import PluginLoader from "./plugins/PluginLoader";
 import SearchModal from "./components/SearchModal";
+import { initAppearance } from "./themes/appearance";
+
+// Restore font-size and message density classes before first render
+initAppearance();
 
 export default function App() {
   const { session, setUpdateAvailable } = useStore();
@@ -56,12 +60,20 @@ export default function App() {
       {/* Background iframe sandboxes for enabled plugins */}
       <PluginLoader />
 
+      {/* Skip navigation link — visible only when focused (for keyboard users) */}
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[9999] focus:px-4 focus:py-2 focus:rounded focus:bg-accent-500 focus:text-white focus:text-sm focus:font-medium focus:shadow-lg"
+      >
+        Skip to content
+      </a>
+
       <div className="flex flex-col h-full">
         <UpdateBanner />
         {searchOpen && session && (
           <SearchModal onClose={() => setSearchOpen(false)} />
         )}
-        <div className="flex-1 overflow-hidden">
+        <main id="main-content" className="flex-1 overflow-hidden">
           <Routes>
             <Route
               path="/login"
@@ -76,7 +88,7 @@ export default function App() {
               element={session ? <MainLayout /> : <Navigate to="/login" replace />}
             />
           </Routes>
-        </div>
+        </main>
       </div>
     </ThemeProvider>
   );

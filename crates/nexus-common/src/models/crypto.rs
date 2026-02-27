@@ -138,6 +138,11 @@ pub struct EncryptedMessage {
     pub ciphertext_map: serde_json::Value,
     pub attachment_meta: Option<serde_json::Value>,
     pub sequence: i64,
+    /// Sender's Double Ratchet step at the time of sending.
+    /// Recipients compare this against their last-seen step to detect skipped
+    /// (out-of-order / dropped) ratchet steps.
+    /// `None` for messages sent before ratchet step tracking was introduced.
+    pub sender_ratchet_step: Option<i32>,
     pub client_ts: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
 }
@@ -223,6 +228,12 @@ pub struct SendEncryptedMessageRequest {
     pub attachment_meta: Option<serde_json::Value>,
     /// Client-set timestamp (informational only)
     pub client_ts: Option<DateTime<Utc>>,
+    /// The sender's Double Ratchet step counter at send time.
+    /// Clients SHOULD include this so recipients can detect missed ratchet steps.
+    /// For type=1 (PreKeySignalMessage) this should be 0 or 1.
+    /// For type=2 (SignalMessage) this should be the sender's current step count.
+    #[serde(default)]
+    pub sender_ratchet_step: Option<i32>,
 }
 
 /// Update session state (ratchet advance).

@@ -297,19 +297,20 @@ pub async fn store_encrypted_message(
     ciphertext_map: &serde_json::Value,
     attachment_meta: Option<&serde_json::Value>,
     client_ts: Option<chrono::DateTime<chrono::Utc>>,
+    sender_ratchet_step: Option<i32>,
 ) -> Result<EncryptedMessage> {
     let row = sqlx::query_as::<_, EncryptedMessage>(
         r#"
         INSERT INTO encrypted_messages
             (channel_id, sender_id, sender_device_id, ciphertext_map,
-             attachment_meta, sequence, client_ts)
+             attachment_meta, sequence, client_ts, sender_ratchet_step)
         VALUES (
             $1, $2, $3, $4, $5,
             COALESCE(
                 (SELECT MAX(sequence) + 1 FROM encrypted_messages WHERE channel_id = $6),
                 1
             ),
-            $7
+            $7, $8
         )
         RETURNING *
         "#,
@@ -321,9 +322,38 @@ pub async fn store_encrypted_message(
     .bind(attachment_meta.map(|v| serde_json::to_string(v).unwrap_or_default()))
     .bind(channel_id.to_string())
     .bind(client_ts.map(|d| d.to_rfc3339()))
+    .bind(sender_ratchet_step)
     .fetch_one(pool)
     .await?;
     Ok(row)
+}
+
+/// Check whether a session record exists for a device pair.
+///
+/// Used by the send path to validate that a type=2 (`SignalMessage`) is being
+/// sent within an established session rather than out of thin air.
+pub async fn session_exists(
+    pool: &sqlx::AnyPool,
+    owner_device_id: Uuid,
+    remote_device_id: Uuid,
+) -> Result<bool> {
+    #[derive(sqlx::FromRow)]
+    struct ExistsRow {
+        exists: i64,
+    }
+    let row = sqlx::query_as::<_, ExistsRow>(
+        r#"
+        SELECT EXISTS(
+            SELECT 1 FROM e2ee_sessions
+            WHERE owner_device_id = $1 AND remote_device_id = $2
+        ) AS exists
+        "#,
+    )
+    .bind(owner_device_id.to_string())
+    .bind(remote_device_id.to_string())
+    .fetch_one(pool)
+    .await?;
+    Ok(row.exists != 0)
 }
 
 /// List encrypted messages for a channel, paginated, newest-first.

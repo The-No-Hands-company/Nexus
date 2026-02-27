@@ -3,6 +3,11 @@ import { useNavigate } from "react-router-dom";
 import { invoke } from "../invoke";
 import { useStore, Server } from "../store";
 import clsx from "clsx";
+import RoleManagementPanel from "./RoleManagementPanel";
+import EmojiManagementPanel from "./EmojiManagementPanel";
+import WebhookManagementPanel from "./WebhookManagementPanel";
+import BotManagementPanel from "./BotManagementPanel";
+import AuditLogPanel from "./AuditLogPanel";
 
 interface Invite {
   code: string;
@@ -13,7 +18,7 @@ interface Invite {
   createdAt: string;
 }
 
-type Tab = "overview" | "invites" | "danger";
+type Tab = "overview" | "invites" | "roles" | "emoji" | "webhooks" | "bots" | "audit" | "danger";
 
 interface Props {
   server: Server;
@@ -28,6 +33,9 @@ export default function ServerSettingsModal({ server, onClose }: Props) {
   // Overview state
   const [name, setName] = useState(server.name);
   const [isPublic, setIsPublic] = useState(false); // loaded from server details
+  const [require2fa, setRequire2fa] = useState(server.require2fa ?? false);
+  const [spamWindowSecs, setSpamWindowSecs] = useState(server.spamWindowSecs ?? 30);
+  const [spamMaxMessages, setSpamMaxMessages] = useState(server.spamMaxMessages ?? 3);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveOk, setSaveOk] = useState(false);
@@ -41,6 +49,10 @@ export default function ServerSettingsModal({ server, onClose }: Props) {
   // Danger state
   const [deleteConfirm, setDeleteConfirm] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const [transferNewOwnerId, setTransferNewOwnerId] = useState("");
+  const [transferring, setTransferring] = useState(false);
+  const [transferError, setTransferError] = useState<string | null>(null);
+  const [transferOk, setTransferOk] = useState(false);
 
   // Load invites when switching to invites tab
   useEffect(() => {
@@ -58,7 +70,14 @@ export default function ServerSettingsModal({ server, onClose }: Props) {
     setSaveError(null);
     setSaveOk(false);
     try {
-      await invoke("update_server", { serverId: server.id, name: name.trim() });
+      await invoke("update_server", {
+        serverId: server.id,
+        name: name.trim(),
+        isPublic,
+        require2fa,
+        spamWindowSecs,
+        spamMaxMessages,
+      });
       await loadServers();
       setSaveOk(true);
       setTimeout(() => setSaveOk(false), 2000);
@@ -66,6 +85,27 @@ export default function ServerSettingsModal({ server, onClose }: Props) {
       setSaveError(String(e));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleTransferOwnership = async () => {
+    if (!transferNewOwnerId.trim()) return;
+    setTransferring(true);
+    setTransferError(null);
+    setTransferOk(false);
+    try {
+      await invoke("transfer_server_ownership", {
+        serverId: server.id,
+        newOwnerId: transferNewOwnerId.trim(),
+      });
+      await loadServers();
+      setTransferOk(true);
+      setTransferNewOwnerId("");
+      setTimeout(() => setTransferOk(false), 3000);
+    } catch (e) {
+      setTransferError(String(e));
+    } finally {
+      setTransferring(false);
     }
   };
 
@@ -122,6 +162,11 @@ export default function ServerSettingsModal({ server, onClose }: Props) {
   const TABS: { id: Tab; label: string }[] = [
     { id: "overview", label: "Overview" },
     { id: "invites", label: "Invites" },
+    { id: "roles", label: "Roles" },
+    { id: "emoji", label: "Emoji" },
+    { id: "webhooks", label: "Webhooks" },
+    { id: "bots", label: "Bots" },
+    { id: "audit", label: "Audit Log" },
     { id: "danger", label: "Danger Zone" },
   ];
 
@@ -197,6 +242,63 @@ export default function ServerSettingsModal({ server, onClose }: Props) {
                   Public server{" "}
                   <span className="text-xs text-muted">(discoverable in server browser)</span>
                 </span>
+              </div>
+
+              {/* ── Moderation / Security ── */}
+              <div className="border-t border-bg-600/50 pt-4 space-y-4">
+                <p className="text-xs font-semibold text-muted uppercase tracking-widest">Moderation</p>
+
+                {/* Require 2FA */}
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setRequire2fa((v) => !v)}
+                    className={clsx(
+                      "relative h-5 w-9 rounded-full transition-colors",
+                      require2fa ? "bg-accent-600" : "bg-bg-600/60"
+                    )}
+                  >
+                    <span
+                      className={clsx(
+                        "absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform",
+                        require2fa ? "translate-x-4" : "translate-x-0.5"
+                      )}
+                    />
+                  </button>
+                  <span className="text-sm text-fg">
+                    Require 2FA to join{" "}
+                    <span className="text-xs text-muted">(members must have TOTP enabled)</span>
+                  </span>
+                </div>
+
+                {/* Spam detection window */}
+                <div className="grid grid-cols-2 gap-3 max-w-sm">
+                  <div>
+                    <label className="block text-xs font-medium text-muted mb-1">
+                      Spam window (seconds)
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={300}
+                      value={spamWindowSecs}
+                      onChange={(e) => setSpamWindowSecs(Math.min(300, Math.max(1, Number(e.target.value))))}
+                      className="w-full rounded-lg border border-bg-600/50 bg-bg-700 px-3 py-1.5 text-sm text-fg outline-none focus:border-accent-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted mb-1">
+                      Max identical messages
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={spamMaxMessages}
+                      onChange={(e) => setSpamMaxMessages(Math.min(20, Math.max(1, Number(e.target.value))))}
+                      className="w-full rounded-lg border border-bg-600/50 bg-bg-700 px-3 py-1.5 text-sm text-fg outline-none focus:border-accent-500"
+                    />
+                  </div>
+                </div>
               </div>
 
               {saveError && (
@@ -278,10 +380,85 @@ export default function ServerSettingsModal({ server, onClose }: Props) {
             </div>
           )}
 
+          {/* ── Emoji ── */}
+          {tab === "emoji" && (
+            <div className="space-y-4">
+              <h2 className="text-lg font-semibold text-fg">Emoji</h2>
+              <EmojiManagementPanel serverId={server.id} />
+            </div>
+          )}
+
+          {/* ── Roles ── */}
+          {tab === "roles" && (
+            <div className="space-y-4">
+              <h2 className="text-lg font-semibold text-fg">Roles</h2>
+              <RoleManagementPanel serverId={server.id} />
+            </div>
+          )}
+
+          {/* ── Webhooks ── */}
+          {tab === "webhooks" && (
+            <div className="space-y-4">
+              <h2 className="text-lg font-semibold text-fg">Webhooks</h2>
+              <WebhookManagementPanel serverId={server.id} />
+            </div>
+          )}
+
+          {/* ── Bots ── */}
+          {tab === "bots" && (
+            <div className="space-y-4">
+              <h2 className="text-lg font-semibold text-fg">Bots</h2>
+              <BotManagementPanel serverId={server.id} />
+            </div>
+          )}
+
+          {/* ── Audit Log ── */}
+          {tab === "audit" && (
+            <div className="space-y-4">
+              <h2 className="text-lg font-semibold text-fg">Audit Log</h2>
+              <p className="text-xs text-muted">
+                Moderation actions, channel and role changes, and other server
+                events. Requires the View Audit Log permission.
+              </p>
+              <AuditLogPanel serverId={server.id} />
+            </div>
+          )}
+
           {/* ── Danger Zone ── */}
           {tab === "danger" && (
             <div className="space-y-5">
               <h2 className="text-lg font-semibold text-red-400">Danger Zone</h2>
+
+              {/* Transfer Ownership */}
+              <div className="rounded-lg border border-yellow-800/50 bg-yellow-950/10 p-4 space-y-3">
+                <p className="text-sm font-medium text-fg">Transfer Ownership</p>
+                <p className="text-xs text-muted leading-relaxed">
+                  Transfer ownership of this server to another member. You will
+                  lose all owner privileges. This cannot be easily undone.
+                </p>
+                <label className="block text-xs font-medium text-muted mb-1">
+                  New owner's User ID
+                </label>
+                <input
+                  value={transferNewOwnerId}
+                  onChange={(e) => setTransferNewOwnerId(e.target.value)}
+                  placeholder="Paste user ID…"
+                  className="w-full rounded-lg border border-yellow-800/50 bg-bg-700 px-3 py-2 text-sm text-fg placeholder:text-muted/60 outline-none focus:border-yellow-500"
+                />
+                {transferError && (
+                  <p className="text-xs text-red-400">{transferError}</p>
+                )}
+                {transferOk && (
+                  <p className="text-xs text-green-400">✓ Ownership transferred</p>
+                )}
+                <button
+                  onClick={handleTransferOwnership}
+                  disabled={!transferNewOwnerId.trim() || transferring}
+                  className="rounded-lg bg-yellow-700 px-5 py-2 text-sm font-medium text-white hover:bg-yellow-600 disabled:opacity-40 transition-colors"
+                >
+                  {transferring ? "Transferring…" : "Transfer Ownership"}
+                </button>
+              </div>
 
               <div className="rounded-lg border border-red-800/50 bg-red-950/20 p-4 space-y-3">
                 <p className="text-sm font-medium text-fg">Delete this Server</p>

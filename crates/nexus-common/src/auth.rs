@@ -18,8 +18,20 @@ pub struct Claims {
     pub iat: i64,
     /// Expiration (Unix timestamp)
     pub exp: i64,
-    /// Token type ("access" or "refresh")
+    /// Token type: "access", "refresh", or "mfa_challenge"
     pub token_type: String,
+    /// JWT ID — used as session identifier for revocation lookups.
+    /// `#[serde(default)]` ensures tokens issued before 09.7 still decode.
+    #[serde(default)]
+    pub jti: String,
+    /// Whether this token was issued after successful 2FA verification.
+    /// `false` for users without 2FA enabled, `true` after TOTP was checked.
+    #[serde(default)]
+    pub two_fa_verified: bool,
+    /// Whether the user's email address was verified at the time of token issuance.
+    /// `#[serde(default)]` ensures tokens issued before 09.9 still decode as `false`.
+    #[serde(default)]
+    pub email_verified: bool,
 }
 
 /// Validate and decode a JWT token.

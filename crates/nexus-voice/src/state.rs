@@ -113,6 +113,7 @@ impl VoiceStateManager {
             server = ?server_id,
             "User joined voice channel"
         );
+        metrics::gauge!("nexus_voice_users_active").increment(1.0);
 
         (state, old_channel)
     }
@@ -136,6 +137,7 @@ impl VoiceStateManager {
                 channel = %s.channel_id,
                 "User left voice channel"
             );
+            metrics::gauge!("nexus_voice_users_active").decrement(1.0);
         }
 
         state.map(|s| s.channel_id)

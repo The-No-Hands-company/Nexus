@@ -63,6 +63,7 @@ pub async fn update_user(
     display_name: Option<&str>,
     bio: Option<&str>,
     status: Option<&str>,
+    avatar: Option<&str>,
 ) -> Result<User, sqlx::Error> {
     let q = format!(
         "UPDATE users SET \
@@ -70,6 +71,7 @@ pub async fn update_user(
              display_name = COALESCE($2, display_name), \
              bio = COALESCE($3, bio), \
              status = COALESCE($4, status), \
+             avatar = COALESCE($6, avatar), \
              updated_at = CURRENT_TIMESTAMP \
            WHERE id = $5::uuid \
            RETURNING {USER_COLS}"
@@ -80,6 +82,7 @@ pub async fn update_user(
     .bind(bio)
     .bind(status)
     .bind(id.to_string())
+    .bind(avatar)
     .fetch_one(pool)
     .await
 }

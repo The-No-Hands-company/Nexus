@@ -24,19 +24,17 @@ pub struct TokenPair {
     pub refresh_token: String,
     pub expires_in: u64,
     pub token_type: String,
+    /// Session UUID — used to persist the session row in `refresh_tokens`.
+    /// Excluded from the JSON response; the client sees only the opaque tokens.
+    #[serde(skip)]
+    pub session_id: Uuid,
 }
 
 /// Returns the Argon2 instance appropriate for the current build profile.
-///
-/// Debug builds use minimal parameters (8 MB, 1 iteration) so that
-/// login/register complete in ~50 ms instead of 15+ seconds.
-/// Release builds use the production-strength defaults.
 fn argon2_instance() -> Argon2<'static> {
     #[cfg(debug_assertions)]
     {
-        // m_cost = 8 * 1024 KiB, t_cost = 1 iteration, p_cost = 1 lane
-        let params = Params::new(8 * 1024, 1, 1, None)
-            .expect("valid argon2 debug params");
+        let params = Params::new(8 * 1024, 1, 1, None).expect("valid argon2 debug params");
         Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
     }
     #[cfg(not(debug_assertions))]
@@ -45,7 +43,7 @@ fn argon2_instance() -> Argon2<'static> {
     }
 }
 
-/// Hash a password using Argon2id (the gold standard for password hashing).
+/// Hash a password using Argon2id.
 pub fn hash_password(password: &str) -> Result<String, argon2::password_hash::Error> {
     let salt = SaltString::generate(&mut OsRng);
     let hash = argon2_instance().hash_password(password.as_bytes(), &salt)?;
@@ -61,11 +59,17 @@ pub fn verify_password(password: &str, hash: &str) -> Result<bool, argon2::passw
 }
 
 /// Generate a JWT access token.
+///
+/// `session_id` becomes the `jti` claim — it identifies the owning session row
+/// in `refresh_tokens` so individual sessions can be revoked.
 pub fn generate_access_token(
     user_id: Uuid,
     username: &str,
     secret: &str,
     ttl_secs: u64,
+    session_id: Uuid,
+    two_fa_verified: bool,
+    email_verified: bool,
 ) -> Result<String, jsonwebtoken::errors::Error> {
     let now = Utc::now();
     let claims = Claims {
@@ -74,21 +78,20 @@ pub fn generate_access_token(
         iat: now.timestamp(),
         exp: (now + Duration::seconds(ttl_secs as i64)).timestamp(),
         token_type: "access".to_string(),
+        jti: session_id.to_string(),
+        two_fa_verified,
+        email_verified,
     };
-
-    encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(secret.as_bytes()),
-    )
+    encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes()))
 }
 
-/// Generate a JWT refresh token (longer-lived).
+/// Generate a JWT refresh token (longer-lived, same session JTI as the access token).
 pub fn generate_refresh_token(
     user_id: Uuid,
     username: &str,
     secret: &str,
     ttl_secs: u64,
+    session_id: Uuid,
 ) -> Result<String, jsonwebtoken::errors::Error> {
     let now = Utc::now();
     let claims = Claims {
@@ -97,27 +100,58 @@ pub fn generate_refresh_token(
         iat: now.timestamp(),
         exp: (now + Duration::seconds(ttl_secs as i64)).timestamp(),
         token_type: "refresh".to_string(),
+        jti: session_id.to_string(),
+        two_fa_verified: false,
+        email_verified: false,
     };
-
-    encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(secret.as_bytes()),
-    )
+    encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes()))
 }
 
-/// Generate both access and refresh tokens.
+/// Generate both access and refresh tokens for a newly authenticated session.
+///
+/// A fresh `session_id` (UUID v4) is minted here and embedded in both tokens
+/// as their `jti` so they share a single session row.
 pub fn generate_token_pair(
     user_id: Uuid,
     username: &str,
     secret: &str,
     access_ttl: u64,
     refresh_ttl: u64,
+    two_fa_verified: bool,
+    email_verified: bool,
 ) -> Result<TokenPair, jsonwebtoken::errors::Error> {
+    let session_id = Uuid::new_v4();
     Ok(TokenPair {
-        access_token: generate_access_token(user_id, username, secret, access_ttl)?,
-        refresh_token: generate_refresh_token(user_id, username, secret, refresh_ttl)?,
+        access_token: generate_access_token(
+            user_id, username, secret, access_ttl, session_id, two_fa_verified, email_verified,
+        )?,
+        refresh_token: generate_refresh_token(user_id, username, secret, refresh_ttl, session_id)?,
         expires_in: access_ttl,
         token_type: "Bearer".to_string(),
+        session_id,
     })
 }
+
+/// Generate a short-lived (5-minute) MFA challenge token.
+///
+/// Issued after password verification when the account has `totp_enabled = true`.
+/// The client exchanges it for a full token pair by calling `POST /auth/2fa/verify`.
+pub fn generate_mfa_challenge_token(
+    user_id: Uuid,
+    username: &str,
+    secret: &str,
+) -> Result<String, jsonwebtoken::errors::Error> {
+    let now = Utc::now();
+    let claims = Claims {
+        sub: user_id.to_string(),
+        username: username.to_string(),
+        iat: now.timestamp(),
+        exp: (now + Duration::minutes(5)).timestamp(),
+        token_type: "mfa_challenge".to_string(),
+        jti: Uuid::new_v4().to_string(),
+        two_fa_verified: false,
+        email_verified: false,
+    };
+    encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes()))
+}
+

@@ -15,7 +15,8 @@ use nexus_common::{
     snowflake,
     validation::validate_request,
 };
-use nexus_db::repository::{channels, members, messages, reactions, read_states};
+use chrono::Utc;
+use nexus_db::repository::{channels, members, messages, moderation, reactions, read_states};
 use nexus_common::gateway_event::GatewayEvent;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -118,11 +119,56 @@ async fn send_message(
             resource: "Channel".into(),
         })?;
 
-    // If this is a server channel, verify user is a member
+    // If this is a server channel, verify membership, timeout status, and content filters
+    // Also capture per-server spam settings for the check below.
+    let mut spam_window_secs: u64 = 30;
+    let mut spam_max_messages: u64 = 3;
     if let Some(server_id) = channel.server_id {
-        if !members::is_member(&state.db.pool, auth.user_id, server_id).await? {
-            return Err(NexusError::Forbidden);
+        let member = members::find_member(&state.db.pool, auth.user_id, server_id)
+            .await?
+            .ok_or(NexusError::Forbidden)?;
+
+        // Timeout enforcement: member cannot send messages while timed out
+        if let Some(disabled_until) = member.communication_disabled_until {
+            if disabled_until > Utc::now() {
+                return Err(NexusError::Validation {
+                    message: "You are currently timed out in this server".into(),
+                });
+            }
         }
+
+        // Word filter check
+        if let Ok(Some((_pattern, action))) =
+            moderation::check_content(&state.db.pool, server_id, &body.content).await
+        {
+            match action.as_str() {
+                "warn" => {
+                    // Log but allow — a future gateway event could warn the client
+                    tracing::debug!(
+                        user_id = %auth.user_id,
+                        channel_id = %channel_id,
+                        "Word filter matched (warn action)"
+                    );
+                }
+                _ => {
+                    // "block" and "delete" both prevent sending
+                    return Err(NexusError::Validation {
+                        message: "Message contains prohibited content".into(),
+                    });
+                }
+            }
+        }
+
+        // Load per-server spam detection settings.
+        if let Ok(Some(server)) = nexus_db::repository::servers::find_by_id(&state.db.pool, server_id).await {
+            spam_window_secs = server.spam_window_secs.max(1) as u64;
+            spam_max_messages = server.spam_max_messages.max(1) as u64;
+        }
+    }
+
+    // Spam check: reject if the same content exceeds the per-server limit within the window
+    if check_spam(&state.db.redis, auth.user_id, channel_id, &body.content, spam_window_secs, spam_max_messages).await {
+        return Err(NexusError::RateLimited { retry_after_ms: spam_window_secs * 1_000 });
     }
 
     // Determine message type: 0 = Default, 1 = Reply (if reference provided)
@@ -284,11 +330,31 @@ async fn edit_message(
         message: "Content is required".into(),
     })?;
 
-    let updated = messages::update_message(&state.db.pool, message_id, content).await?;
+    // Fetch the channel before applying the edit so we can run the word filter.
+    let channel = channels::find_by_id(&state.db.pool, channel_id).await?.ok_or(
+        NexusError::NotFound { resource: "Channel".into() },
+    )?;
 
-    let channel = channels::find_by_id(&state.db.pool, channel_id).await?.ok_or(NexusError::NotFound {
-        resource: "Channel".into(),
-    })?;
+    // Word filter — reject / warn before persisting the edit.
+    if let Some(server_id) = channel.server_id {
+        if let Ok(Some((_pattern, action))) =
+            moderation::check_content(&state.db.pool, server_id, content).await
+        {
+            match action.as_str() {
+                "warn" => tracing::debug!(
+                    server_id = %server_id,
+                    "word filter match on message edit (warn only)"
+                ),
+                _ => {
+                    return Err(NexusError::Validation {
+                        message: "Message contains prohibited content".into(),
+                    })
+                }
+            }
+        }
+    }
+
+    let updated = messages::update_message(&state.db.pool, message_id, content).await?;
 
     let response = message_row_to_json(&updated, &[]);
 
@@ -344,6 +410,24 @@ async fn delete_message(
     }
 
     messages::delete_message(&state.db.pool, message_id).await?;
+
+    // Write an audit log entry when a moderator deletes someone else's message
+    if msg.author_id != auth.user_id {
+        if let Some(server_id) = channel.server_id {
+            let _ = nexus_db::repository::audit_log::write_entry(
+                &state.db.pool,
+                snowflake::generate_id(),
+                server_id,
+                Some(auth.user_id),
+                "MESSAGE_DELETE",
+                Some("message"),
+                Some(message_id),
+                &serde_json::json!({ "channel_id": channel_id, "author_id": msg.author_id }),
+                None,
+            )
+            .await;
+        }
+    }
 
     // Emit MESSAGE_DELETE event
     let _ = state.gateway_tx.send(GatewayEvent {
@@ -819,6 +903,40 @@ fn parse_mentions(content: &str) -> Vec<Uuid> {
         }
     }
     mentions
+}
+
+/// Spam detection: returns `true` when the same content has been sent more than
+/// `max_messages` times within the last `window_secs` seconds by the same user
+/// in the same channel.
+///
+/// Uses Redis INCR + EXPIRE.  If Redis is unavailable (lite mode or connection
+/// error) the function silently returns `false` so message sending is never
+/// blocked by a Redis outage.
+async fn check_spam(
+    redis: &Option<redis::aio::ConnectionManager>,
+    user_id: Uuid,
+    channel_id: Uuid,
+    content: &str,
+    window_secs: u64,
+    max_messages: u64,
+) -> bool {
+    let Some(mut conn) = redis.clone() else {
+        return false;
+    };
+
+    // Low-cost fingerprint \u2014 no extra dependencies required.
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    content.hash(&mut hasher);
+    let hash = hasher.finish();
+
+    let key = format!("msgdedup:{user_id}:{channel_id}:{hash:016x}");
+
+    match nexus_db::redis_pool::incr_expire(&mut conn, &key, window_secs).await {
+        Ok(count) => count > max_messages as i64,
+        Err(_) => false, // Don't block messages on Redis failure
+    }
 }
 
 /// Get which emojis the current user has reacted with on a message.

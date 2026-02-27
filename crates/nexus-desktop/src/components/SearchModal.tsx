@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { invoke } from "../invoke";
 import { useStore } from "../store";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 import { formatDistanceToNow } from "date-fns";
 
 interface SearchHit {
@@ -33,6 +34,7 @@ export default function SearchModal({ onClose }: Props) {
   const [selected, setSelected] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dialogRef = useFocusTrap<HTMLDivElement>(true);
 
   // Focus input on mount
   useEffect(() => {
@@ -112,8 +114,13 @@ export default function SearchModal({ onClose }: Props) {
     <div
       className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm pt-[15vh]"
       onClick={handleBackdropClick}
+      role="presentation"
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Search messages"
         className="w-full max-w-xl rounded-xl bg-bg-700 shadow-2xl overflow-hidden"
         onKeyDown={handleKeyDown}
       >
@@ -126,6 +133,7 @@ export default function SearchModal({ onClose }: Props) {
               fill="none"
               stroke="currentColor"
               strokeWidth="2"
+              aria-hidden="true"
             >
               <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
               <path d="M12 2a10 10 0 0 1 10 10" />
@@ -137,6 +145,7 @@ export default function SearchModal({ onClose }: Props) {
               fill="none"
               stroke="currentColor"
               strokeWidth="2"
+              aria-hidden="true"
             >
               <circle cx="11" cy="11" r="8" />
               <path d="m21 21-4.35-4.35" />
@@ -147,6 +156,12 @@ export default function SearchModal({ onClose }: Props) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search messages…"
+            aria-label="Search messages"
+            aria-autocomplete="list"
+            aria-controls="search-results"
+            aria-expanded={results.length > 0}
+            role="combobox"
+            autoComplete="off"
             className="flex-1 bg-transparent text-sm text-fg placeholder:text-muted/60 outline-none"
           />
           <kbd className="text-[10px] text-muted border border-bg-600/60 rounded px-1.5 py-0.5 shrink-0">
@@ -156,15 +171,22 @@ export default function SearchModal({ onClose }: Props) {
 
         {/* Results */}
         {results.length > 0 && (
-          <div className="max-h-80 overflow-y-auto">
+          <div
+            id="search-results"
+            role="listbox"
+            aria-label="Search results"
+            className="max-h-80 overflow-y-auto"
+          >
             {totalHits !== null && totalHits > results.length && (
-              <p className="px-4 py-1.5 text-[11px] text-muted/70 border-b border-bg-600/30">
+              <p className="px-4 py-1.5 text-[11px] text-muted/70 border-b border-bg-600/30" aria-live="polite">
                 Showing {results.length} of {totalHits} results
               </p>
             )}
             {results.map((hit, i) => (
               <button
                 key={hit.id}
+                role="option"
+                aria-selected={i === selected}
                 onClick={() => goToResult(hit)}
                 onMouseEnter={() => setSelected(i)}
                 className={`w-full flex gap-3 px-4 py-3 text-left transition-colors ${

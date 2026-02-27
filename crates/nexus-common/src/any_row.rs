@@ -163,6 +163,7 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for User {
                 _ => Some(UserPresence::Offline),
             })?,
             flags: row.try_get("flags")?,
+            totp_enabled: row.try_get("totp_enabled").unwrap_or(false),
             created_at: dt(row, "created_at")?,
             updated_at: dt(row, "updated_at")?,
         })
@@ -187,6 +188,9 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for Server {
             vanity_code: row.try_get("vanity_code")?,
             member_count: row.try_get("member_count")?,
             max_file_size: row.try_get("max_file_size")?,
+            require_2fa: row.try_get("require_2fa").unwrap_or(false),
+            spam_window_secs: row.try_get("spam_window_secs").unwrap_or(30),
+            spam_max_messages: row.try_get("spam_max_messages").unwrap_or(3),
             created_at: dt(row, "created_at")?,
             updated_at: dt(row, "updated_at")?,
         })
@@ -451,6 +455,7 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for EncryptedMessage {
             ciphertext_map,
             attachment_meta,
             sequence: row.try_get("sequence")?,
+            sender_ratchet_step: row.try_get("sender_ratchet_step")?,
             client_ts: opt_dt(row, "client_ts")?,
             created_at: dt(row, "created_at")?,
         })

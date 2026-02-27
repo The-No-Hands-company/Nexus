@@ -88,6 +88,51 @@ pub async fn send_encrypted_message(
     resp.json().await.map_err(|e| e.to_string())
 }
 
+/// List all E2EE devices registered by the current user.
+#[tauri::command]
+pub async fn list_devices(
+    state: State<'_, AppState>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let session = state.session_snapshot();
+    let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
+    let resp = client
+        .get(format!("{base}/api/v1/devices"))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    // API returns either a direct array or { devices: [...] }
+    let arr = if let Some(arr) = body.as_array() {
+        arr.clone()
+    } else if let Some(arr) = body.get("devices").and_then(|v| v.as_array()) {
+        arr.clone()
+    } else {
+        vec![]
+    };
+    Ok(arr)
+}
+
+/// Revoke (delete) one of the current user's registered E2EE devices.
+#[tauri::command]
+pub async fn delete_device(
+    state: State<'_, AppState>,
+    device_id: Uuid,
+) -> Result<(), String> {
+    let session = state.session_snapshot();
+    let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
+    let resp = client
+        .delete(format!("{base}/api/v1/devices/{device_id}"))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if resp.status().is_success() || resp.status().as_u16() == 204 {
+        Ok(())
+    } else {
+        let status = resp.status().as_u16();
+        Err(format!("Server returned HTTP {status}"))
+    }
+}
+
 /// Fetch encrypted message history for a channel.
 #[tauri::command]
 pub async fn fetch_encrypted_history(

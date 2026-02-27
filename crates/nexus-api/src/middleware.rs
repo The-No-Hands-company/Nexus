@@ -1,4 +1,4 @@
-//! Middleware — authentication extraction, rate limiting, security headers, etc.
+//! Middleware — authentication extraction, rate limiting, security headers, metrics, etc.
 
 use axum::{
     extract::Request,
@@ -8,8 +8,59 @@ use axum::{
 };
 use nexus_common::error::NexusError;
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::{auth, AppState};
+
+// ── HTTP metrics middleware ──────────────────────────────────────────────────
+
+/// Normalize a raw URI path to a low-cardinality label suitable for Prometheus.
+///
+/// Keeps the first 4 slash-delimited segments (e.g. `/api/v1/channels`) and
+/// drops dynamic path params that would explode label cardinality.
+fn normalize_path(path: &str) -> String {
+    // Try to use the matched route pattern from Axum (`:id` placeholders)
+    // before falling back to raw prefix truncation.
+    path.split('/')
+        .take(4)
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Record per-request Prometheus counters and latency histograms.
+///
+/// Labels:
+///   `nexus_http_requests_total{method, path, status}`
+///   `nexus_http_request_duration_seconds{method, path}`
+pub async fn record_request_metrics(request: Request, next: Next) -> Response {
+    let method = request.method().as_str().to_owned();
+    // Prefer the matched route pattern if Axum has already resolved it;
+    // otherwise fall back to the raw URI path (normalized to avoid high cardinality).
+    let path = request
+        .extensions()
+        .get::<axum::extract::MatchedPath>()
+        .map(|mp| mp.as_str().to_owned())
+        .unwrap_or_else(|| normalize_path(request.uri().path()));
+
+    let start = Instant::now();
+    let response = next.run(request).await;
+    let elapsed = start.elapsed().as_secs_f64();
+    let status = response.status().as_u16().to_string();
+
+    metrics::counter!(
+        "nexus_http_requests_total",
+        "method" => method.clone(),
+        "path" => path.clone(),
+        "status" => status,
+    ).increment(1);
+    metrics::histogram!(
+        "nexus_http_request_duration_seconds",
+        "method" => method,
+        "path" => path,
+    ).record(elapsed);
+
+    response
+}
 
 /// Authentication context extracted from the Authorization header.
 ///
@@ -22,6 +73,15 @@ pub struct AuthContext {
     /// `true` when the request was authenticated with a bot token rather than
     /// a user JWT.  Handlers that should be user-only can reject bots here.
     pub is_bot: bool,
+    /// The JTI (JWT ID) of the current access token, parsed as UUID.
+    /// Used by session-management routes to identify the caller's own session.
+    /// `None` for bot tokens or tokens issued before 09.7 (no `jti` claim).
+    pub session_id: Option<uuid::Uuid>,
+    /// Whether the token was issued after a successful 2FA check.
+    pub two_fa_verified: bool,
+    /// Whether the user's email was verified at the time of token issuance.
+    /// Always `true` for bot tokens and for users with no email registered.
+    pub email_verified: bool,
 }
 
 // ── SHA-256 helper (used for bot token hashing) ──────────────────────────────
@@ -68,14 +128,30 @@ pub async fn auth_middleware(
         .parse::<uuid::Uuid>()
         .map_err(|_| NexusError::InvalidToken)?;
 
+    let session_id = claims.jti.parse::<uuid::Uuid>().ok();
+    let two_fa_verified = claims.two_fa_verified;
+    let email_verified = claims.email_verified;
+
     let auth_ctx = AuthContext {
         user_id,
         username: claims.username,
         is_bot: false,
+        session_id,
+        two_fa_verified,
+        email_verified,
     };
 
     // Insert auth context into request extensions for handlers to use
-    request.extensions_mut().insert(auth_ctx);
+    request.extensions_mut().insert(auth_ctx.clone());
+
+    // Email verification gate (same policy as combined_auth_middleware)
+    let config = nexus_common::config::get();
+    if config.features.require_email_verification && !auth_ctx.email_verified {
+        let path = request.uri().path();
+        if !path.contains("/auth/") && !path.starts_with("/health") {
+            return Err(NexusError::Forbidden);
+        }
+    }
 
     Ok(next.run(request).await)
 }
@@ -122,6 +198,10 @@ pub async fn combined_auth_middleware(
             user_id: bot.id,
             username: bot.name,
             is_bot: true,
+            session_id: None,
+            two_fa_verified: false,
+            // Bots are not subject to email verification requirements.
+            email_verified: true,
         }
     } else {
         // ── JWT Bearer authentication ─────────────────────────────────────
@@ -142,14 +222,39 @@ pub async fn combined_auth_middleware(
             .parse::<uuid::Uuid>()
             .map_err(|_| NexusError::InvalidToken)?;
 
+        let session_id = claims.jti.parse::<uuid::Uuid>().ok();
+        let two_fa_verified = claims.two_fa_verified;
+        let email_verified = claims.email_verified;
+
         AuthContext {
             user_id,
             username: claims.username,
             is_bot: false,
+            session_id,
+            two_fa_verified,
+            email_verified,
         }
     };
 
-    request.extensions_mut().insert(auth_ctx);
+    request.extensions_mut().insert(auth_ctx.clone());
+
+    // ── Email verification gate ───────────────────────────────────────────
+    // Exempt /auth/* routes so that resend-verification, session management
+    // and 2FA completion still work while the account is unverified.
+    let config = nexus_common::config::get();
+    if config.features.require_email_verification
+        && !auth_ctx.is_bot
+        && !auth_ctx.email_verified
+    {
+        let path = request.uri().path();
+        let is_auth_path = path.contains("/auth/")
+            || path.starts_with("/healthz")
+            || path.starts_with("/health");
+        if !is_auth_path {
+            return Err(NexusError::Forbidden);
+        }
+    }
+
     Ok(next.run(request).await)
 }
 

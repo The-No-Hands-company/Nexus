@@ -18,6 +18,7 @@ use axum::{
     routing::{get, patch, post},
     Json, Router,
 };
+use chrono::Utc;
 use nexus_common::{
     error::{NexusError, NexusResult},
     gateway_event::GatewayEvent,
@@ -139,13 +140,22 @@ async fn voice_join_preflight(
         }
     }
 
-    // If it's a server channel, check membership
+    // If it's a server channel, check membership and timeout status
     if let Some(server_id) = channel.server_id {
-        let _member =
+        let member =
             nexus_db::repository::members::find_member(&state.db.pool, auth.user_id, server_id)
                 .await
                 .map_err(NexusError::Database)?
                 .ok_or(NexusError::Forbidden)?;
+
+        // Timeout enforcement: timed-out members cannot join voice
+        if let Some(disabled_until) = member.communication_disabled_until {
+            if disabled_until > Utc::now() {
+                return Err(NexusError::Validation {
+                    message: "You are currently timed out in this server".into(),
+                });
+            }
+        }
     }
 
     let config = nexus_common::config::get();

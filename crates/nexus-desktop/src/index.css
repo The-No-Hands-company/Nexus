@@ -2,6 +2,24 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Appearance: Font Size ───────────────────────────────────────────────────
+   Applied as a class on <html>. Rem-based Tailwind utilities scale with it.   */
+html.nexus-font-sm { font-size: 13px; }
+html.nexus-font-md { font-size: 16px; } /* default – matches browser baseline */
+html.nexus-font-lg { font-size: 18px; }
+html.nexus-font-xl { font-size: 20px; }
+
+/* ── Appearance: Message Density ────────────────────────────────────────────
+   Targets .nexus-msg rows inside ChatView.  Higher specificity than Tailwind  */
+html.nexus-density-compact .nexus-msg { padding-top: 0; padding-bottom: 0; }
+html.nexus-density-compact .nexus-msg-list { gap: 0; }
+
+html.nexus-density-cozy .nexus-msg { padding-top: 0.125rem; padding-bottom: 0.125rem; }
+html.nexus-density-cozy .nexus-msg-list { gap: 0.125rem; }
+
+html.nexus-density-roomy .nexus-msg { padding-top: 0.5rem; padding-bottom: 0.5rem; }
+html.nexus-density-roomy .nexus-msg-list { gap: 0.25rem; }
+
 /* ── Default theme (Nexus Dark) ─────────────────────────────────────────────── */
 :root {
   --color-bg-900: #0d0f13;

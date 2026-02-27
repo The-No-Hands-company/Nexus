@@ -4,6 +4,19 @@ import { invoke } from "../invoke";
 import ThemeSwitcher from "../themes/ThemeSwitcher";
 import type { PluginManifest } from "../plugins/types";
 import { formatDistanceToNow } from "date-fns";
+import clsx from "clsx";
+import {
+  type FontSize,
+  type Density,
+  type ColorScheme,
+  getFontSize,
+  getDensity,
+  getColorScheme,
+  saveFontSize,
+  saveDensity,
+  saveColorScheme,
+  isDarkScheme,
+} from "../themes/appearance";
 
 interface E2eeDevice {
   id: string;
@@ -15,8 +28,17 @@ interface E2eeDevice {
   createdAt: string;
 }
 
+interface Session {
+  id: string;
+  device_info: string | null;
+  user_agent: string | null;
+  ip_address: string | null;
+  created_at: string;
+  last_seen_at: string;
+}
+
 export default function SettingsPage() {
-  const { plugins, enabledPlugins, installPlugin, uninstallPlugin, togglePlugin, session, setSession } = useStore();
+  const { plugins, enabledPlugins, installPlugin, uninstallPlugin, togglePlugin, session, setSession, activeThemeId, setActiveTheme } = useStore();
   const [urlInput, setUrlInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -45,6 +67,36 @@ export default function SettingsPage() {
   };
 
   // ── Privacy preferences ────────────────────────────────────────────────────
+  // ── Appearance preferences ────────────────────────────────────────────────
+  const [colorScheme, setColorScheme] = useState<ColorScheme>(() => getColorScheme());
+  const [fontSize, setFontSize] = useState<FontSize>(() => getFontSize());
+  const [density, setDensity] = useState<Density>(() => getDensity());
+
+  const handleColorScheme = (scheme: ColorScheme) => {
+    setColorScheme(scheme);
+    saveColorScheme(scheme);
+    const dark = isDarkScheme(scheme);
+    if (!dark && activeThemeId !== "nexus-light") {
+      setActiveTheme("nexus-light");
+    } else if (dark && activeThemeId === "nexus-light") {
+      setActiveTheme("nexus-dark");
+    }
+  };
+
+  // Listen for OS color-scheme changes when the user is in "system" mode
+  useEffect(() => {
+    if (colorScheme !== "system") return;
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const handler = (e: MediaQueryListEvent) => {
+      if (e.matches) {
+        if (activeThemeId === "nexus-light") setActiveTheme("nexus-dark");
+      } else {
+        if (activeThemeId !== "nexus-light") setActiveTheme("nexus-light");
+      }
+    };
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, [colorScheme, activeThemeId, setActiveTheme]);
   const [privacyReadReceipts, setPrivacyReadReceipts] = useState(
     () => localStorage.getItem("nexus:privacy:readReceipts") !== "false"
   );
@@ -61,14 +113,69 @@ export default function SettingsPage() {
   const [devices, setDevices] = useState<E2eeDevice[]>([]);
   const [devicesLoading, setDevicesLoading] = useState(false);
   const [devicesError, setDevicesError] = useState<string | null>(null);
-  useEffect(() => {
+
+  const loadDevices = () => {
     if (!session) return;
     setDevicesLoading(true);
+    setDevicesError(null);
     invoke<E2eeDevice[]>("list_devices", {})
       .then(setDevices)
       .catch((e) => setDevicesError(String(e)))
       .finally(() => setDevicesLoading(false));
+  };
+
+  useEffect(() => {
+    loadDevices();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
+
+  const revokeDevice = async (deviceId: string) => {
+    try {
+      await invoke("delete_device", { deviceId });
+      setDevices((prev) => prev.filter((d) => d.id !== deviceId));
+    } catch (e) {
+      setDevicesError(`Failed to revoke device: ${String(e)}`);
+    }
+  };
+
+  // ── Sessions ───────────────────────────────────────────────────────────────
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [sessionsError, setSessionsError] = useState<string | null>(null);
+
+  const loadSessions = () => {
+    if (!session) return;
+    setSessionsLoading(true);
+    setSessionsError(null);
+    invoke<{ sessions: Session[] }>("list_sessions", {})
+      .then((res) => setSessions(res.sessions))
+      .catch((e) => setSessionsError(String(e)))
+      .finally(() => setSessionsLoading(false));
+  };
+
+  useEffect(() => {
+    loadSessions();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session]);
+
+  const revokeSession = async (sessionId: string) => {
+    try {
+      await invoke("revoke_session", { sessionId });
+      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+    } catch (e) {
+      setSessionsError(`Failed to revoke session: ${String(e)}`);
+    }
+  };
+
+  const revokeAllOtherSessions = async () => {
+    try {
+      await invoke("revoke_all_sessions", {});
+      // Keep only the current session (the one with no current marker will remain)
+      loadSessions();
+    } catch (e) {
+      setSessionsError(`Failed to revoke sessions: ${String(e)}`);
+    }
+  };
 
   const saveProfile = async () => {
     if (!session) return;
@@ -175,9 +282,125 @@ export default function SettingsPage() {
         </div>
       </section>
       <section className="mb-10">
-        <h2 className="text-base font-semibold mb-4 border-b border-bg-600 pb-2">Appearance</h2>
-        <div className="max-w-xs">
+        <h2 className="text-base font-semibold mb-5 border-b border-bg-600 pb-2">Appearance</h2>
+
+        {/* ── Color Scheme ──────────────────────────────── */}
+        <div className="mb-6 max-w-md">
+          <p className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Color Scheme</p>
+          <div className="flex gap-2">
+            {(["system", "dark", "light"] as const).map((scheme) => (
+              <button
+                key={scheme}
+                aria-pressed={colorScheme === scheme}
+                onClick={() => handleColorScheme(scheme)}
+                className={clsx(
+                  "flex-1 rounded-lg border py-2 text-sm font-medium transition-colors capitalize",
+                  colorScheme === scheme
+                    ? "border-accent-600 bg-accent-600/15 text-accent-300"
+                    : "border-bg-600/50 bg-bg-800 text-muted hover:text-fg"
+                )}
+              >
+                {scheme === "system" ? "🖥 System" : scheme === "dark" ? "🌙 Dark" : "☀ Light"}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-muted mt-1.5">
+            {colorScheme === "system"
+              ? "Follows your OS dark/light mode setting automatically."
+              : colorScheme === "dark"
+              ? "Always use a dark theme."
+              : "Always use the light theme."}
+          </p>
+        </div>
+
+        {/* ── Theme ─────────────────────────────────────── */}
+        <div className="mb-6 max-w-xs">
           <ThemeSwitcher />
+        </div>
+
+        {/* ── Font Size ─────────────────────────────────── */}
+        <div className="mb-6 max-w-md">
+          <p className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Font Size</p>
+          <div className="flex gap-1.5 items-end">
+            {([
+              { id: "sm" as const, label: "Small", size: "text-xs" },
+              { id: "md" as const, label: "Normal", size: "text-sm" },
+              { id: "lg" as const, label: "Large", size: "text-base" },
+              { id: "xl" as const, label: "Extra Large", size: "text-lg" },
+            ]).map(({ id, label, size }) => (
+              <button
+                key={id}
+                aria-pressed={fontSize === id}
+                onClick={() => {
+                  setFontSize(id);
+                  saveFontSize(id);
+                }}
+                className={clsx(
+                  "flex-1 rounded-lg border py-2 transition-colors text-center",
+                  size,
+                  fontSize === id
+                    ? "border-accent-600 bg-accent-600/15 text-accent-300"
+                    : "border-bg-600/50 bg-bg-800 text-muted hover:text-fg"
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <div className="mt-2 rounded-lg bg-bg-800 border border-bg-600/30 px-3 py-2">
+            <p className="text-muted text-[0.875em]">
+              Preview: The quick brown fox jumps over the lazy dog.
+            </p>
+          </div>
+        </div>
+
+        {/* ── Message Density ───────────────────────────── */}
+        <div className="mb-2 max-w-md">
+          <p className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">Message Density</p>
+          <div className="flex gap-2">
+            {([
+              {
+                id: "compact" as const,
+                label: "Compact",
+                desc: "Tightest spacing — maximise visible messages.",
+              },
+              {
+                id: "cozy" as const,
+                label: "Cozy",
+                desc: "Balanced spacing. The default.",
+              },
+              {
+                id: "roomy" as const,
+                label: "Roomy",
+                desc: "Extra breathing room between messages.",
+              },
+            ]).map(({ id, label, desc }) => (
+              <button
+                key={id}
+                aria-pressed={density === id}
+                onClick={() => {
+                  setDensity(id);
+                  saveDensity(id);
+                }}
+                className={clsx(
+                  "flex-1 rounded-lg border p-3 text-left transition-colors",
+                  density === id
+                    ? "border-accent-600 bg-accent-600/15"
+                    : "border-bg-600/50 bg-bg-800 hover:border-bg-500"
+                )}
+              >
+                <p
+                  className={clsx(
+                    "text-sm font-medium",
+                    density === id ? "text-accent-300" : "text-fg"
+                  )}
+                >
+                  {label}
+                </p>
+                <p className="text-xs text-muted mt-0.5">{desc}</p>
+              </button>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -332,6 +555,63 @@ export default function SettingsPage() {
                 <code className="text-[10px] text-muted/60 font-mono shrink-0">
                   {d.id.slice(0, 8)}…
                 </code>
+                <button
+                  onClick={() => revokeDevice(d.id)}
+                  className="text-[11px] text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded px-2 py-0.5 transition-colors shrink-0"
+                  title="Revoke this device"
+                >
+                  Revoke
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* ── Sessions ──────────────────────────────────────────────────────── */}
+      <section className="mb-10">
+        <div className="flex items-center justify-between mb-4 border-b border-bg-600 pb-2">
+          <h2 className="text-base font-semibold">Active Sessions</h2>
+          {sessions.length > 1 && (
+            <button
+              onClick={revokeAllOtherSessions}
+              className="text-xs text-red-400 hover:text-red-300 transition-colors"
+            >
+              Revoke all other sessions
+            </button>
+          )}
+        </div>
+        {sessionsError && (
+          <p className="text-sm text-red-400 mb-2">Error: {sessionsError}</p>
+        )}
+        {sessionsLoading ? (
+          <p className="text-sm text-muted">Loading sessions…</p>
+        ) : sessions.length === 0 ? (
+          <p className="text-sm text-muted">No active sessions found.</p>
+        ) : (
+          <ul className="flex flex-col gap-2 max-w-lg">
+            {sessions.map((s) => (
+              <li key={s.id} className="flex items-start gap-3 rounded-lg bg-bg-800 p-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-fg truncate">
+                    {s.device_info ?? s.user_agent ?? "Unknown device"}
+                  </p>
+                  {s.ip_address && (
+                    <p className="text-xs text-muted">{s.ip_address}</p>
+                  )}
+                  <p className="text-xs text-muted/60">
+                    Last active {formatDistanceToNow(new Date(s.last_seen_at), { addSuffix: true })}
+                    {" · "}
+                    Created {formatDistanceToNow(new Date(s.created_at), { addSuffix: true })}
+                  </p>
+                </div>
+                <button
+                  onClick={() => revokeSession(s.id)}
+                  className="text-[11px] text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded px-2 py-0.5 transition-colors shrink-0 mt-0.5"
+                  title="Revoke this session"
+                >
+                  Revoke
+                </button>
               </li>
             ))}
           </ul>

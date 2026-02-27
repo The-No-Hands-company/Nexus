@@ -46,6 +46,10 @@ pub struct User {
     /// User flags (bitfield: staff, verified, bot, etc.)
     pub flags: i64,
 
+    /// Whether TOTP two-factor authentication is enabled.
+    #[serde(skip_serializing)]
+    pub totp_enabled: bool,
+
     /// Account creation timestamp
     pub created_at: DateTime<Utc>,
 
@@ -167,6 +171,12 @@ pub struct UpdateUserRequest {
     pub status: Option<String>,
 
     pub presence: Option<UserPresence>,
+
+    /// URL of the user's avatar image.
+    #[validate(url)]
+    #[validate(length(max = 512))]
+    #[serde(default)]
+    pub avatar: Option<String>,
 }
 
 use std::sync::LazyLock;

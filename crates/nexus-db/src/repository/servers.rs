@@ -58,21 +58,53 @@ pub async fn update_server(
     name: Option<&str>,
     description: Option<&str>,
     is_public: Option<bool>,
+    require_2fa: Option<bool>,
+    spam_window_secs: Option<i32>,
+    spam_max_messages: Option<i32>,
 ) -> Result<Server, sqlx::Error> {
     let q = format!(
         "UPDATE servers SET \
              name = COALESCE($1, name), \
              description = COALESCE($2, description), \
              is_public = COALESCE($3, is_public), \
+             require_2fa = COALESCE($4, require_2fa), \
+             spam_window_secs = COALESCE($5, spam_window_secs), \
+             spam_max_messages = COALESCE($6, spam_max_messages), \
              updated_at = CURRENT_TIMESTAMP \
-         WHERE id = $4::uuid \
+         WHERE id = $7::uuid \
          RETURNING {SERVER_COLS}"
     );
     sqlx::query_as::<_, Server>(&q)
-    .bind(id.to_string())
     .bind(name)
     .bind(description)
     .bind(is_public)
+    .bind(require_2fa)
+    .bind(spam_window_secs)
+    .bind(spam_max_messages)
+    .bind(id.to_string())
+    .fetch_one(pool)
+    .await
+}
+
+/// Transfer server ownership to another member.
+///
+/// The caller is responsible for verifying the requester is the current owner
+/// and that `new_owner_id` is already a member of the server.
+pub async fn transfer_ownership(
+    pool: &sqlx::AnyPool,
+    server_id: Uuid,
+    new_owner_id: Uuid,
+) -> Result<Server, sqlx::Error> {
+    let q = format!(
+        "UPDATE servers SET \
+             owner_id = $1::uuid, \
+             updated_at = CURRENT_TIMESTAMP \
+         WHERE id = $2::uuid \
+         RETURNING {SERVER_COLS}"
+    );
+    sqlx::query_as::<_, Server>(&q)
+    .bind(new_owner_id.to_string())
+    .bind(server_id.to_string())
     .fetch_one(pool)
     .await
 }

@@ -111,6 +111,7 @@ async fn send_encrypted_message(
         &body.ciphertext_map,
         body.attachment_meta.as_ref(),
         body.client_ts,
+        body.sender_ratchet_step,
     )
     .await
     .map_err(|e| NexusError::Internal(e))?;
@@ -135,13 +136,25 @@ async fn send_encrypted_message(
     });
 
     // ── Ratchet step advancement ───────────────────────────────────────────────
-    // For each recipient device in the ciphertext map, advance the server-side
-    // ratchet_step counter.  This lets recipients detect if they missed any
-    // ratchet steps (out-of-order / dropped messages).
     //
-    // message type 1 = PreKeySignalMessage  → X3DH session establishment,
-    //                                          starts fresh session at step 1
-    // message type 2 = SignalMessage        → in-session step, increment counter
+    // For each recipient device in the ciphertext map, advance the server-side
+    // ratchet_step counter.  This counter is a server-maintained monotonic
+    // integer that mirrors the client's Double Ratchet step; it is not the
+    // ratchet state itself (which remains opaque on the client side).
+    //
+    // Signal Protocol message types:
+    //   type 1 = PreKeySignalMessage  — X3DH session establishment.
+    //            The server does NOT create a session row here.  A session row
+    //            with the encrypted ratchet state blob will be created by the
+    //            client via PUT /devices/:id/sessions/:remote after completing
+    //            the X3DH calculation locally.
+    //
+    //   type 2 = SignalMessage        — in-session ratchet step.
+    //            Increment the session's ratchet_step counter so recipients can
+    //            detect gaps (out-of-order or dropped messages).  If no session
+    //            row exists we log a warning (client sent without establishing a
+    //            session first) but still store the message so it can be re-read
+    //            if the client recovers.
     if let Some(map) = body.ciphertext_map.as_object() {
         for (device_id_str, envelope) in map {
             if let Ok(recipient_device_id) = Uuid::parse_str(device_id_str) {
@@ -149,28 +162,36 @@ async fn send_encrypted_message(
                     .get("type")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(2);
-                if msg_type == 1 {
-                    // PreKeySignalMessage: establish a fresh session record.
-                    // session_state is empty here; the client will PUT the
-                    // encrypted state blob after completing X3DH.
-                    let _ = keystore::upsert_session(
-                        &state.db.pool,
-                        sender_device.id,
-                        recipient_device_id,
-                        "",
-                        1,
-                    )
-                    .await;
-                } else {
-                    // SignalMessage: increment the ratchet counter.
-                    // Ignore missing sessions (first message race).
-                    let _ = keystore::increment_ratchet_step(
+
+                if msg_type == 2 {
+                    // Validate a session exists before incrementing.
+                    let exists = keystore::session_exists(
                         &state.db.pool,
                         sender_device.id,
                         recipient_device_id,
                     )
-                    .await;
+                    .await
+                    .unwrap_or(false);
+
+                    if exists {
+                        let _ = keystore::increment_ratchet_step(
+                            &state.db.pool,
+                            sender_device.id,
+                            recipient_device_id,
+                        )
+                        .await;
+                    } else {
+                        tracing::warn!(
+                            sender_device = %sender_device.id,
+                            recipient_device = %recipient_device_id,
+                            "SignalMessage sent without an established session — \
+                             client should call PUT /sessions before sending type=2 messages"
+                        );
+                    }
                 }
+                // type=1 (PreKeySignalMessage): no server-side session action.
+                // The client will PUT the encrypted session state blob once X3DH
+                // completes, establishing the session row.
             }
         }
     }

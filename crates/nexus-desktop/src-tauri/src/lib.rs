@@ -64,6 +64,24 @@ pub fn run() {
             commands::servers::list_servers,
             commands::servers::get_server,
             commands::servers::create_server,
+            commands::servers::list_roles,
+            commands::servers::create_role,
+            commands::servers::update_role,
+            commands::servers::delete_role,
+            // Emoji management
+            commands::emojis::list_emoji,
+            commands::emojis::upload_emoji,
+            commands::emojis::rename_emoji,
+            commands::emojis::delete_emoji,
+            // Webhook management
+            commands::webhooks::list_webhooks,
+            commands::webhooks::create_incoming_webhook,
+            commands::webhooks::delete_webhook,
+            // Bot management
+            commands::bots::list_server_bots,
+            commands::bots::install_bot,
+            commands::bots::uninstall_bot,
+            commands::bots::get_public_bot_info,
             commands::channels::list_channels,
             commands::channels::get_channel,
             commands::channels::create_channel,
@@ -75,6 +93,8 @@ pub fn run() {
             commands::e2ee::fetch_encrypted_history,
             commands::e2ee::register_device,
             commands::e2ee::get_key_bundle,
+            commands::e2ee::list_devices,
+            commands::e2ee::delete_device,
             // Presence & voice
             commands::presence::update_presence,
             commands::voice::get_voice_state,
@@ -82,6 +102,7 @@ pub fn run() {
             commands::settings::get_settings,
             commands::settings::set_setting,
             commands::settings::set_server_url,
+            commands::settings::update_profile,
             // Overlay
             overlay::show_overlay,
             overlay::hide_overlay,

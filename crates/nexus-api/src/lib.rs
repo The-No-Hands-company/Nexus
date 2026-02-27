@@ -8,6 +8,7 @@ pub mod middleware;
 pub mod routes;
 
 use axum::Router;
+use metrics_exporter_prometheus::PrometheusHandle;
 use nexus_common::gateway_event::GatewayEvent;
 use nexus_db::{search::SearchClient, storage::StorageClient, Database};
 use nexus_federation::{client::FederationClient, ServerKeyPair};
@@ -39,6 +40,8 @@ pub struct AppState {
     pub federation_client: Arc<FederationClient>,
     /// Monotonic timestamp captured at process start — used to compute uptime.
     pub started_at: Instant,
+    /// Prometheus metrics handle — render current metrics text with `prometheus.render()`.
+    pub prometheus: PrometheusHandle,
 }
 
 /// Build the complete API router with all routes and middleware.
@@ -74,6 +77,13 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::extensibility::router())
         // v0.8 Federation — client-facing directory endpoints
         .merge(routes::directory::router())
+        // v0.9.7 Account Security
+        .merge(routes::two_fa::router())           // authenticated 2FA management
+        .merge(routes::two_fa::public_router())    // unauthenticated MFA verify endpoint
+        .merge(routes::sessions::router())         // session listing + revocation
+        .merge(routes::email_verification::router()) // email verify + resend
+        // v0.9.8 Moderation & Safety
+        .merge(routes::moderation::router())       // audit log, kick, ban, timeout, reports, word filters
         // Make Arc<AppState> available as an Axum Extension so that
         // `combined_auth_middleware` can perform DB lookups for bot tokens
         // without requiring `from_fn_with_state` on every sub-router.
@@ -83,6 +93,8 @@ pub fn build_router(state: AppState) -> Router {
         .nest("/api/v1", api_routes)
         // v0.8 Federation — server-to-server endpoints (live outside /api/v1)
         .merge(routes::federation::federation_router())
+        // Prometheus metrics — at /metrics (outside /api/v1 for standard scrape_configs)
+        .merge(routes::metrics::router())
         // Local file serving (lite mode — no-op in full mode)
         .merge(routes::files::router())
         .layer(
@@ -91,9 +103,29 @@ pub fn build_router(state: AppState) -> Router {
                 .allow_methods(tower_http::cors::Any)
                 .allow_headers(tower_http::cors::Any),
         )
-        .layer(tower_http::trace::TraceLayer::new_for_http())
+        .layer(
+            tower_http::trace::TraceLayer::new_for_http()
+                // Emit a span per request with method + URI path as structured fields
+                .make_span_with(
+                    tower_http::trace::DefaultMakeSpan::new()
+                        .level(tracing::Level::INFO)
+                        .include_headers(false),
+                )
+                // Emit a record per response with status + latency_ms as structured fields
+                .on_response(
+                    tower_http::trace::DefaultOnResponse::new()
+                        .level(tracing::Level::INFO)
+                        .latency_unit(tower_http::LatencyUnit::Millis),
+                )
+                // Emit a record on request body failures
+                .on_failure(
+                    tower_http::trace::DefaultOnFailure::new()
+                        .level(tracing::Level::ERROR),
+                ),
+        )
         .layer(tower_http::compression::CompressionLayer::new())
         .layer(axum::middleware::from_fn(middleware::security_headers))
+        .layer(axum::middleware::from_fn(middleware::record_request_metrics))
         .with_state(arc_state)
 }
 
