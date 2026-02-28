@@ -220,6 +220,132 @@ pub struct WellKnownServer {
     pub server: String,
 }
 
+// ─── v0.8.5 Rich server identity ─────────────────────────────────────────────
+
+/// Extended well-known response returned by Phase 8.5+ servers.
+///
+/// Published at `/.well-known/nexus/server` by servers that have filled in
+/// instance metadata. Remote servers parse this when initiating peering.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RichWellKnownServer {
+    /// Canonical server name for federation (required).
+    #[serde(rename = "m.server")]
+    pub server: String,
+    /// Human-readable display name of this instance.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+    /// Short description shown in directory / peering UX.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Admin contact — e-mail address or URL.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub admin_contact: Option<String>,
+    /// Software stack and version (e.g. `"Nexus 0.15.0"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub software_version: Option<String>,
+    /// Approximate number of registered users on the instance.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_count: Option<u64>,
+    /// Number of servers this instance is currently peered with.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub peer_count: Option<u64>,
+    /// Federation policy: `"open"` | `"allowlist"` | `"closed"`.
+    #[serde(default = "default_federation_policy")]
+    pub federation_policy: String,
+}
+
+fn default_federation_policy() -> String {
+    "open".to_owned()
+}
+
+// ─── v0.8.5 Peer health & status ─────────────────────────────────────────────
+
+/// Online / offline / degraded health status of a federated peer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PeerStatus {
+    /// Peer responded to the most recent ping within normal latency.
+    Online,
+    /// Peer did not respond to the most recent ping.
+    Offline,
+    /// Peer responded but with elevated latency or partial errors.
+    Degraded,
+    /// Peer has been manually blocked by an admin.
+    Blocked,
+}
+
+/// Live health snapshot of a single federated peer.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeerHealth {
+    pub domain: String,
+    pub status: PeerStatus,
+    /// Most recent round-trip latency in milliseconds (None if offline).
+    pub latency_ms: Option<u32>,
+    /// ISO-8601 timestamp of the last successful contact.
+    pub last_seen_at: Option<DateTime<Utc>>,
+    /// Last error string, if any.
+    pub last_error: Option<String>,
+}
+
+// ─── v0.8.5 Admin peer record ─────────────────────────────────────────────────
+
+/// Full peer record as returned by `GET /api/v1/admin/federation/peers`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeerRecord {
+    pub id: String,
+    pub server_name: String,
+    pub display_name: Option<String>,
+    pub description: Option<String>,
+    pub admin_contact: Option<String>,
+    pub software_version: Option<String>,
+    pub user_count: Option<i64>,
+    pub trust_score: i16,
+    pub federation_policy: String,
+    pub is_blocked: bool,
+    pub is_healthy: bool,
+    pub latency_ms: Option<i32>,
+    pub last_seen_at: Option<DateTime<Utc>>,
+    pub last_error: Option<String>,
+    pub first_seen_at: DateTime<Utc>,
+    pub server_type: String,
+}
+
+// ─── v0.8.5 Peering request record ───────────────────────────────────────────
+
+/// A pending or resolved peering request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeerRequest {
+    pub id: String,
+    /// `"outbound"` or `"inbound"`.
+    pub direction: String,
+    pub remote_domain: String,
+    pub remote_display_name: Option<String>,
+    pub remote_description: Option<String>,
+    pub message: Option<String>,
+    /// `"pending"` | `"accepted"` | `"rejected"` | `"cancelled"`.
+    pub status: String,
+    pub created_at: DateTime<Utc>,
+    pub resolved_at: Option<DateTime<Utc>>,
+}
+
+// ─── v0.8.5 Admin federation status ──────────────────────────────────────────
+
+/// Summary of this instance's federation state, returned by
+/// `GET /api/v1/admin/federation/status`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FederationStatus {
+    pub server_name: String,
+    pub software_version: String,
+    pub federation_enabled: bool,
+    pub peer_count: u64,
+    pub healthy_peer_count: u64,
+    pub pending_inbound_requests: u64,
+    pub pending_outbound_requests: u64,
+    /// Total federated events processed since last restart.
+    pub events_processed: u64,
+    pub uptime_seconds: u64,
+}
+
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
 /// Generate a new locally-unique event ID on this server.

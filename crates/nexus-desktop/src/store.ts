@@ -302,6 +302,60 @@ export interface CanvasBlock {
   updatedAt: string;
 }
 
+// ── Federation types (v0.8.5) ─────────────────────────────────────────────────
+
+export type FederationPolicy = "open" | "closed" | "invite_only";
+
+export interface FederationStatus {
+  serverName: string;
+  softwareVersion: string;
+  federationEnabled: boolean;
+  peerCount: number;
+  healthyPeerCount: number;
+  pendingInboundRequests: number;
+  pendingOutboundRequests: number;
+  uptimeSeconds: number;
+}
+
+export interface FederationIdentity {
+  displayName?: string;
+  description?: string;
+  adminContact?: string;
+  federationPolicy: FederationPolicy;
+}
+
+export interface FederatedPeer {
+  domain: string;
+  displayName?: string;
+  trustScore: number;
+  isHealthy: boolean;
+  isBlocked: boolean;
+  latencyMs?: number;
+  lastSeenAt?: string;
+  notes?: string;
+  addedAt: string;
+}
+
+export interface PeeringRequest {
+  id: string;
+  direction: "inbound" | "outbound";
+  remoteDomain: string;
+  remoteDisplayName?: string;
+  remoteDescription?: string;
+  status: "pending" | "accepted" | "rejected" | "cancelled";
+  message?: string;
+  createdAt: string;
+}
+
+export interface FederationAuditEntry {
+  id: string;
+  adminId: string;
+  action: string;
+  targetDomain: string;
+  details: Record<string, unknown>;
+  createdAt: string;
+}
+
 interface StoreState {
   // Auth
   session: Session | null;
@@ -463,6 +517,16 @@ interface StoreState {
   upsertCanvasBlock: (channelId: string, block: CanvasBlock) => void;
   removeCanvasBlock: (channelId: string, blockId: string) => void;
   loadCanvasBlocks: (channelId: string) => Promise<void>;
+
+  // Federation (v0.8.5) — instance-admin management
+  federationStatus: FederationStatus | null;
+  loadFederationStatus: () => Promise<void>;
+  federationIdentity: FederationIdentity | null;
+  loadFederationIdentity: () => Promise<void>;
+  federatedPeers: FederatedPeer[];
+  loadFederatedPeers: () => Promise<void>;
+  peeringRequests: PeeringRequest[];
+  loadPeeringRequests: (status?: string) => Promise<void>;
 }
 
 // Module-level map so typing-clear timeouts survive re-renders
@@ -987,6 +1051,49 @@ export const useStore = create<StoreState>((set, get) => ({
       set((s) => ({ canvasBlocks: { ...s.canvasBlocks, [channelId]: blocks } }));
     } catch (e) {
       console.error("loadCanvasBlocks error", e);
+    }
+  },
+
+  // ─── Federation ───────────────────────────────────────────────────────
+  federationStatus: null,
+  loadFederationStatus: async () => {
+    try {
+      const data = await invoke<FederationStatus>("get_federation_status", {});
+      set({ federationStatus: data });
+    } catch (e) {
+      console.error("loadFederationStatus error", e);
+    }
+  },
+
+  federationIdentity: null,
+  loadFederationIdentity: async () => {
+    try {
+      const data = await invoke<FederationIdentity>("get_federation_identity", {});
+      set({ federationIdentity: data });
+    } catch (e) {
+      console.error("loadFederationIdentity error", e);
+    }
+  },
+
+  federatedPeers: [],
+  loadFederatedPeers: async () => {
+    try {
+      const data = await invoke<{ peers: FederatedPeer[] }>("list_peers", {});
+      set({ federatedPeers: data.peers ?? [] });
+    } catch (e) {
+      console.error("loadFederatedPeers error", e);
+    }
+  },
+
+  peeringRequests: [],
+  loadPeeringRequests: async (status?) => {
+    try {
+      const data = await invoke<{ requests: PeeringRequest[] }>(
+        "list_peering_requests", { status }
+      );
+      set({ peeringRequests: data.requests ?? [] });
+    } catch (e) {
+      console.error("loadPeeringRequests error", e);
     }
   },
 }));

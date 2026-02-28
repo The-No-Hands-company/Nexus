@@ -288,6 +288,68 @@ function mapCanvasBlock(b: Raw) {
   };
 }
 
+// ── Federation mappers (v0.8.5) ───────────────────────────────────────────────
+
+function mapFederationStatus(r: Raw) {
+  return {
+    serverName:             r.server_name as string,
+    softwareVersion:        (r.software_version as string) ?? "",
+    federationEnabled:      Boolean(r.federation_enabled),
+    peerCount:              (r.peer_count as number) ?? 0,
+    healthyPeerCount:       (r.healthy_peer_count as number) ?? 0,
+    pendingInboundRequests: (r.pending_inbound_requests as number) ?? 0,
+    pendingOutboundRequests:(r.pending_outbound_requests as number) ?? 0,
+    uptimeSeconds:          (r.uptime_seconds as number) ?? 0,
+  };
+}
+
+function mapFederationIdentity(r: Raw) {
+  return {
+    displayName:       (r.display_name as string | undefined) ?? undefined,
+    description:       (r.description as string | undefined) ?? undefined,
+    adminContact:      (r.admin_contact as string | undefined) ?? undefined,
+    federationPolicy:  (r.federation_policy as string) ?? "open",
+  };
+}
+
+function mapFederatedPeer(r: Raw) {
+  return {
+    domain:       r.domain as string,
+    displayName:  (r.display_name as string | undefined) ?? undefined,
+    trustScore:   (r.trust_score as number) ?? 50,
+    isHealthy:    Boolean(r.is_healthy),
+    isBlocked:    Boolean(r.is_blocked),
+    latencyMs:    (r.latency_ms as number | undefined) ?? undefined,
+    lastSeenAt:   (r.last_seen_at as string | undefined) ?? undefined,
+    notes:        (r.notes as string | undefined) ?? undefined,
+    addedAt:      (r.added_at as string) ?? "",
+  };
+}
+
+function mapPeeringRequest(r: Raw) {
+  return {
+    id:                 r.id as string,
+    direction:          r.direction as "inbound" | "outbound",
+    remoteDomain:       r.remote_domain as string,
+    remoteDisplayName:  (r.remote_display_name as string | undefined) ?? undefined,
+    remoteDescription:  (r.remote_description as string | undefined) ?? undefined,
+    status:             r.status as "pending" | "accepted" | "rejected" | "cancelled",
+    message:            (r.message as string | undefined) ?? undefined,
+    createdAt:          (r.created_at as string) ?? "",
+  };
+}
+
+function mapAuditEntry(r: Raw) {
+  return {
+    id:           r.id as string,
+    adminId:      (r.admin_id as string) ?? "",
+    action:       r.action as string,
+    targetDomain: (r.target_domain as string) ?? "",
+    details:      (r.details as Record<string, unknown>) ?? {},
+    createdAt:    (r.created_at as string) ?? "",
+  };
+}
+
 // ── Command dispatch ──────────────────────────────────────────────────────────
 
 async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
@@ -936,6 +998,111 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
         blocks: args.blocks,
       });
     }
+
+    // ── Federation (v0.8.5) ───────────────────────────────────────────────
+
+    case "get_federation_status": {
+      const raw = await apiFetch<Raw>("GET", "/api/v1/admin/federation/status");
+      return mapFederationStatus(raw) as unknown as T;
+    }
+
+    case "get_federation_identity": {
+      const raw = await apiFetch<Raw>("GET", "/api/v1/admin/federation/identity");
+      return mapFederationIdentity(raw) as unknown as T;
+    }
+
+    case "update_federation_identity": {
+      const raw = await apiFetch<Raw>("PATCH", "/api/v1/admin/federation/identity", {
+        display_name:       args.displayName,
+        description:        args.description,
+        admin_contact:      args.adminContact,
+        federation_policy:  args.federationPolicy,
+      });
+      return mapFederationIdentity(raw) as unknown as T;
+    }
+
+    case "list_peers": {
+      const raw = await apiFetch<{ peers: Raw[] }>("GET", "/api/v1/admin/federation/peers");
+      return {
+        peers: (raw.peers ?? []).map(mapFederatedPeer),
+      } as unknown as T;
+    }
+
+    case "add_peer": {
+      return apiFetch<T>("POST", "/api/v1/admin/federation/peers", {
+        domain:      args.domain,
+        message:     args.message,
+        trust_score: args.trustScore,
+      });
+    }
+
+    case "peer_health": {
+      return apiFetch<T>("GET", `/api/v1/admin/federation/peers/${encodeURIComponent(args.domain as string)}/health`);
+    }
+
+    case "update_peer_trust": {
+      return apiFetch<T>("PATCH", `/api/v1/admin/federation/peers/${encodeURIComponent(args.domain as string)}/trust`, {
+        trust_score: args.trustScore,
+        notes:       args.notes,
+      });
+    }
+
+    case "block_peer": {
+      return apiFetch<T>("POST", `/api/v1/admin/federation/peers/${encodeURIComponent(args.domain as string)}/block`);
+    }
+
+    case "unblock_peer": {
+      return apiFetch<T>("POST", `/api/v1/admin/federation/peers/${encodeURIComponent(args.domain as string)}/unblock`);
+    }
+
+    case "remove_peer": {
+      return apiFetch<T>("DELETE", `/api/v1/admin/federation/peers/${encodeURIComponent(args.domain as string)}`);
+    }
+
+    case "list_peering_requests": {
+      const params = new URLSearchParams();
+      if (args.status) params.set("status", args.status as string);
+      if (args.direction) params.set("direction", args.direction as string);
+      const qs = params.toString() ? `?${params}` : "";
+      const raw = await apiFetch<{ requests: Raw[]; total: number }>(
+        "GET", `/api/v1/admin/federation/requests${qs}`
+      );
+      return {
+        requests: (raw.requests ?? []).map(mapPeeringRequest),
+        total: raw.total ?? 0,
+      } as unknown as T;
+    }
+
+    case "accept_peering_request": {
+      return apiFetch<T>("POST", `/api/v1/admin/federation/requests/${args.requestId}/accept`);
+    }
+
+    case "reject_peering_request": {
+      return apiFetch<T>("POST", `/api/v1/admin/federation/requests/${args.requestId}/reject`);
+    }
+
+    case "get_federation_audit": {
+      const params = new URLSearchParams();
+      if (args.domain) params.set("domain", args.domain as string);
+      if (args.limit) params.set("limit", String(args.limit));
+      const qs = params.toString() ? `?${params}` : "";
+      const raw = await apiFetch<{ entries: Raw[]; total: number }>(
+        "GET", `/api/v1/admin/federation/audit${qs}`
+      );
+      return {
+        entries: (raw.entries ?? []).map(mapAuditEntry),
+        total: raw.total ?? 0,
+      } as unknown as T;
+    }
+
+    case "search_federated_users": {
+      const params = new URLSearchParams();
+      if (args.query) params.set("q", args.query as string);
+      if (args.domain) params.set("domain", args.domain as string);
+      const qs = params.toString() ? `?${params}` : "";
+      return apiFetch<T>("GET", `/api/v1/federation/search${qs}`);
+    }
+
       throw new Error(`[browser] Unhandled invoke command: "${cmd}"`);
   }
 }

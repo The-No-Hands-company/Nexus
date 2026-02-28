@@ -47,4 +47,7 @@ pub use key_manager::KeyManager;
 pub use keys::ServerKeyPair;
 pub use matrix_bridge::{BridgeConfig, BridgeError, BridgedEvent, MatrixBridge, MatrixTransaction, mxid_to_username};
 pub use signatures::sign_event;
-pub use types::{FederationEvent, FederationTransaction, ServerInfo};
+pub use types::{
+    FederationEvent, FederationStatus, FederationTransaction, PeerHealth, PeerRecord,
+    PeerRequest, PeerStatus, RichWellKnownServer, ServerInfo,
+};

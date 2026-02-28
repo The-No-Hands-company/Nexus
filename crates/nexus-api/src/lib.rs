@@ -101,6 +101,8 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::badges::router())                          // user badges
         .merge(routes::boosters::router())                        // server supporter tiers
         .merge(routes::canvas::router())                          // canvas document channels
+        // v0.8.5 Federation UX — admin management + cross-instance search
+        .merge(routes::federation_admin::router())                // federation admin panel API
         // Make Arc<AppState> available as an Axum Extension so that
         // `combined_auth_middleware` can perform DB lookups for bot tokens
         // without requiring `from_fn_with_state` on every sub-router.

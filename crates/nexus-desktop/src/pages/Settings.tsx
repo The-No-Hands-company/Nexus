@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useStore } from "../store";
 import { invoke } from "../invoke";
 import ThemeSwitcher from "../themes/ThemeSwitcher";
+import FederationPanel from "../components/FederationPanel";
 import type { PluginManifest } from "../plugins/types";
 import { formatDistanceToNow } from "date-fns";
 import clsx from "clsx";
@@ -764,6 +765,20 @@ export default function SettingsPage() {
             To change the server, log out and connect to a different instance.
           </p>
         </div>
+      </section>
+
+      {/* ── Federation — instance-admin only (enforced server-side) ──── */}
+      <section className="space-y-4" aria-labelledby="fed-heading">
+        <div>
+          <h2 id="fed-heading" className="text-sm font-semibold text-fg">
+            Federation
+          </h2>
+          <p className="text-xs text-muted mt-0.5">
+            Manage which remote Nexus instances this server federates with.
+            Requires instance-admin privileges.
+          </p>
+        </div>
+        <FederationPanel />
       </section>
     </div>
   );

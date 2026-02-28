@@ -11,6 +11,8 @@ pub mod e2ee;
 pub mod emoji;
 pub mod extensibility;
 pub mod federation;
+// v0.8.5 Federation UX — admin management endpoints
+pub mod federation_admin;
 pub mod forum;
 pub mod health;
 pub mod keys;

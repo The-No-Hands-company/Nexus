@@ -90,6 +90,8 @@ pub mod user_flags {
     pub const DISABLED: i64 = 1 << 5;
     /// Account suspended by moderation
     pub const SUSPENDED: i64 = 1 << 6;
+    /// Instance administrator — can manage federation, instance settings, etc.
+    pub const INSTANCE_ADMIN: i64 = 1 << 7;
 }
 
 /// Registration request — minimal by design. No ID, no phone, no nonsense.

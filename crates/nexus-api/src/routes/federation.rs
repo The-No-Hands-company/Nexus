@@ -81,16 +81,60 @@ async fn server_key_document(State(state): State<Arc<AppState>>) -> impl IntoRes
 
 /// `GET /.well-known/nexus/server`
 ///
-/// Supports server name delegation. If the server is delegating federation
-/// to a different host (e.g. running on a non-standard port), the `m.server`
-/// field points to the actual federation endpoint.
-async fn well_known_server(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
+/// Returns rich instance identity metadata (v0.8.5+).  Remote servers parse
+/// this when initiating peering to learn the instance's display name,
+/// description, admin contact, and federation policy.
+///
+/// Falls back gracefully to a minimal response for older remotes that only
+/// look at the `m.server` field.
+async fn well_known_server(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let server_name =
         std::env::var("NEXUS_FEDERATION_SERVER").unwrap_or_else(|_| {
             std::env::var("NEXUS_SERVER_NAME")
-                .unwrap_or_else(|_| "localhost:8448".to_owned())
+                .unwrap_or_else(|_| state.server_name.clone())
         });
-    Json(json!({ "m.server": server_name }))
+
+    // Load optional identity from instance_settings.
+    let identity: serde_json::Value = sqlx::query(
+        "SELECT value FROM instance_settings WHERE key = 'federation_identity'")
+        .fetch_optional(&state.db.pool)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|r| r.try_get::<serde_json::Value, _>("value").ok())
+        .unwrap_or_else(|| json!({}));
+
+    // Count local users (best-effort).
+    let user_count: i64 = sqlx::query("SELECT COUNT(*) AS count FROM users")
+        .fetch_one(&state.db.pool)
+        .await
+        .ok()
+        .and_then(|r| r.try_get::<i64, _>("count").ok())
+        .unwrap_or(0);
+
+    // Count active peers.
+    let peer_count: i64 = sqlx::query(
+        "SELECT COUNT(*) AS count FROM federated_servers WHERE is_blocked = false")
+        .fetch_one(&state.db.pool)
+        .await
+        .ok()
+        .and_then(|r| r.try_get::<i64, _>("count").ok())
+        .unwrap_or(0);
+
+    let version = concat!("Nexus ", env!("CARGO_PKG_VERSION"));
+
+    Json(json!({
+        "m.server":          server_name,
+        "display_name":      identity.get("display_name").and_then(|v| v.as_str()),
+        "description":       identity.get("description").and_then(|v| v.as_str()),
+        "admin_contact":     identity.get("admin_contact").and_then(|v| v.as_str()),
+        "software_version":  version,
+        "user_count":        user_count,
+        "peer_count":        peer_count,
+        "federation_policy": identity.get("federation_policy")
+                                     .and_then(|v| v.as_str())
+                                     .unwrap_or("open"),
+    }))
 }
 
 // ─── Transaction receive ──────────────────────────────────────────────────────

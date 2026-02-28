@@ -210,6 +210,43 @@ The UX should feel immediately familiar. Servers, channels, voice, bots, rich em
 - ✅ Outbound relay (Nexus → Matrix via `relay_to_matrix` with stable idempotent txn IDs)
 - ✅ `handle_transaction` wired into `PUT /_matrix/app/v1/transactions/{txnId}` handler
 
+## Phase 8.5: Federation UX (v0.8.5) ✅ Complete
+
+> **Goal:** Make federation actually usable for community self-hosters.  
+> Instance admins can now peer with remote Nexus instances, manage trust, review
+> inbound requests, and monitor federation health — all from a polished in-app
+> dashboard, with full audit logging and well-known identity management.
+
+### 08.5-01: Backend — Admin API
+
+- ✅ Migration `20260218000017_federation_ux.sql` — `instance_settings`, `federation_peer_requests`, `federation_audit_log` tables + `federated_servers` health columns
+- ✅ `crates/nexus-api/src/routes/federation_admin.rs` (876 lines) — 14 endpoints covering status, identity, peer management, peering requests, audit log, and cross-instance user search
+- ✅ `GET  /admin/federation/status` — live federation health overview
+- ✅ `GET|PATCH /admin/federation/identity` — read/update `/.well-known` display fields
+- ✅ `GET|POST /admin/federation/peers` — list peers and initiate peering
+- ✅ `GET /admin/federation/peers/{domain}/health` — live-ping a peer
+- ✅ `PATCH /admin/federation/peers/{domain}/trust` — update trust score
+- ✅ `POST /admin/federation/peers/{domain}/block|unblock` — block management
+- ✅ `DELETE /admin/federation/peers/{domain}` — remove peer
+- ✅ `GET|POST /admin/federation/requests/{id}/accept|reject` — peering request workflow
+- ✅ `GET /admin/federation/audit` — paginated audit log with domain filter
+- ✅ `GET /federation/search` — cross-instance user search
+- ✅ All actions write to `federation_audit_log`; `INSTANCE_ADMIN` flag enforced (`1 << 7`)
+
+### 08.5-02: Frontend — FederationPanel
+
+- ✅ `crates/nexus-desktop/src/components/FederationPanel.tsx` — tabbed admin panel
+  - **Status** tab — peer count, healthy count, pending requests, uptime, software version
+  - **Identity** tab — edit display name, description, admin contact, federation policy (open/closed/invite-only)
+  - **Peers** tab — table with trust score, health indicator, latency, add-peer form, inline trust editing, ping/block/unblock/remove actions
+  - **Requests** tab — inbound accept/reject workflow; outbound status tracking; pending badge on tab
+  - **Audit Log** tab — paginated, filterable by domain
+- ✅ Federation types exported from `store.ts` (`FederationStatus`, `FederationIdentity`, `FederatedPeer`, `PeeringRequest`, `FederationAuditEntry`)
+- ✅ Store state: `federationStatus`, `federationIdentity`, `federatedPeers`, `peeringRequests` with loaders
+- ✅ 15 invoke commands wired in `invoke.ts` with snake_case → camelCase field mappers
+- ✅ `pages/Settings.tsx` — Federation section added at bottom; graceful 403 / non-admin notice
+- ✅ `docs/federation.md` — quick-start guide, peering walkthrough, trust levels, .well-known setup, troubleshooting
+
 ## Phase 9: Launch (v0.9) ✅ Complete
 
 ### 09-01: Deployment Infrastructure
@@ -581,45 +618,7 @@ Optional per-channel "stream mode": messages are grouped by topic (like Zulip to
 
 ---
 
-## Phase 15: Community Ecosystem (v0.15) ✅ Complete
-
-> **Goal:** Retention, identity, and creator economy features.
-
-### 15-01: User Badges & Profile Enrichment
-
-- ✅ `user_badges` DB table (user_id, badge_type, awarded_at, awarded_by nullable) — migration 00016
-- ✅ Badge types: `early_adopter`, `active_contributor`, `verified_developer`, `server_booster`, `custom` (server-specific)
-- ✅ `GET /api/v1/users/{id}/badges` — public
-- ✅ `POST /api/v1/admin/users/{id}/badges` — admin-only award; `DELETE` to revoke
-- ✅ Desktop: `BadgesBar` component renders badge icons with tooltips on user profile cards
-
-### 15-02: Server Supporter Tiers
-
-Community-funded servers with tiered perks (extra emoji slots, higher upload limits, vanity invite URLs).
-
-- ✅ `server_supporter_tiers` + `server_boosters` DB tables — migration 00016
-- ✅ `boost_tier` + `booster_count` fields added to `servers` table
-- ✅ `POST /api/v1/servers/{id}/boost` — add boost slot (auto-assigns slot 1 or 2)
-- ✅ `DELETE /api/v1/servers/{id}/boost/{slot}` — remove boost slot
-- ✅ Perk enforcement: tier 1 → +50 emoji / 25 MB; tier 2 → +100 / 50 MB; tier 3 → +200 / 100 MB; vanity URL tier 2+
-- ✅ `PATCH /api/v1/servers/{id}/vanity-url` — set vanity code (MANAGE_SERVER, tier 2+)
-- ✅ Tier auto-recalculates on boost/unboost with thresholds 2/7/14; emits `SERVER_TIER_UPDATE` on change
-- ✅ Desktop: `BoosterPanel` in server settings — tier progress bar, boosters list, boost/unboost controls, vanity setter
-
-### 15-03: Rich Document Channels (Canvas)
-
-A simple block-based document editor embedded in a dedicated channel type — for wikis, onboarding docs, and pinned knowledge.
-
-- ✅ `canvas_blocks` DB table (channel_id, block_id uuid, block_type 7 types, content jsonb, position int) — migration 00016
-- ✅ `ChannelType::Canvas` variant added
-- ✅ `GET /api/v1/channels/{id}/canvas` — fetch full document as ordered block list
-- ✅ `PUT /api/v1/channels/{id}/canvas/blocks/{block_id}` — upsert block (ON CONFLICT DO UPDATE)
-- ✅ `DELETE /api/v1/channels/{id}/canvas/blocks/{block_id}` — remove block (MANAGE_MESSAGES)
-- ✅ `POST /api/v1/channels/{id}/canvas/blocks/reorder` — bulk position update
-- ✅ Gateway: `CANVAS_BLOCK_UPDATE`, `CANVAS_BLOCK_DELETE` events for real-time collaborative editing
-- ✅ Desktop: `CanvasView` — full block editor (heading/paragraph/code/divider/image/callout/table), double-click to edit, drag-to-reorder, `+` block menu; canvas channels skip MessageInput
-
----
+                                
 
 ## Phase 10: Mobile (v1.0) 🔲 Planned
 

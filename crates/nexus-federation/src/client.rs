@@ -211,6 +211,58 @@ impl FederationClient {
         Ok(resp.json().await?)
     }
 
+    // ── v0.8.5 Health ping ───────────────────────────────────────────────────
+
+    /// Ping a remote server and return its [`RichWellKnownServer`] metadata along
+    /// with the round-trip latency in milliseconds.
+    ///
+    /// Hits `/.well-known/nexus/server` (unauthenticated), which is the lightest
+    /// possible probe — it doesn't require key negotiation.
+    ///
+    /// Returns `(latency_ms, rich_info)` on success, or a [`FederationError`] on
+    /// connection failure / HTTP error.
+    pub async fn ping(
+        &self,
+        destination: &str,
+    ) -> Result<(u64, crate::types::RichWellKnownServer), FederationError> {
+        let base_url = self.discovery.resolve(destination).await?;
+        let url = format!("{}/.well-known/nexus/server", base_url);
+        debug!("Pinging {} via {}", destination, url);
+
+        let start = std::time::Instant::now();
+        let resp = self
+            .http
+            .get(&url)
+            .send()
+            .await?
+            .error_for_status()
+            .map_err(|e| FederationError::RemoteHttp(destination.to_owned(), e.to_string()))?;
+        let latency_ms = start.elapsed().as_millis() as u64;
+
+        let info: crate::types::RichWellKnownServer = resp.json().await?;
+        Ok((latency_ms, info))
+    }
+
+    // ── v0.8.5 User profile fetch ────────────────────────────────────────────
+
+    /// Fetch a remote user's profile via `GET /_nexus/federation/v1/user/{userId}`.
+    pub async fn get_user_profile(
+        &self,
+        destination: &str,
+        user_id: &str,
+    ) -> Result<serde_json::Value, FederationError> {
+        let uri = format!("/_nexus/federation/v1/user/{}", urlencoded(user_id));
+        let base_url = self.discovery.resolve(destination).await?;
+        self.signed_get(destination, &base_url, &uri).await
+    }
+
+    // ── v0.8.5 Discovery access ──────────────────────────────────────────────
+
+    /// Expose the underlying discovery cache so callers can resolve base URLs.
+    pub fn discovery(&self) -> &DiscoveryCache {
+        &self.discovery
+    }
+
     // ── Signed request helpers ───────────────────────────────────────────────
 
     async fn signed_get<T: DeserializeOwned>(
