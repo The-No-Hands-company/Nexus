@@ -74,13 +74,14 @@ impl KeyManager {
         sqlx::query(
             "INSERT INTO federation_keys \
              (key_id, seed_bytes, public_key_b64, expires_at, is_active) \
-             VALUES (?, ?, ?, ?, TRUE) \
+             VALUES ($1, $2, $3, $4, $5) \
              ON CONFLICT (key_id) DO NOTHING",
         )
         .bind(&kp.key_id)
         .bind(kp.seed_bytes().to_vec())
         .bind(kp.public_key_base64())
         .bind(expires_at.to_rfc3339())
+        .bind(true)
         .execute(&self.pool)
         .await
         .map_err(|e| FederationError::Other(anyhow!(e)))?;
