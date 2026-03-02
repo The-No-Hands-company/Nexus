@@ -267,8 +267,12 @@ The UX should feel immediately familiar. Servers, channels, voice, bots, rich em
 ### 09-03: Security Hardening
 
 - ✅ `deny.toml` + cargo-deny CI step (audit vulnerabilities & licenses)
-- ✅ Security HTTP headers middleware (HSTS, CSP, X-Frame-Options, Referrer-Policy)
-- ✅ Auth hardening review (rate limiting, refresh token rotation, token expiry)
+- ✅ Security HTTP headers middleware (HSTS 2yr+preload, CSP `default-src 'self'`, X-Frame-Options DENY, X-Content-Type-Options, Referrer-Policy, Permissions-Policy camera/mic/geo off)
+- ✅ Auth route rate limiting — Redis sliding-window: 10 req/min per IP on login, 5 req/5min per username on login, 10 req/5min per IP on register, 30 req/min per IP on refresh; degrades gracefully when Redis is absent (lite mode)
+- ✅ Refresh token rotation + token expiry (configurable TTL, access/refresh separation, `jti` per-session, 2FA + email-verified flags in JWT)
+- ✅ `/metrics` endpoint protected — requires `Authorization: Bearer <NEXUS_METRICS_TOKEN>` when env var is set; otherwise restricted to loopback addresses (127.0.0.1 / ::1)
+- ✅ CORS origin hardening — honours `NEXUS_CORS_ORIGINS` env var (comma-separated allowed origins); defaults to `*` only when unset
+- ✅ Global request body limit — 32 MiB via `DefaultBodyLimit` (prevents memory exhaustion from oversized payloads)
 - ✅ `SECURITY.md` vulnerability disclosure policy
 
 ### 09-04: Performance Benchmarks
@@ -313,7 +317,8 @@ The UX should feel immediately familiar. Servers, channels, voice, bots, rich em
 
 ### 09.5-04: Lite Distribution
 
-- ✅ GitHub Releases: attach pre-built `nexus-linux-x86_64`, `nexus-linux-aarch64`, `nexus-macos`, `nexus-windows.exe` binaries (via CI)
+- ✅ GitHub Releases: attach pre-built `nexus-linux-x86_64`, `nexus-linux-aarch64`, `nexus-macos-x86_64`, `nexus-macos-aarch64`, `nexus-windows-x86_64.exe` binaries (via CI — `.github/workflows/release.yml`)
+- ✅ Desktop client (Tauri 2) release builds: Linux AppImage + deb, macOS universal DMG (Intel + Apple Silicon), Windows MSI + installer (via `.github/workflows/desktop-release.yml`)
 - ✅ Single-line install script: `curl -fsSL https://get.nexus.chat | sh`
 - ✅ Update `docs/self-hosting.md` with a "Quick — no Docker" section at the top
 
@@ -617,8 +622,6 @@ Optional per-channel "stream mode": messages are grouped by topic (like Zulip to
 - ✅ Desktop: stream channel shows `StreamView.tsx` (topic-bar grouped timeline) instead of flat list
 
 ---
-
-                                
 
 ## Phase 10: Mobile (v1.0) 🔲 Planned
 

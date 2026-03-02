@@ -274,6 +274,92 @@ impl AuthContext {
     }
 }
 
+// ── Auth rate limiter ────────────────────────────────────────────────────────
+
+/// Redis-backed sliding-window rate limiter.
+///
+/// Uses the classic `INCR` + `EXPIRE` pattern — O(1) in Redis.
+/// The race between INCR and EXPIRE is acceptable: the worst
+/// case is that the window extends slightly on the very first hit,
+/// not that the limit is relaxed.
+///
+/// # Arguments
+/// * `redis`       – Redis connection manager borrowed from `db.redis`
+/// * `key`         – Unique key (e.g. `"rl:login:ip:1.2.3.4"`)
+/// * `limit`       – Max calls allowed in the window
+/// * `window_secs` – Window length in seconds
+///
+/// Returns `Ok(())` when the call is within limits, or
+/// `Err(NexusError::RateLimited { retry_after_ms })` when exceeded.
+pub async fn check_rate_limit(
+    redis: &redis::aio::ConnectionManager,
+    key: impl AsRef<str>,
+    limit: u64,
+    window_secs: u64,
+) -> Result<(), NexusError> {
+    #[allow(unused_imports)]
+    use redis::AsyncCommands as _;
+    let mut conn = redis.clone();
+    let key = key.as_ref();
+
+    let count: u64 = redis::cmd("INCR")
+        .arg(key)
+        .query_async(&mut conn)
+        .await
+        .unwrap_or(0);
+
+    if count == 1 {
+        // First hit — arm the expiry clock.
+        let _: Result<(), _> = redis::cmd("EXPIRE")
+            .arg(key)
+            .arg(window_secs as i64)
+            .query_async(&mut conn)
+            .await;
+    }
+
+    if count > limit {
+        let ttl_secs: i64 = redis::cmd("TTL")
+            .arg(key)
+            .query_async(&mut conn)
+            .await
+            .unwrap_or(window_secs as i64);
+        let retry_after_ms = (ttl_secs.max(1) as u64) * 1000;
+        return Err(NexusError::RateLimited { retry_after_ms });
+    }
+
+    Ok(())
+}
+
+/// Extract the best-effort client IP from request headers.
+///
+/// Checks (in order):
+///   1. `X-Forwarded-For` first value — set by nginx / Fly.io / Cloudflare
+///   2. `X-Real-IP` — set by nginx in single-proxy mode
+///   3. Falls back to `"unknown"` (rate-limiting degrades gracefully)
+///
+/// **Security note:** these headers can be spoofed when Nexus is directly
+/// internet-facing.  For production, run behind a trusted reverse proxy
+/// that strips and re-sets `X-Forwarded-For`.
+pub fn extract_client_ip(headers: &axum::http::HeaderMap) -> String {
+    if let Some(xff) = headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+    {
+        // XFF may be "client, proxy1, proxy2" — take the leftmost value.
+        if let Some(ip) = xff.split(',').next().map(str::trim) {
+            if !ip.is_empty() {
+                return ip.to_owned();
+            }
+        }
+    }
+    if let Some(xri) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
+        if !xri.is_empty() {
+            return xri.to_owned();
+        }
+    }
+    "unknown".to_owned()
+}
+
 // ── Security headers ──────────────────────────────────────────────────────────
 
 /// Add defensive security headers to every HTTP response.

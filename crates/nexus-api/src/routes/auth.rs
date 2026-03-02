@@ -22,6 +22,7 @@ use std::sync::Arc;
 
 use crate::{
     auth::{self, TokenPair},
+    middleware::{check_rate_limit, extract_client_ip},
     AppState,
 };
 
@@ -118,6 +119,12 @@ async fn register(
     headers: HeaderMap,
     Json(body): Json<CreateUserRequest>,
 ) -> NexusResult<Json<AuthResponse>> {
+    // Rate limit: 10 registrations per IP per 5 minutes
+    if let Some(ref redis) = state.db.redis {
+        let ip = extract_client_ip(&headers);
+        check_rate_limit(redis, format!("rl:register:ip:{ip}"), 10, 300).await?;
+    }
+
     let user_agent = user_agent_from_headers(&headers);
     validate_request(&body)?;
 
@@ -217,6 +224,20 @@ async fn login(
     headers: HeaderMap,
     Json(body): Json<LoginRequest>,
 ) -> NexusResult<Json<LoginResponse>> {
+    // Rate limit: 10 attempts per IP per minute, 5 per username per 5 minutes
+    // (the username limit prevents targeted brute-force even with rotating IPs)
+    if let Some(ref redis) = state.db.redis {
+        let ip = extract_client_ip(&headers);
+        check_rate_limit(redis, format!("rl:login:ip:{ip}"), 10, 60).await?;
+        check_rate_limit(
+            redis,
+            format!("rl:login:user:{}", body.username.to_lowercase()),
+            5,
+            300,
+        )
+        .await?;
+    }
+
     let user_agent = user_agent_from_headers(&headers);
     validate_request(&body)?;
 
@@ -266,8 +287,15 @@ async fn login(
 /// Exchange a refresh token for a new token pair (session rotation).
 async fn refresh_token(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(body): Json<RefreshRequest>,
 ) -> NexusResult<Json<TokenPair>> {
+    // Rate limit: 30 refreshes per IP per minute
+    if let Some(ref redis) = state.db.redis {
+        let ip = extract_client_ip(&headers);
+        check_rate_limit(redis, format!("rl:refresh:ip:{ip}"), 30, 60).await?;
+    }
+
     let config = nexus_common::config::get();
 
     let claims = auth::validate_token(&body.refresh_token, &config.auth.jwt_secret)

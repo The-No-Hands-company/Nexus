@@ -615,7 +615,7 @@ fn generate_or_load_lite_secret(path: &str) -> anyhow::Result<String> {
     // Generate a new 64-byte hex secret
     use rand::RngCore;
     let mut bytes = [0u8; 64];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rand::rng().fill_bytes(&mut bytes);
     let secret = hex::encode(bytes);
 
     // Persist — append/create

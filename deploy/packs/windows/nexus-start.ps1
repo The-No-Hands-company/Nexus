@@ -45,7 +45,7 @@ Write-Info "Checking Docker daemon …"
 $attempts = 0
 while ($attempts -lt 15) {
     try {
-        docker info 2>$null | Out-Null
+        docker info 2>&1 | Out-Null
         break
     } catch {
         Write-Host "." -NoNewline
@@ -57,7 +57,7 @@ if ($attempts -eq 15) {
     Write-Info "Starting Docker Desktop …"
     Start-Process "C:\Program Files\Docker\Docker\Docker Desktop.exe"
     Start-Sleep -Seconds 20
-    docker info 2>$null | Out-Null | Out-Null
+    docker info 2>&1 | Out-Null
 }
 Write-Ok "Docker is running."
 
@@ -99,7 +99,7 @@ Write-Info "Waiting for services to become healthy …"
 Start-Sleep -Seconds 15
 $ready = $false
 for ($i = 0; $i -lt 20; $i++) {
-    $ps = docker compose ps 2>$null
+    $ps = docker compose ps 2>&1
     if ($ps -match "healthy") { $ready = $true; break }
     Start-Sleep -Seconds 3
     Write-Host "." -NoNewline

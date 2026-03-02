@@ -116,12 +116,10 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::metrics::router())
         // Local file serving (lite mode — no-op in full mode)
         .merge(routes::files::router())
-        .layer(
-            tower_http::cors::CorsLayer::new()
-                .allow_origin(tower_http::cors::Any)
-                .allow_methods(tower_http::cors::Any)
-                .allow_headers(tower_http::cors::Any),
-        )
+        // Global request body limit (32 MiB).  Individual upload routes may raise
+        // this with an inner RequestBodyLimitLayer; auth routes should keep it low.
+        .layer(axum::extract::DefaultBodyLimit::max(32 * 1024 * 1024))
+        .layer(build_cors_layer())
         .layer(
             tower_http::trace::TraceLayer::new_for_http()
                 // Emit a span per request with method + URI path as structured fields
@@ -146,5 +144,52 @@ pub fn build_router(state: AppState) -> Router {
         .layer(axum::middleware::from_fn(middleware::security_headers))
         .layer(axum::middleware::from_fn(middleware::record_request_metrics))
         .with_state(arc_state)
+}
+
+// ── CORS helper ─────────────────────────────────────────────────────────────
+
+/// Build the CORS layer, honouring the `NEXUS_CORS_ORIGINS` environment variable.
+///
+/// | `NEXUS_CORS_ORIGINS` | Behaviour |
+/// |---|---|
+/// | Not set | `*` — permissive default (works for dev, lite mode, and initial self-hosted installs) |
+/// | `*` | Explicitly permissive |
+/// | `https://app.nexus.chat,https://admin.nexus.chat` | Only the listed origins |
+///
+/// Methods and headers are always `*`; the restriction is origin-only because
+/// Nexus uses JWT bearer tokens (not cookies) so CORS origin alone cannot be
+/// the only security boundary.
+fn build_cors_layer() -> tower_http::cors::CorsLayer {
+    use tower_http::cors::CorsLayer;
+
+    if let Ok(origins_env) = std::env::var("NEXUS_CORS_ORIGINS") {
+        // Explicit wildcard bypass:
+        if origins_env.trim() == "*" {
+            return CorsLayer::new()
+                .allow_origin(tower_http::cors::Any)
+                .allow_methods(tower_http::cors::Any)
+                .allow_headers(tower_http::cors::Any);
+        }
+
+        let allowed: Vec<axum::http::HeaderValue> = origins_env
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .filter_map(|s| s.parse().ok())
+            .collect();
+
+        if !allowed.is_empty() {
+            return CorsLayer::new()
+                .allow_origin(allowed)
+                .allow_methods(tower_http::cors::Any)
+                .allow_headers(tower_http::cors::Any);
+        }
+    }
+
+    // Default: permissive (safe because auth is JWT-in-header, not cookie-based)
+    CorsLayer::new()
+        .allow_origin(tower_http::cors::Any)
+        .allow_methods(tower_http::cors::Any)
+        .allow_headers(tower_http::cors::Any)
 }
 
