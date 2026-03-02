@@ -1,7 +1,7 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    Nexus — Windows Quick-Start Script
+    Nexus - Windows Quick-Start Script
 .DESCRIPTION
     Installs all dependencies (if needed), spins up infrastructure via Docker Desktop,
     builds the server with Cargo, and starts Nexus.
@@ -22,13 +22,13 @@ function Write-Ok($msg)      { Write-Host "[nexus] $msg" -ForegroundColor Green 
 function Write-Warn($msg)    { Write-Host "[nexus] $msg" -ForegroundColor Yellow }
 function Write-Err($msg)     { Write-Host "[nexus] ERROR: $msg" -ForegroundColor Red; exit 1 }
 
-# ── Winget helper ─────────────────────────────────────────────────────────────
+# -- Winget helper -------------------------------------------------------------
 function Install-Via-Winget($id, $name) {
-    Write-Info "Installing $name via winget …"
+    Write-Info "Installing $name via winget ..."
     winget install --id $id --silent --accept-package-agreements --accept-source-agreements
 }
 
-# ── Check / install Docker Desktop ───────────────────────────────────────────
+# -- Check / install Docker Desktop -------------------------------------------
 if (-not (Get-Command "docker" -ErrorAction SilentlyContinue)) {
     Write-Warn "Docker not found."
     if (Get-Command "winget" -ErrorAction SilentlyContinue) {
@@ -41,7 +41,7 @@ if (-not (Get-Command "docker" -ErrorAction SilentlyContinue)) {
 }
 
 # Wait for Docker daemon
-Write-Info "Checking Docker daemon …"
+Write-Info "Checking Docker daemon ..."
 $attempts = 0
 while ($attempts -lt 15) {
     try {
@@ -54,14 +54,14 @@ while ($attempts -lt 15) {
     }
 }
 if ($attempts -eq 15) {
-    Write-Info "Starting Docker Desktop …"
+    Write-Info "Starting Docker Desktop ..."
     Start-Process "C:\Program Files\Docker\Docker\Docker Desktop.exe"
     Start-Sleep -Seconds 20
     docker info 2>&1 | Out-Null
 }
 Write-Ok "Docker is running."
 
-# ── Check / install Rust ──────────────────────────────────────────────────────
+# -- Check / install Rust ------------------------------------------------------
 if (-not (Get-Command "cargo" -ErrorAction SilentlyContinue)) {
     Write-Warn "Rust not found."
     if (Get-Command "winget" -ErrorAction SilentlyContinue) {
@@ -74,9 +74,9 @@ if (-not (Get-Command "cargo" -ErrorAction SilentlyContinue)) {
 }
 Write-Info "Rust: $(rustc --version)"
 
-# ── Environment setup ─────────────────────────────────────────────────────────
+# -- Environment setup ---------------------------------------------------------
 if (-not (Test-Path $EnvFile)) {
-    Write-Info "Creating .env from .env.example …"
+    Write-Info "Creating .env from .env.example ..."
     Copy-Item (Join-Path $RepoRoot ".env.example") $EnvFile
 
     # Generate a random JWT secret using .NET
@@ -90,12 +90,12 @@ if (-not (Test-Path $EnvFile)) {
     Write-Ok ".env created with auto-generated JWT secret."
 }
 
-# ── Start infrastructure ──────────────────────────────────────────────────────
-Write-Info "Starting infrastructure (Postgres, Redis, ScyllaDB, MinIO, MeiliSearch) …"
+# -- Start infrastructure ------------------------------------------------------
+Write-Info "Starting infrastructure (Postgres, Redis, ScyllaDB, MinIO, MeiliSearch) ..."
 Set-Location $RepoRoot
 docker compose up -d
 
-Write-Info "Waiting for services to become healthy …"
+Write-Info "Waiting for services to become healthy ..."
 Start-Sleep -Seconds 15
 $ready = $false
 for ($i = 0; $i -lt 20; $i++) {
@@ -105,14 +105,14 @@ for ($i = 0; $i -lt 20; $i++) {
     Write-Host "." -NoNewline
 }
 Write-Host ""
-if (-not $ready) { Write-Warn "Some services may still be starting — continuing anyway." }
+if (-not $ready) { Write-Warn "Some services may still be starting - continuing anyway." }
 
-# ── Build ─────────────────────────────────────────────────────────────────────
-Write-Info "Building Nexus server (first build: 2–10 min) …"
+# -- Build ---------------------------------------------------------------------
+Write-Info "Building Nexus server (first build: 2-10 min) ..."
 cargo build --release --bin nexus
 
-# ── Run ───────────────────────────────────────────────────────────────────────
-Write-Ok "Starting Nexus …"
+# -- Run -----------------------------------------------------------------------
+Write-Ok "Starting Nexus ..."
 Write-Host ""
 Write-Host "  REST API:   http://localhost:8080"
 Write-Host "  Gateway:    ws://localhost:8081"
