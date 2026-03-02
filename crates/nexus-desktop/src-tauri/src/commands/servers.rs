@@ -262,3 +262,212 @@ pub async fn delete_role(
     }
     Ok(())
 }
+
+// ─── Server management commands ─────────────────────────────────────────────
+
+/// Update server settings (name, description, public flag, etc.).
+#[tauri::command]
+pub async fn update_server(
+    state: State<'_, AppState>,
+    server_id: Uuid,
+    name: Option<String>,
+    description: Option<String>,
+    is_public: Option<bool>,
+    region: Option<String>,
+    require_2fa: Option<bool>,
+    spam_window_secs: Option<i32>,
+    spam_max_messages: Option<i32>,
+) -> Result<ServerClient, String> {
+    let session = state.session_snapshot();
+    let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
+    let body = serde_json::json!({
+        "name": name,
+        "description": description,
+        "is_public": is_public,
+        "region": region,
+        "require_2fa": require_2fa,
+        "spam_window_secs": spam_window_secs,
+        "spam_max_messages": spam_max_messages,
+    });
+    let resp = client
+        .patch(format!("{base}/api/v1/servers/{server_id}"))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(text);
+    }
+    let raw: RawServer = resp.json().await.map_err(|e| e.to_string())?;
+    Ok(ServerClient::from(raw))
+}
+
+/// Delete a server permanently.
+#[tauri::command]
+pub async fn delete_server(
+    state: State<'_, AppState>,
+    server_id: Uuid,
+) -> Result<(), String> {
+    let session = state.session_snapshot();
+    let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
+    let resp = client
+        .delete(format!("{base}/api/v1/servers/{server_id}"))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(text);
+    }
+    Ok(())
+}
+
+/// Transfer server ownership to another member.
+#[tauri::command]
+pub async fn transfer_server_ownership(
+    state: State<'_, AppState>,
+    server_id: Uuid,
+    new_owner_id: String,
+) -> Result<(), String> {
+    let session = state.session_snapshot();
+    let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
+    let body = serde_json::json!({ "new_owner_id": new_owner_id });
+    let resp = client
+        .post(format!("{base}/api/v1/servers/{server_id}/transfer-ownership"))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(text);
+    }
+    Ok(())
+}
+
+/// Leave a server (non-owner members only).
+#[tauri::command]
+pub async fn leave_server(
+    state: State<'_, AppState>,
+    server_id: Uuid,
+) -> Result<(), String> {
+    let session = state.session_snapshot();
+    let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
+    let resp = client
+        .post(format!("{base}/api/v1/servers/{server_id}/leave"))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(text);
+    }
+    Ok(())
+}
+
+// ─── Invite commands ─────────────────────────────────────────────────────────
+
+#[derive(Serialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct InviteClient {
+    pub code: String,
+    pub server_id: String,
+    pub max_uses: Option<i64>,
+    pub uses: i64,
+    pub expires_at: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+struct RawInvite {
+    pub code: String,
+    pub server_id: serde_json::Value,
+    pub max_uses: Option<i64>,
+    pub uses: i64,
+    pub expires_at: Option<String>,
+    pub created_at: String,
+}
+
+impl From<RawInvite> for InviteClient {
+    fn from(r: RawInvite) -> Self {
+        Self {
+            code: r.code,
+            server_id: r.server_id.to_string().trim_matches('"').to_string(),
+            max_uses: r.max_uses,
+            uses: r.uses,
+            expires_at: r.expires_at,
+            created_at: r.created_at,
+        }
+    }
+}
+
+/// List all active invites for a server.
+#[tauri::command]
+pub async fn list_server_invites(
+    state: State<'_, AppState>,
+    server_id: Uuid,
+) -> Result<Vec<InviteClient>, String> {
+    let session = state.session_snapshot();
+    let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
+    let resp = client
+        .get(format!("{base}/api/v1/servers/{server_id}/invites"))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(text);
+    }
+    let raw: Vec<RawInvite> = resp.json().await.map_err(|e| e.to_string())?;
+    Ok(raw.into_iter().map(InviteClient::from).collect())
+}
+
+/// Create a new invite for a server.
+#[tauri::command]
+pub async fn create_invite(
+    state: State<'_, AppState>,
+    server_id: Uuid,
+    max_uses: Option<i64>,
+    max_age_secs: Option<i64>,
+) -> Result<InviteClient, String> {
+    let session = state.session_snapshot();
+    let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
+    let body = serde_json::json!({
+        "max_uses": max_uses,
+        "max_age_secs": max_age_secs,
+    });
+    let resp = client
+        .post(format!("{base}/api/v1/servers/{server_id}/invites"))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(text);
+    }
+    let raw: RawInvite = resp.json().await.map_err(|e| e.to_string())?;
+    Ok(InviteClient::from(raw))
+}
+
+/// Delete (revoke) a server invite by code.
+#[tauri::command]
+pub async fn delete_invite(
+    state: State<'_, AppState>,
+    server_id: Uuid,
+    code: String,
+) -> Result<(), String> {
+    let session = state.session_snapshot();
+    let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
+    let resp = client
+        .delete(format!("{base}/api/v1/servers/{server_id}/invites/{code}"))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(text);
+    }
+    Ok(())
+}
