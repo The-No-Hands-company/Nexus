@@ -129,4 +129,4 @@ Write-Host "  Gateway:    ws://localhost:8081"
 Write-Host "  Voice:      ws://localhost:8082"
 Write-Host "  Health:     http://localhost:8080/api/v1/health"
 Write-Host ""
-cargo run --release --bin nexus
+cargo run --release --bin nexus -- serve
