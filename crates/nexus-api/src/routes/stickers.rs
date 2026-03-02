@@ -21,6 +21,7 @@ use nexus_common::{
 };
 use nexus_db::repository::{members, roles, servers};
 use serde::{Deserialize, Serialize};
+use sqlx::Row;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -72,6 +73,35 @@ struct RenameRequest {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// DateTime helper
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Parse a PostgreSQL timestamptz ::text value into DateTime<Utc>.
+fn parse_pg_dt(s: &str) -> Option<DateTime<Utc>> {
+    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
+        return Some(dt.with_timezone(&Utc));
+    }
+    let normalized = if s.ends_with("+00") {
+        format!("{}00", s)
+    } else {
+        s.to_string()
+    };
+    if let Ok(dt) = DateTime::parse_from_str(&normalized, "%Y-%m-%d %H:%M:%S%.f%z") {
+        return Some(dt.with_timezone(&Utc));
+    }
+    if let Ok(dt) = DateTime::parse_from_str(&normalized, "%Y-%m-%d %H:%M:%S%z") {
+        return Some(dt.with_timezone(&Utc));
+    }
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f") {
+        return Some(DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
+    }
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
+        return Some(DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
+    }
+    None
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Permission helper
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -112,21 +142,25 @@ async fn require_manage_emojis(
 async fn list_global_packs(
     State(state): State<Arc<AppState>>,
 ) -> NexusResult<Json<Vec<StickerPack>>> {
-    let packs = sqlx::query!(
-        "SELECT id, name, description, is_premium FROM sticker_packs WHERE server_id IS NULL ORDER BY name"
+    let pack_rows = sqlx::query(
+        "SELECT id::text AS id, name, description, is_premium \
+         FROM sticker_packs WHERE server_id IS NULL ORDER BY name",
     )
     .fetch_all(&state.db.pool)
-    .await?;
+    .await
+    .map_err(NexusError::Database)?;
 
     let mut result = Vec::new();
-    for p in packs {
-        let stickers = fetch_pack_stickers(&state, p.id).await?;
+    for row in &pack_rows {
+        let pack_id_str: String = row.try_get("id").unwrap_or_default();
+        let pack_id: Uuid = pack_id_str.parse().unwrap_or_default();
+        let stickers = fetch_pack_stickers(&state, pack_id).await?;
         result.push(StickerPack {
-            id: p.id,
-            name: p.name,
-            description: p.description,
+            id: pack_id,
+            name: row.try_get("name").unwrap_or_default(),
+            description: row.try_get::<Option<String>, _>("description").unwrap_or(None),
             server_id: None,
-            is_premium: p.is_premium,
+            is_premium: row.try_get::<bool, _>("is_premium").unwrap_or(false),
             stickers,
         });
     }
@@ -143,22 +177,33 @@ async fn list_server_stickers(
         .await?
         .ok_or(NexusError::Forbidden)?;
 
-    let stickers = sqlx::query!(
-        "SELECT id, pack_id, name, description, asset_url, type AS sticker_type, created_at FROM stickers WHERE server_id = $1 ORDER BY name",
-        server_id,
+    let rows = sqlx::query(
+        r#"SELECT id::text AS id, pack_id::text AS pack_id, name, description,
+                  asset_url, "type" AS sticker_type, created_at::text AS created_at
+           FROM stickers WHERE server_id = $1::uuid ORDER BY name"#,
     )
+    .bind(server_id.to_string())
     .fetch_all(&state.db.pool)
-    .await?;
+    .await
+    .map_err(NexusError::Database)?;
 
-    Ok(Json(stickers.into_iter().map(|s| Sticker {
-        id: s.id,
-        pack_id: s.pack_id,
-        name: s.name,
-        description: s.description,
-        asset_url: s.asset_url,
-        sticker_type: s.sticker_type,
-        created_at: s.created_at,
-    }).collect()))
+    let stickers = rows.iter().filter_map(|r| {
+        let id: Uuid = r.try_get::<String, _>("id").unwrap_or_default().parse().ok()?;
+        let pack_id: Uuid = r.try_get::<String, _>("pack_id").unwrap_or_default().parse().ok()?;
+        let created_at = r.try_get::<String, _>("created_at").ok()
+            .as_deref().and_then(parse_pg_dt).unwrap_or_else(Utc::now);
+        Some(Sticker {
+            id,
+            pack_id,
+            name: r.try_get("name").unwrap_or_default(),
+            description: r.try_get::<Option<String>, _>("description").unwrap_or(None),
+            asset_url: r.try_get("asset_url").unwrap_or_default(),
+            sticker_type: r.try_get("sticker_type").unwrap_or_else(|_| "png".into()),
+            created_at,
+        })
+    }).collect();
+
+    Ok(Json(stickers))
 }
 
 /// POST /api/v1/servers/:server_id/stickers — multipart upload
@@ -171,13 +216,15 @@ async fn upload_sticker(
     require_manage_emojis(&state, auth.user_id, server_id).await?;
 
     // Count existing server stickers — max 60
-    let count: i64 = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM stickers WHERE server_id = $1", server_id
+    let count_row = sqlx::query(
+        "SELECT COUNT(*) AS cnt FROM stickers WHERE server_id = $1::uuid",
     )
+    .bind(server_id.to_string())
     .fetch_one(&state.db.pool)
-    .await?
-    .unwrap_or(0);
+    .await
+    .map_err(NexusError::Database)?;
 
+    let count: i64 = count_row.try_get::<i64, _>("cnt").unwrap_or(0);
     if count >= 60 {
         return Err(NexusError::Validation {
             message: "Server has reached the 60-sticker limit".into(),
@@ -250,12 +297,22 @@ async fn upload_sticker(
     let pack_id = ensure_server_pack(&state, server_id).await?;
 
     let now = Utc::now();
-    sqlx::query!(
-        "INSERT INTO stickers (id, pack_id, server_id, name, description, asset_url, type, creator_id, created_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
-        sticker_id, pack_id, server_id, name.trim(), description.as_deref(), asset_url, sticker_type, auth.user_id, now,
+    sqlx::query(
+        r#"INSERT INTO stickers (id, pack_id, server_id, name, description, asset_url, "type", creator_id, created_at)
+           VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8::uuid, $9::timestamptz)"#,
     )
+    .bind(sticker_id.to_string())
+    .bind(pack_id.to_string())
+    .bind(server_id.to_string())
+    .bind(name.trim().to_string())
+    .bind(description.clone())
+    .bind(&asset_url)
+    .bind(&sticker_type)
+    .bind(auth.user_id.to_string())
+    .bind(now.to_rfc3339())
     .execute(&state.db.pool)
-    .await?;
+    .await
+    .map_err(NexusError::Database)?;
 
     let sticker = Sticker {
         id: sticker_id,
@@ -289,12 +346,15 @@ async fn rename_sticker(
     if body.name.trim().is_empty() || body.name.len() > 64 {
         return Err(NexusError::Validation { message: "name must be 1–64 characters".into() });
     }
-    sqlx::query!(
-        "UPDATE stickers SET name = $1 WHERE id = $2 AND server_id = $3",
-        body.name.trim(), sticker_id, server_id,
+    sqlx::query(
+        "UPDATE stickers SET name = $1 WHERE id = $2::uuid AND server_id = $3::uuid",
     )
+    .bind(body.name.trim().to_string())
+    .bind(sticker_id.to_string())
+    .bind(server_id.to_string())
     .execute(&state.db.pool)
-    .await?;
+    .await
+    .map_err(NexusError::Database)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -306,12 +366,14 @@ async fn delete_sticker(
 ) -> NexusResult<Json<serde_json::Value>> {
     require_manage_emojis(&state, auth.user_id, server_id).await?;
 
-    sqlx::query!(
-        "DELETE FROM stickers WHERE id = $1 AND server_id = $2",
-        sticker_id, server_id,
+    sqlx::query(
+        "DELETE FROM stickers WHERE id = $1::uuid AND server_id = $2::uuid",
     )
+    .bind(sticker_id.to_string())
+    .bind(server_id.to_string())
     .execute(&state.db.pool)
-    .await?;
+    .await
+    .map_err(NexusError::Database)?;
 
     let _ = state.gateway_tx.send(GatewayEvent {
         event_type: event_types::GUILD_STICKERS_UPDATE.into(),
@@ -329,46 +391,64 @@ async fn delete_sticker(
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn fetch_pack_stickers(state: &AppState, pack_id: Uuid) -> NexusResult<Vec<Sticker>> {
-    let rows = sqlx::query!(
-        "SELECT id, pack_id, name, description, asset_url, type AS sticker_type, created_at FROM stickers WHERE pack_id = $1 ORDER BY name",
-        pack_id
+    let rows = sqlx::query(
+        r#"SELECT id::text AS id, pack_id::text AS pack_id, name, description,
+                  asset_url, "type" AS sticker_type, created_at::text AS created_at
+           FROM stickers WHERE pack_id = $1::uuid ORDER BY name"#,
     )
+    .bind(pack_id.to_string())
     .fetch_all(&state.db.pool)
-    .await?;
-    Ok(rows.into_iter().map(|s| Sticker {
-        id: s.id,
-        pack_id: s.pack_id,
-        name: s.name,
-        description: s.description,
-        asset_url: s.asset_url,
-        sticker_type: s.sticker_type,
-        created_at: s.created_at,
-    }).collect())
+    .await
+    .map_err(NexusError::Database)?;
+
+    let stickers = rows.iter().filter_map(|r| {
+        let id: Uuid = r.try_get::<String, _>("id").unwrap_or_default().parse().ok()?;
+        let pid: Uuid = r.try_get::<String, _>("pack_id").unwrap_or_default().parse().ok()?;
+        let created_at = r.try_get::<String, _>("created_at").ok()
+            .as_deref().and_then(parse_pg_dt).unwrap_or_else(Utc::now);
+        Some(Sticker {
+            id,
+            pack_id: pid,
+            name: r.try_get("name").unwrap_or_default(),
+            description: r.try_get::<Option<String>, _>("description").unwrap_or(None),
+            asset_url: r.try_get("asset_url").unwrap_or_default(),
+            sticker_type: r.try_get("sticker_type").unwrap_or_else(|_| "png".into()),
+            created_at,
+        })
+    }).collect();
+
+    Ok(stickers)
 }
 
 /// Find or create the default server sticker pack for `server_id`.
 async fn ensure_server_pack(state: &AppState, server_id: Uuid) -> NexusResult<Uuid> {
-    if let Some(row) = sqlx::query_scalar!(
-        "SELECT id FROM sticker_packs WHERE server_id = $1 LIMIT 1",
-        server_id
+    let existing = sqlx::query(
+        "SELECT id::text AS id FROM sticker_packs WHERE server_id = $1::uuid LIMIT 1",
     )
+    .bind(server_id.to_string())
     .fetch_optional(&state.db.pool)
-    .await?
-    {
-        return Ok(row);
+    .await
+    .map_err(NexusError::Database)?;
+
+    if let Some(row) = existing {
+        let id_str: String = row.try_get("id").unwrap_or_default();
+        if let Ok(id) = id_str.parse::<Uuid>() {
+            return Ok(id);
+        }
     }
 
     let pack_id = snowflake::generate_id();
     let server = servers::find_by_id(&state.db.pool, server_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "Server".into() })?;
-    sqlx::query!(
-        "INSERT INTO sticker_packs (id, name, server_id, is_premium) VALUES ($1, $2, $3, FALSE)",
-        pack_id,
-        format!("{} Stickers", server.name),
-        server_id,
+    sqlx::query(
+        "INSERT INTO sticker_packs (id, name, server_id, is_premium) VALUES ($1::uuid, $2, $3::uuid, FALSE)",
     )
+    .bind(pack_id.to_string())
+    .bind(format!("{} Stickers", server.name))
+    .bind(server_id.to_string())
     .execute(&state.db.pool)
-    .await?;
+    .await
+    .map_err(NexusError::Database)?;
     Ok(pack_id)
 }

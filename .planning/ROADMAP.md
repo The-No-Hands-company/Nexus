@@ -317,7 +317,7 @@ The UX should feel immediately familiar. Servers, channels, voice, bots, rich em
 - ✅ Single-line install script: `curl -fsSL https://get.nexus.chat | sh`
 - ✅ Update `docs/self-hosting.md` with a "Quick — no Docker" section at the top
 
-## Phase 9.6: Polish & Correctness (v0.9.6) 🔲 Planned
+## Phase 9.6: Polish & Correctness (v0.9.6) ✅ Complete
 
 > **Goal:** Close the gap between what the roadmap claims is done and what is actually production-ready. Fix every known stub, placeholder, and TODO in the existing implementation before adding new features.
 
@@ -358,7 +358,7 @@ The UX should feel immediately familiar. Servers, channels, voice, bots, rich em
 - [x] `GET /api/v1/health` extended response — include DB connectivity, Redis connectivity, search backend status
 - [x] Graceful shutdown — drain in-flight WebSocket messages before process exit
 
-## Phase 9.7: Account Security (v0.9.7) � In Progress
+## Phase 9.7: Account Security (v0.9.7) ✅ Complete
 
 > **Goal:** Give users real control over their account security. None of these features exist anywhere in the codebase today.
 

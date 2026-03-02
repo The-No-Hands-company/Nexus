@@ -20,6 +20,7 @@ use nexus_common::{
 };
 use nexus_db::repository::{channels, members};
 use serde::{Deserialize, Serialize};
+use sqlx::Row;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -61,16 +62,24 @@ async fn forward_message(
     }
 
     // Fetch the original message
-    let original = sqlx::query!(
-        "SELECT id, channel_id, author_id, content, attachments FROM messages WHERE id = $1",
-        message_id
+    let orig_row = sqlx::query(
+        "SELECT channel_id::text AS channel_id, content FROM messages WHERE id = $1::uuid",
     )
+    .bind(message_id.to_string())
     .fetch_optional(&state.db.pool)
-    .await?
+    .await
+    .map_err(NexusError::Database)?
     .ok_or(NexusError::NotFound { resource: "Message".into() })?;
 
-    let original_channel_id: Uuid = original.channel_id;
-    let content = original.content.clone().unwrap_or_default();
+    let original_channel_id: Uuid = orig_row
+        .try_get::<String, _>("channel_id")
+        .unwrap_or_default()
+        .parse()
+        .unwrap_or_default();
+    let content: String = orig_row
+        .try_get::<Option<String>, _>("content")
+        .unwrap_or(None)
+        .unwrap_or_default();
 
     let mut created_ids = Vec::new();
 
@@ -90,23 +99,25 @@ async fn forward_message(
         let new_id = snowflake::generate_id();
         let now = Utc::now();
 
-        sqlx::query!(
+        sqlx::query(
             r#"
             INSERT INTO messages
                 (id, channel_id, author_id, content, created_at, updated_at,
                  forwarded_from_message_id, forwarded_from_channel_id)
-            VALUES ($1, $2, $3, $4, $5, $5, $6, $7)
+            VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5::timestamptz, $5::timestamptz,
+                    $6::uuid, $7::uuid)
             "#,
-            new_id,
-            target_channel_id,
-            auth.user_id,
-            content,
-            now,
-            message_id,
-            original_channel_id,
         )
+        .bind(new_id.to_string())
+        .bind(target_channel_id.to_string())
+        .bind(auth.user_id.to_string())
+        .bind(&content)
+        .bind(now.to_rfc3339())
+        .bind(message_id.to_string())
+        .bind(original_channel_id.to_string())
         .execute(&state.db.pool)
-        .await?;
+        .await
+        .map_err(NexusError::Database)?;
 
         created_ids.push(new_id);
 

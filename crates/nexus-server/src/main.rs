@@ -247,7 +247,7 @@ async fn run_server(
     let voice_addr = SocketAddr::new(host, voice_port);
 
     // ── WebSocket Gateway ─────────────────────────────────────────────────────
-    let gateway_state = GatewayState::with_broadcast(db.clone(), gateway_tx);
+    let gateway_state = GatewayState::with_broadcast(db.clone(), gateway_tx.clone());
     let gateway_router = nexus_gateway::build_router(gateway_state);
 
     // ── Voice Signaling ───────────────────────────────────────────────────────

@@ -146,4 +146,6 @@ pub struct UpdateChannelRequest {
     pub user_limit: Option<i32>,
 
     pub parent_id: Option<Uuid>,
-}
+
+    /// Toggle stream / topic-threaded mode on the channel (v0.14).
+    pub is_stream: Option<bool>,}

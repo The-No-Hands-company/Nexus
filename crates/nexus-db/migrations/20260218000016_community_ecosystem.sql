@@ -17,10 +17,11 @@ CREATE TABLE IF NOT EXISTS user_badges (
     awarded_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     -- Optional display metadata for custom badges
     label           TEXT,
-    icon_url        TEXT,
-    UNIQUE (user_id, badge_type, COALESCE(server_id, '00000000-0000-0000-0000-000000000000'::uuid))
+    icon_url        TEXT
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_badges_unique ON user_badges
+    (user_id, badge_type, COALESCE(server_id, '00000000-0000-0000-0000-000000000000'::uuid));
 CREATE INDEX IF NOT EXISTS idx_user_badges_user ON user_badges (user_id);
 CREATE INDEX IF NOT EXISTS idx_user_badges_server ON user_badges (server_id) WHERE server_id IS NOT NULL;
 

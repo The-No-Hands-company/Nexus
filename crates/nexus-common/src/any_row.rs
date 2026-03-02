@@ -191,6 +191,8 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for Server {
             require_2fa: row.try_get("require_2fa").unwrap_or(false),
             spam_window_secs: row.try_get("spam_window_secs").unwrap_or(30),
             spam_max_messages: row.try_get("spam_max_messages").unwrap_or(3),
+            boost_tier: row.try_get("boost_tier").unwrap_or(0),
+            booster_count: row.try_get("booster_count").unwrap_or(0),
             created_at: dt(row, "created_at")?,
             updated_at: dt(row, "updated_at")?,
         })
@@ -231,6 +233,7 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for Channel {
             archived: row.try_get("archived")?,
             locked: row.try_get("locked")?,
             disappear_after_seconds: row.try_get("disappear_after_seconds").unwrap_or(0),
+            is_stream: row.try_get("is_stream").unwrap_or(false),
             created_at: dt(row, "created_at")?,
             updated_at: dt(row, "updated_at")?,
         })

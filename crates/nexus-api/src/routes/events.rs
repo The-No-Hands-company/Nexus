@@ -22,6 +22,7 @@ use nexus_common::{
 };
 use nexus_db::repository::{members, roles, servers};
 use serde::{Deserialize, Serialize};
+use sqlx::Row;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -41,9 +42,9 @@ pub fn router() -> Router<Arc<AppState>> {
         .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// —————————————————————————————————————————————————————————————————————————————
 // Models
-// ─────────────────────────────────────────────────────────────────────────────
+// —————————————————————————————————————————————————————————————————————————————
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ServerEvent {
@@ -91,9 +92,41 @@ struct ListEventsParams {
     limit: Option<i64>,
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// —————————————————————————————————————————————————————————————————————————————
+// DateTime helper
+// —————————————————————————————————————————————————————————————————————————————
+
+/// Parse a PostgreSQL timestamptz ::text value into DateTime<Utc>.
+/// Handles "2024-01-15 10:30:00+00", "2024-01-15 10:30:00.123456+00", RFC3339.
+fn parse_pg_dt(s: &str) -> Option<DateTime<Utc>> {
+    // RFC3339 first (e.g. "2024-01-15T10:30:00Z")
+    if let Ok(dt) = DateTime::parse_from_rfc3339(s) {
+        return Some(dt.with_timezone(&Utc));
+    }
+    // PostgreSQL outputs "+00" suffix — normalize to "+0000" for chrono %z
+    let normalized = if s.ends_with("+00") {
+        format!("{}00", s)
+    } else {
+        s.to_string()
+    };
+    if let Ok(dt) = DateTime::parse_from_str(&normalized, "%Y-%m-%d %H:%M:%S%.f%z") {
+        return Some(dt.with_timezone(&Utc));
+    }
+    if let Ok(dt) = DateTime::parse_from_str(&normalized, "%Y-%m-%d %H:%M:%S%z") {
+        return Some(dt.with_timezone(&Utc));
+    }
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f") {
+        return Some(DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
+    }
+    if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S") {
+        return Some(DateTime::<Utc>::from_naive_utc_and_offset(dt, Utc));
+    }
+    None
+}
+
+// —————————————————————————————————————————————————————————————————————————————
 // Permission helper
-// ─────────────────────────────────────────────────────────────────────────────
+// —————————————————————————————————————————————————————————————————————————————
 
 async fn require_manage_events(
     state: &AppState,
@@ -125,48 +158,68 @@ async fn require_manage_events(
 }
 
 async fn fetch_event(state: &AppState, event_id: Uuid, requester_id: Uuid) -> NexusResult<ServerEvent> {
-    let row = sqlx::query!(
+    let row = sqlx::query(
         r#"
         SELECT
-            e.id, e.server_id, e.creator_id, e.title, e.description,
-            e.starts_at, e.ends_at, e.location, e.channel_id, e.cover_image,
-            e.status, e.created_at, e.updated_at,
-            COUNT(r.user_id) AS interested_count,
-            BOOL_OR(r.user_id = $2) AS is_interested
+            e.id::text            AS id,
+            e.server_id::text     AS server_id,
+            e.creator_id::text    AS creator_id,
+            e.title,
+            e.description,
+            e.starts_at::text     AS starts_at,
+            e.ends_at::text       AS ends_at,
+            e.location,
+            e.channel_id::text    AS channel_id,
+            e.cover_image,
+            e.status,
+            e.created_at::text    AS created_at,
+            e.updated_at::text    AS updated_at,
+            COUNT(r.user_id)      AS interested_count,
+            BOOL_OR(r.user_id = $2::uuid) AS is_interested
         FROM server_events e
         LEFT JOIN server_event_rsvps r ON r.event_id = e.id
-        WHERE e.id = $1
+        WHERE e.id = $1::uuid
         GROUP BY e.id
         "#,
-        event_id,
-        requester_id,
     )
+    .bind(event_id.to_string())
+    .bind(requester_id.to_string())
     .fetch_optional(&state.db.pool)
-    .await?
+    .await
+    .map_err(NexusError::Database)?
     .ok_or(NexusError::NotFound { resource: "ServerEvent".into() })?;
 
     Ok(ServerEvent {
-        id: row.id,
-        server_id: row.server_id,
-        creator_id: row.creator_id,
-        title: row.title,
-        description: row.description,
-        starts_at: row.starts_at,
-        ends_at: row.ends_at,
-        location: row.location,
-        channel_id: row.channel_id,
-        cover_image: row.cover_image,
-        status: row.status,
-        interested_count: row.interested_count.unwrap_or(0),
-        is_interested: row.is_interested.unwrap_or(false),
-        created_at: row.created_at,
-        updated_at: row.updated_at,
+        id: row.try_get::<String, _>("id").unwrap_or_default()
+            .parse().unwrap_or(event_id),
+        server_id: row.try_get::<String, _>("server_id").unwrap_or_default()
+            .parse().unwrap_or_default(),
+        creator_id: row.try_get::<String, _>("creator_id").unwrap_or_default()
+            .parse().unwrap_or_default(),
+        title: row.try_get("title").unwrap_or_default(),
+        description: row.try_get::<Option<String>, _>("description").unwrap_or(None),
+        starts_at: row.try_get::<String, _>("starts_at").ok()
+            .as_deref().and_then(parse_pg_dt).unwrap_or_else(Utc::now),
+        ends_at: row.try_get::<Option<String>, _>("ends_at").ok()
+            .flatten().as_deref().and_then(parse_pg_dt),
+        location: row.try_get::<Option<String>, _>("location").unwrap_or(None),
+        channel_id: row.try_get::<Option<String>, _>("channel_id").ok()
+            .flatten().and_then(|s| s.parse().ok()),
+        cover_image: row.try_get::<Option<String>, _>("cover_image").unwrap_or(None),
+        status: row.try_get("status").unwrap_or_else(|_| "scheduled".into()),
+        interested_count: row.try_get::<i64, _>("interested_count").unwrap_or(0),
+        is_interested: row.try_get::<Option<bool>, _>("is_interested")
+            .ok().flatten().unwrap_or(false),
+        created_at: row.try_get::<String, _>("created_at").ok()
+            .as_deref().and_then(parse_pg_dt).unwrap_or_else(Utc::now),
+        updated_at: row.try_get::<String, _>("updated_at").ok()
+            .as_deref().and_then(parse_pg_dt).unwrap_or_else(Utc::now),
     })
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
+// —————————————————————————————————————————————————————————————————————————————
 // Handlers
-// ─────────────────────────────────────────────────────────────────────────────
+// —————————————————————————————————————————————————————————————————————————————
 
 /// POST /api/v1/servers/:server_id/events
 async fn create_event(
@@ -192,20 +245,32 @@ async fn create_event(
     let event_id = snowflake::generate_id();
     let now = Utc::now();
 
-    sqlx::query!(
+    sqlx::query(
         r#"
         INSERT INTO server_events
             (id, server_id, creator_id, title, description, starts_at, ends_at,
              location, channel_id, cover_image, status, created_at, updated_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'scheduled',$11,$11)
+        VALUES (
+            $1::uuid, $2::uuid, $3::uuid, $4, $5,
+            $6::timestamptz, $7::timestamptz, $8, $9::uuid, $10,
+            'scheduled', $11::timestamptz, $11::timestamptz
+        )
         "#,
-        event_id, server_id, auth.user_id,
-        body.title.trim(), body.description.as_deref(),
-        body.starts_at, body.ends_at, body.location.as_deref(),
-        body.channel_id, body.cover_image.as_deref(), now,
     )
+    .bind(event_id.to_string())
+    .bind(server_id.to_string())
+    .bind(auth.user_id.to_string())
+    .bind(body.title.trim().to_string())
+    .bind(body.description.clone())
+    .bind(body.starts_at.to_rfc3339())
+    .bind(body.ends_at.map(|d| d.to_rfc3339()))
+    .bind(body.location.clone())
+    .bind(body.channel_id.map(|id| id.to_string()))
+    .bind(body.cover_image.clone())
+    .bind(now.to_rfc3339())
     .execute(&state.db.pool)
-    .await?;
+    .await
+    .map_err(NexusError::Database)?;
 
     let event = fetch_event(&state, event_id, auth.user_id).await?;
 
@@ -232,46 +297,73 @@ async fn list_events(
         .await?
         .ok_or(NexusError::Forbidden)?;
 
-    let status_filter = params.status.as_deref().unwrap_or("scheduled");
+    let status_filter = params.status.clone().unwrap_or_else(|| "scheduled".into());
     let limit = params.limit.unwrap_or(50).min(100);
 
-    let rows = sqlx::query!(
+    let rows = sqlx::query(
         r#"
         SELECT
-            e.id, e.server_id, e.creator_id, e.title, e.description,
-            e.starts_at, e.ends_at, e.location, e.channel_id, e.cover_image,
-            e.status, e.created_at, e.updated_at,
-            COUNT(r.user_id) AS interested_count,
-            BOOL_OR(r.user_id = $3) AS is_interested
+            e.id::text            AS id,
+            e.server_id::text     AS server_id,
+            e.creator_id::text    AS creator_id,
+            e.title,
+            e.description,
+            e.starts_at::text     AS starts_at,
+            e.ends_at::text       AS ends_at,
+            e.location,
+            e.channel_id::text    AS channel_id,
+            e.cover_image,
+            e.status,
+            e.created_at::text    AS created_at,
+            e.updated_at::text    AS updated_at,
+            COUNT(r.user_id)      AS interested_count,
+            BOOL_OR(r.user_id = $3::uuid) AS is_interested
         FROM server_events e
         LEFT JOIN server_event_rsvps r ON r.event_id = e.id
-        WHERE e.server_id = $1 AND e.status = $2
+        WHERE e.server_id = $1::uuid AND e.status = $2
         GROUP BY e.id
         ORDER BY e.starts_at ASC
         LIMIT $4
         "#,
-        server_id, status_filter, auth.user_id, limit,
     )
+    .bind(server_id.to_string())
+    .bind(status_filter)
+    .bind(auth.user_id.to_string())
+    .bind(limit)
     .fetch_all(&state.db.pool)
-    .await?;
+    .await
+    .map_err(NexusError::Database)?;
 
-    Ok(Json(rows.into_iter().map(|row| ServerEvent {
-        id: row.id,
-        server_id: row.server_id,
-        creator_id: row.creator_id,
-        title: row.title,
-        description: row.description,
-        starts_at: row.starts_at,
-        ends_at: row.ends_at,
-        location: row.location,
-        channel_id: row.channel_id,
-        cover_image: row.cover_image,
-        status: row.status,
-        interested_count: row.interested_count.unwrap_or(0),
-        is_interested: row.is_interested.unwrap_or(false),
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-    }).collect()))
+    let events: Vec<ServerEvent> = rows.iter().map(|row| {
+        ServerEvent {
+            id: row.try_get::<String, _>("id").unwrap_or_default()
+                .parse().unwrap_or_default(),
+            server_id: row.try_get::<String, _>("server_id").unwrap_or_default()
+                .parse().unwrap_or_default(),
+            creator_id: row.try_get::<String, _>("creator_id").unwrap_or_default()
+                .parse().unwrap_or_default(),
+            title: row.try_get("title").unwrap_or_default(),
+            description: row.try_get::<Option<String>, _>("description").unwrap_or(None),
+            starts_at: row.try_get::<String, _>("starts_at").ok()
+                .as_deref().and_then(parse_pg_dt).unwrap_or_else(Utc::now),
+            ends_at: row.try_get::<Option<String>, _>("ends_at").ok()
+                .flatten().as_deref().and_then(parse_pg_dt),
+            location: row.try_get::<Option<String>, _>("location").unwrap_or(None),
+            channel_id: row.try_get::<Option<String>, _>("channel_id").ok()
+                .flatten().and_then(|s| s.parse().ok()),
+            cover_image: row.try_get::<Option<String>, _>("cover_image").unwrap_or(None),
+            status: row.try_get("status").unwrap_or_else(|_| "scheduled".into()),
+            interested_count: row.try_get::<i64, _>("interested_count").unwrap_or(0),
+            is_interested: row.try_get::<Option<bool>, _>("is_interested")
+                .ok().flatten().unwrap_or(false),
+            created_at: row.try_get::<String, _>("created_at").ok()
+                .as_deref().and_then(parse_pg_dt).unwrap_or_else(Utc::now),
+            updated_at: row.try_get::<String, _>("updated_at").ok()
+                .as_deref().and_then(parse_pg_dt).unwrap_or_else(Utc::now),
+        }
+    }).collect();
+
+    Ok(Json(events))
 }
 
 /// GET /api/v1/servers/:server_id/events/:event_id
@@ -296,30 +388,31 @@ async fn update_event(
     require_manage_events(&state, auth.user_id, server_id).await?;
 
     let now = Utc::now();
-    sqlx::query!(
+    sqlx::query(
         r#"
         UPDATE server_events SET
             title       = COALESCE($2, title),
             description = COALESCE($3, description),
-            starts_at   = COALESCE($4, starts_at),
-            ends_at     = COALESCE($5, ends_at),
+            starts_at   = COALESCE($4::timestamptz, starts_at),
+            ends_at     = COALESCE($5::timestamptz, ends_at),
             location    = COALESCE($6, location),
             cover_image = COALESCE($7, cover_image),
-            updated_at  = $8
-        WHERE id = $1 AND server_id = $9
+            updated_at  = $8::timestamptz
+        WHERE id = $1::uuid AND server_id = $9::uuid
         "#,
-        event_id,
-        body.title.as_deref(),
-        body.description.as_deref(),
-        body.starts_at,
-        body.ends_at,
-        body.location.as_deref(),
-        body.cover_image.as_deref(),
-        now,
-        server_id,
     )
+    .bind(event_id.to_string())
+    .bind(body.title.clone())
+    .bind(body.description.clone())
+    .bind(body.starts_at.map(|d| d.to_rfc3339()))
+    .bind(body.ends_at.map(|d| d.to_rfc3339()))
+    .bind(body.location.clone())
+    .bind(body.cover_image.clone())
+    .bind(now.to_rfc3339())
+    .bind(server_id.to_string())
     .execute(&state.db.pool)
-    .await?;
+    .await
+    .map_err(NexusError::Database)?;
 
     let event = fetch_event(&state, event_id, auth.user_id).await?;
 
@@ -342,12 +435,14 @@ async fn cancel_event(
 ) -> NexusResult<Json<serde_json::Value>> {
     require_manage_events(&state, auth.user_id, server_id).await?;
 
-    sqlx::query!(
-        "UPDATE server_events SET status = 'cancelled', updated_at = NOW() WHERE id = $1 AND server_id = $2",
-        event_id, server_id,
+    sqlx::query(
+        "UPDATE server_events SET status = 'cancelled', updated_at = NOW() WHERE id = $1::uuid AND server_id = $2::uuid",
     )
+    .bind(event_id.to_string())
+    .bind(server_id.to_string())
     .execute(&state.db.pool)
-    .await?;
+    .await
+    .map_err(NexusError::Database)?;
 
     let _ = state.gateway_tx.send(GatewayEvent {
         event_type: event_types::GUILD_SCHEDULED_EVENT_DELETE.into(),
@@ -370,12 +465,14 @@ async fn rsvp(
         .await?
         .ok_or(NexusError::Forbidden)?;
 
-    sqlx::query!(
-        "INSERT INTO server_event_rsvps (event_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-        event_id, auth.user_id,
+    sqlx::query(
+        "INSERT INTO server_event_rsvps (event_id, user_id) VALUES ($1::uuid, $2::uuid) ON CONFLICT DO NOTHING",
     )
+    .bind(event_id.to_string())
+    .bind(auth.user_id.to_string())
     .execute(&state.db.pool)
-    .await?;
+    .await
+    .map_err(NexusError::Database)?;
 
     let _ = state.gateway_tx.send(GatewayEvent {
         event_type: event_types::GUILD_SCHEDULED_EVENT_USER_ADD.into(),
@@ -394,12 +491,14 @@ async fn un_rsvp(
     State(state): State<Arc<AppState>>,
     Path((server_id, event_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    sqlx::query!(
-        "DELETE FROM server_event_rsvps WHERE event_id = $1 AND user_id = $2",
-        event_id, auth.user_id,
+    sqlx::query(
+        "DELETE FROM server_event_rsvps WHERE event_id = $1::uuid AND user_id = $2::uuid",
     )
+    .bind(event_id.to_string())
+    .bind(auth.user_id.to_string())
     .execute(&state.db.pool)
-    .await?;
+    .await
+    .map_err(NexusError::Database)?;
 
     let _ = state.gateway_tx.send(GatewayEvent {
         event_type: event_types::GUILD_SCHEDULED_EVENT_USER_REMOVE.into(),

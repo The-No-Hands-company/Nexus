@@ -85,7 +85,7 @@ ALTER TABLE messages
 -- Each bot may declare zero or more inline trigger prefixes (e.g. "/gif")
 CREATE TABLE IF NOT EXISTS bot_inline_triggers (
     id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    bot_id      UUID        NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+    bot_id      UUID        NOT NULL REFERENCES bot_applications(id) ON DELETE CASCADE,
     prefix      TEXT        NOT NULL CHECK (char_length(prefix) BETWEEN 1 AND 32),
     description TEXT        CHECK (char_length(description) <= 100),
     UNIQUE (bot_id, prefix)

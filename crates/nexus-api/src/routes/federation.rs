@@ -96,12 +96,13 @@ async fn well_known_server(State(state): State<Arc<AppState>>) -> impl IntoRespo
 
     // Load optional identity from instance_settings.
     let identity: serde_json::Value = sqlx::query(
-        "SELECT value FROM instance_settings WHERE key = 'federation_identity'")
+        "SELECT value::text AS value_text FROM instance_settings WHERE key = 'federation_identity'")
         .fetch_optional(&state.db.pool)
         .await
         .ok()
         .flatten()
-        .and_then(|r| r.try_get::<serde_json::Value, _>("value").ok())
+        .and_then(|r| r.try_get::<String, _>("value_text").ok())
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
         .unwrap_or_else(|| json!({}));
 
     // Count local users (best-effort).

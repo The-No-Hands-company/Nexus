@@ -13,6 +13,7 @@ use axum::{
 };
 use nexus_common::error::{NexusError, NexusResult};
 use serde::{Deserialize, Serialize};
+use sqlx::Row;
 use std::{sync::Arc, time::Duration};
 use uuid::Uuid;
 
@@ -93,23 +94,32 @@ async fn inline_query(
     Path(channel_id): Path<Uuid>,
     Query(params): Query<InlineQueryParams>,
 ) -> NexusResult<Json<Vec<InlineQueryResponse>>> {
-    // Validate user can see this channel (membership check for DM/server channels)
-    // We do a lightweight existence check — detailed access control is in the channel routes
-    let channel = sqlx::query!(
-        "SELECT id, server_id FROM channels WHERE id = $1", channel_id
+    // Lightweight existence + membership check
+    let channel_row = sqlx::query(
+        "SELECT id::text AS id, server_id::text AS server_id FROM channels WHERE id = $1::uuid",
     )
+    .bind(channel_id.to_string())
     .fetch_optional(&state.db.pool)
-    .await?
+    .await
+    .map_err(NexusError::Database)?
     .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
 
-    if let Some(server_id) = channel.server_id {
-        let _ = sqlx::query!(
-            "SELECT id FROM server_members WHERE user_id = $1 AND server_id = $2",
-            auth.user_id, server_id,
-        )
-        .fetch_optional(&state.db.pool)
-        .await?
-        .ok_or(NexusError::Forbidden)?;
+    let server_id_str: Option<String> = channel_row
+        .try_get::<Option<String>, _>("server_id")
+        .unwrap_or(None);
+
+    if let Some(sid_str) = server_id_str {
+        if let Ok(server_id) = sid_str.parse::<Uuid>() {
+            sqlx::query(
+                "SELECT id FROM server_members WHERE user_id = $1::uuid AND server_id = $2::uuid",
+            )
+            .bind(auth.user_id.to_string())
+            .bind(server_id.to_string())
+            .fetch_optional(&state.db.pool)
+            .await
+            .map_err(NexusError::Database)?
+            .ok_or(NexusError::Forbidden)?;
+        }
     }
 
     let query_text = params.query.trim().to_owned();
@@ -120,27 +130,40 @@ async fn inline_query(
     // Determine which bot(s) to query
     let triggers: Vec<(Uuid, String)> = if let Some(bot_id) = params.bot_id {
         // Use specified bot; find any trigger prefix for it
-        let row = sqlx::query!(
-            "SELECT id, bot_id, callback_url FROM bot_inline_triggers WHERE bot_id = $1 LIMIT 1",
-            bot_id,
+        let row = sqlx::query(
+            "SELECT bot_id::text AS bot_id, callback_url FROM bot_inline_triggers WHERE bot_id = $1::uuid LIMIT 1",
         )
+        .bind(bot_id.to_string())
         .fetch_optional(&state.db.pool)
-        .await?;
+        .await
+        .map_err(NexusError::Database)?;
+
         if let Some(r) = row {
-            vec![(r.bot_id, r.callback_url)]
+            let bid: Uuid = r.try_get::<String, _>("bot_id").unwrap_or_default()
+                .parse().unwrap_or(bot_id);
+            let cb: String = r.try_get("callback_url").unwrap_or_default();
+            vec![(bid, cb)]
         } else {
             return Ok(Json(vec![]));
         }
     } else {
         // Match by prefix: e.g. "@gif cats" → prefix "@gif"
         let prefix = query_text.split_whitespace().next().unwrap_or("").to_string();
-        let rows = sqlx::query!(
-            "SELECT DISTINCT ON (bot_id) bot_id, callback_url FROM bot_inline_triggers WHERE prefix = $1",
-            prefix,
+        let rows = sqlx::query(
+            "SELECT DISTINCT ON (bot_id) bot_id::text AS bot_id, callback_url FROM bot_inline_triggers WHERE prefix = $1",
         )
+        .bind(prefix)
         .fetch_all(&state.db.pool)
-        .await?;
-        rows.into_iter().map(|r| (r.bot_id, r.callback_url)).collect()
+        .await
+        .map_err(NexusError::Database)?;
+
+        rows.iter()
+            .filter_map(|r| {
+                let bid: Uuid = r.try_get::<String, _>("bot_id").unwrap_or_default().parse().ok()?;
+                let cb: String = r.try_get("callback_url").ok()?;
+                Some((bid, cb))
+            })
+            .collect()
     };
 
     // Proxy to each matching bot
@@ -159,7 +182,8 @@ async fn inline_query(
                 ("user_id", auth.user_id.to_string().as_str()),
             ])
             .send()
-            .await {
+            .await
+        {
             Ok(resp) if resp.status().is_success() => {
                 match resp.json::<Vec<InlineSuggestion>>().await {
                     Ok(suggestions) => results.push(InlineQueryResponse { bot_id, suggestions }),
@@ -188,42 +212,63 @@ async fn list_channel_triggers(
     State(state): State<Arc<AppState>>,
     Path(channel_id): Path<Uuid>,
 ) -> NexusResult<Json<Vec<BotTrigger>>> {
-    let channel = sqlx::query!(
-        "SELECT id, server_id FROM channels WHERE id = $1", channel_id
+    let channel_row = sqlx::query(
+        "SELECT id::text AS id, server_id::text AS server_id FROM channels WHERE id = $1::uuid",
     )
+    .bind(channel_id.to_string())
     .fetch_optional(&state.db.pool)
-    .await?
+    .await
+    .map_err(NexusError::Database)?
     .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
 
-    if let Some(server_id) = channel.server_id {
-        let _ = sqlx::query!(
-            "SELECT id FROM server_members WHERE user_id = $1 AND server_id = $2",
-            auth.user_id, server_id,
-        )
-        .fetch_optional(&state.db.pool)
-        .await?
-        .ok_or(NexusError::Forbidden)?;
+    let server_id_str: Option<String> = channel_row
+        .try_get::<Option<String>, _>("server_id")
+        .unwrap_or(None);
+
+    if let Some(sid_str) = server_id_str {
+        if let Ok(server_id) = sid_str.parse::<Uuid>() {
+            sqlx::query(
+                "SELECT id FROM server_members WHERE user_id = $1::uuid AND server_id = $2::uuid",
+            )
+            .bind(auth.user_id.to_string())
+            .bind(server_id.to_string())
+            .fetch_optional(&state.db.pool)
+            .await
+            .map_err(NexusError::Database)?
+            .ok_or(NexusError::Forbidden)?;
+        }
     }
 
-    // We join bot_inline_triggers → users (bots are users with is_bot=true)
-    let rows = sqlx::query!(
-        r#"SELECT bit.id, bit.bot_id, bit.prefix, bit.description,
+    // Join bot_inline_triggers → users (bots are users with is_bot=true)
+    let rows = sqlx::query(
+        r#"SELECT bit.id::text AS id, bit.bot_id::text AS bot_id,
+                  bit.prefix, bit.description,
                   u.username AS bot_name, u.avatar_url AS bot_avatar
            FROM bot_inline_triggers bit
            JOIN users u ON u.id = bit.bot_id
-           ORDER BY bit.prefix"#
+           ORDER BY bit.prefix"#,
     )
     .fetch_all(&state.db.pool)
-    .await?;
+    .await
+    .map_err(NexusError::Database)?;
 
-    Ok(Json(rows.into_iter().map(|r| BotTrigger {
-        id: r.id,
-        bot_id: r.bot_id,
-        prefix: r.prefix,
-        description: r.description,
-        bot_name: r.bot_name,
-        bot_avatar: r.bot_avatar,
-    }).collect()))
+    let triggers: Vec<BotTrigger> = rows
+        .iter()
+        .filter_map(|r| {
+            let id: Uuid = r.try_get::<String, _>("id").unwrap_or_default().parse().ok()?;
+            let bot_id: Uuid = r.try_get::<String, _>("bot_id").unwrap_or_default().parse().ok()?;
+            Some(BotTrigger {
+                id,
+                bot_id,
+                prefix: r.try_get("prefix").unwrap_or_default(),
+                description: r.try_get("description").unwrap_or_default(),
+                bot_name: r.try_get("bot_name").unwrap_or_default(),
+                bot_avatar: r.try_get::<Option<String>, _>("bot_avatar").unwrap_or(None),
+            })
+        })
+        .collect();
+
+    Ok(Json(triggers))
 }
 
 /// POST /api/v1/bots/@me/inline-triggers — bot registers a new trigger prefix
@@ -233,12 +278,16 @@ async fn register_trigger(
     Json(body): Json<RegisterTriggerRequest>,
 ) -> NexusResult<Json<serde_json::Value>> {
     // Verify caller is actually a bot
-    let is_bot: Option<bool> = sqlx::query_scalar!(
-        "SELECT is_bot FROM users WHERE id = $1", auth.user_id
+    let bot_row = sqlx::query(
+        "SELECT is_bot FROM users WHERE id = $1::uuid",
     )
+    .bind(auth.user_id.to_string())
     .fetch_optional(&state.db.pool)
-    .await?
-    .flatten();
+    .await
+    .map_err(NexusError::Database)?;
+
+    let is_bot = bot_row
+        .and_then(|r| r.try_get::<Option<bool>, _>("is_bot").ok().flatten());
 
     match is_bot {
         Some(true) => {}
@@ -259,12 +308,20 @@ async fn register_trigger(
     }
 
     let trigger_id = nexus_common::snowflake::generate_id();
-    sqlx::query!(
-        "INSERT INTO bot_inline_triggers (id, bot_id, prefix, description, callback_url) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (bot_id, prefix) DO UPDATE SET description=EXCLUDED.description, callback_url=EXCLUDED.callback_url",
-        trigger_id, auth.user_id, body.prefix.trim(), body.description, body.callback_url,
+    sqlx::query(
+        "INSERT INTO bot_inline_triggers (id, bot_id, prefix, description, callback_url) \
+         VALUES ($1::uuid, $2::uuid, $3, $4, $5) \
+         ON CONFLICT (bot_id, prefix) DO UPDATE \
+         SET description = EXCLUDED.description, callback_url = EXCLUDED.callback_url",
     )
+    .bind(trigger_id.to_string())
+    .bind(auth.user_id.to_string())
+    .bind(body.prefix.trim().to_string())
+    .bind(&body.description)
+    .bind(&body.callback_url)
     .execute(&state.db.pool)
-    .await?;
+    .await
+    .map_err(NexusError::Database)?;
 
     Ok(Json(serde_json::json!({ "id": trigger_id, "prefix": body.prefix.trim() })))
 }
@@ -275,12 +332,14 @@ async fn remove_trigger(
     State(state): State<Arc<AppState>>,
     Path(trigger_id): Path<Uuid>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    let res = sqlx::query!(
-        "DELETE FROM bot_inline_triggers WHERE id = $1 AND bot_id = $2",
-        trigger_id, auth.user_id,
+    let res = sqlx::query(
+        "DELETE FROM bot_inline_triggers WHERE id = $1::uuid AND bot_id = $2::uuid",
     )
+    .bind(trigger_id.to_string())
+    .bind(auth.user_id.to_string())
     .execute(&state.db.pool)
-    .await?;
+    .await
+    .map_err(NexusError::Database)?;
 
     if res.rows_affected() == 0 {
         return Err(NexusError::NotFound { resource: "Trigger".into() });

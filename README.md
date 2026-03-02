@@ -8,8 +8,8 @@
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Rust](https://img.shields.io/badge/Rust-1.84+-orange.svg)](https://www.rust-lang.org)
-[![Status](https://img.shields.io/badge/Status-v0.8%20Federation-purple.svg)]()
-[![v0.7](https://img.shields.io/badge/v0.7%20Extensibility-Complete-brightgreen.svg)]()
+[![Status](https://img.shields.io/badge/Status-v0.14%20Complete-brightgreen.svg)]()
+[![Phases](https://img.shields.io/badge/Phases%200.1--0.14-All%20Complete-brightgreen.svg)]()
 
 *Built in response to Discord's mandatory age verification, data breaches, and pre-IPO enshittification.*
 
@@ -112,10 +112,22 @@ Built for performance, privacy, and developer happiness:
 
 ## Quick Start
 
-### Prerequisites
+### One-Command Platform Scripts
+
+The easiest way to get Nexus running:
+
+| Platform | Command |
+|----------|---------|
+| **Linux** | `bash deploy/packs/linux/nexus-start.sh` |
+| **macOS** | `bash deploy/packs/macos/nexus-start.sh` |
+| **Windows** | `powershell -ExecutionPolicy Bypass -File deploy\packs\windows\nexus-start.ps1` |
+
+Each script auto-detects or installs dependencies, generates secrets, starts infrastructure, builds, and runs the server.
+
+### Manual Setup Prerequisites
 
 - [Rust 1.84+](https://rustup.rs/)
-- [Docker Compose](https://docs.docker.com/compose/install/)
+- [Docker Compose](https://docs.docker.com/compose/install/) (or Podman + podman-compose)
 
 ### Development Setup
 
@@ -291,9 +303,18 @@ nexus/
 | **v0.5** | ✅ Complete | E2E Encryption — Signal protocol for DMs + opt-in channels |
 | **v0.6** | ✅ Complete | Desktop Client — Tauri 2 app with full feature parity |
 | **v0.7** | ✅ Complete | Extensibility — Bot API, TypeScript/Python/Rust SDKs, plugin system, custom themes |
-| **v0.8** | 🟡 In Progress | Federation — Matrix-compatible server-to-server protocol |
-| **v0.9** | ⚪ Planned | Mobile — React Native iOS + Android |
-| **v1.0** | ⚪ Planned | Public Launch — managed hosting + self-host docs |
+| **v0.8** | ✅ Complete | Federation — Matrix-compatible server-to-server protocol |
+| **v0.8.5** | ✅ Complete | Federation UX — admin dashboard, trust levels, audit log, peer management |
+| **v0.9** | ✅ Complete | Launch — deployment infrastructure, Docker, CI/CD, self-hosting docs |
+| **v0.9.5** | ✅ Complete | Lite / Zero-Infra Mode — single-binary, SQLite, no external services required |
+| **v0.9.6** | ✅ Complete | Polish & Correctness — bug fixes, API consistency, performance tuning |
+| **v0.9.7** | ✅ Complete | Account Security — 2FA (TOTP), passkeys, session management |
+| **v0.9.8** | ✅ Complete | Moderation & Safety — automod, reports, audit log, timeout/ban flows |
+| **v0.12** | ✅ Complete | Channel Type Completion — announcements, stages, forums, media channels |
+| **v0.13** | ✅ Complete | Engagement Features — polls, events, scheduled posts, reactions v2 |
+| **v0.14** | ✅ Complete | Platform Differentiation — spatial audio, canvas channels, native drawing |
+| **v1.0** | 🔲 Planned | Mobile — React Native iOS + Android |
+| **v1.x** | 🔲 Planned | Phantom Privacy Layer — FHE-based anonymous routing integration |
 
 ## Contributing
 

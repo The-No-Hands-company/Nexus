@@ -4521,6 +4521,7 @@ dependencies = [
  "nexus-gateway",
  "nexus-voice",
  "rand 0.9.2",
+ "serde_json",
  "sqlx",
  "tokio",
  "tower",

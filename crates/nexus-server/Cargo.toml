@@ -29,4 +29,5 @@ sqlx = { workspace = true }
 uuid = { workspace = true }
 rand = { workspace = true }
 hex = { workspace = true }
+serde_json = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }

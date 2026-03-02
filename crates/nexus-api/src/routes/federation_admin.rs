@@ -43,6 +43,7 @@ use std::sync::Arc;
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use sqlx::Row;
 use crate::{middleware::AuthContext, AppState};
 
 // ─── Router ───────────────────────────────────────────────────────────────────
@@ -121,11 +122,11 @@ async fn write_audit(
     if let Err(e) = sqlx::query(
         r#"INSERT INTO federation_audit_log (id, admin_id, action, target_domain, details)
            VALUES ($1::uuid, $2::uuid, $3, $4, $5)"#)
-        .bind(snowflake::generate().to_string())
+        .bind(snowflake::generate_id().to_string())
         .bind(admin_id.to_string())
         .bind(action)
         .bind(target_domain)
-        .bind(details)
+        .bind(serde_json::to_string(&details).unwrap_or_else(|_| "{}".to_string()))
         .execute(pool)
         .await
     {
@@ -192,14 +193,15 @@ async fn get_identity(
     require_instance_admin(&state.db.pool, auth.user_id).await?;
 
     let row = sqlx::query(
-        r#"SELECT value FROM instance_settings WHERE key = 'federation_identity'"#)
+        r#"SELECT value::text AS value FROM instance_settings WHERE key = 'federation_identity'"#)
         .fetch_optional(&state.db.pool)
         .await
         .map_err(NexusError::from)?;
 
     let identity: Value = row
         .and_then(|r| {
-            let v: Option<Value> = r.try_get("value").ok();
+            let v: Option<Value> = r.try_get::<String, _>("value").ok()
+                .and_then(|s| serde_json::from_str(&s).ok());
             v
         })
         .unwrap_or_else(|| json!({
@@ -233,9 +235,9 @@ async fn update_identity(
     // Validate federation_policy
     if let Some(ref policy) = body.federation_policy {
         if !matches!(policy.as_str(), "open" | "allowlist" | "closed") {
-            return Err(NexusError::Validation(
-                "federation_policy must be 'open', 'allowlist', or 'closed'".into(),
-            ));
+            return Err(NexusError::Validation {
+                message: "federation_policy must be 'open', 'allowlist', or 'closed'".to_string(),
+            });
         }
     }
 
@@ -250,7 +252,7 @@ async fn update_identity(
         r#"INSERT INTO instance_settings (key, value)
            VALUES ('federation_identity', $1)
            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()"#)
-        .bind(&value)
+        .bind(serde_json::to_string(&value).unwrap_or_default())
         .execute(&state.db.pool)
         .await
         .map_err(NexusError::from)?;
@@ -296,9 +298,9 @@ async fn list_peers(
                 "is_blocked":       r.try_get::<bool, _>("is_blocked").unwrap_or(false),
                 "is_healthy":       r.try_get::<bool, _>("is_healthy").unwrap_or(true),
                 "latency_ms":       r.try_get::<Option<i32>, _>("latency_ms").unwrap_or(None),
-                "last_seen_at":     r.try_get::<Option<DateTime<Utc>>, _>("last_seen_at").unwrap_or(None),
+                "last_seen_at":     r.try_get::<Option<String>, _>("last_seen_at").unwrap_or(None),
                 "last_error":       r.try_get::<Option<String>, _>("last_error").unwrap_or(None),
-                "first_seen_at":    r.try_get::<Option<DateTime<Utc>>, _>("first_seen_at").unwrap_or(None),
+                "first_seen_at":    r.try_get::<Option<String>, _>("first_seen_at").unwrap_or(None),
                 "server_type":      r.try_get::<String, _>("server_type").unwrap_or_else(|_| "nexus".into()),
             })
         })
@@ -331,10 +333,10 @@ async fn add_peer(
     // Basic domain validation.
     let domain = body.domain.trim().to_lowercase();
     if domain.is_empty() || domain.contains('/') || domain.contains(' ') {
-        return Err(NexusError::Validation("Invalid domain name".into()));
+        return Err(NexusError::Validation { message: "Invalid domain name".to_string() });
     }
     if domain == state.server_name {
-        return Err(NexusError::Validation("Cannot peer with yourself".into()));
+        return Err(NexusError::Validation { message: "Cannot peer with yourself".to_string() });
     }
 
     let trust_score = body.trust_score.unwrap_or(50).clamp(0, 100);
@@ -344,7 +346,7 @@ async fn add_peer(
         .federation_client
         .ping(&domain)
         .await
-        .map_err(|e| NexusError::Validation(format!("Could not reach {}: {}", domain, e)))?;
+        .map_err(|e| NexusError::Validation { message: format!("Could not reach {}: {}", domain, e) })?;
 
     let display_name = well_known.display_name.as_deref().unwrap_or("");
     let description  = well_known.description.as_deref().unwrap_or("");
@@ -367,7 +369,7 @@ async fn add_peer(
                latency_ms        = $9,
                last_seen_at      = NOW(),
                last_error        = NULL"#)
-        .bind(snowflake::generate().to_string())
+        .bind(snowflake::generate_id().to_string())
         .bind(&domain)
         .bind(&well_known.display_name)
         .bind(&well_known.description)
@@ -381,7 +383,7 @@ async fn add_peer(
         .map_err(NexusError::from)?;
 
     // Create an outbound peering request.
-    let req_id = snowflake::generate().to_string();
+    let req_id = snowflake::generate_id().to_string();
     sqlx::query(
         r#"INSERT INTO federation_peer_requests
                (id, remote_domain, direction, acted_by, message, remote_display_name, remote_description)
@@ -501,7 +503,7 @@ async fn update_trust(
         .map_err(NexusError::from)?;
 
     if result.is_none() {
-        return Err(NexusError::NotFound("Peer not found".into()));
+        return Err(NexusError::NotFound { resource: "Peer not found".to_string() });
     }
 
     write_audit(
@@ -537,7 +539,7 @@ async fn block_peer(
             r#"INSERT INTO federated_servers (id, server_name, is_blocked, trust_score)
                VALUES ($1::uuid, $2, true, 0)
                ON CONFLICT (server_name) DO UPDATE SET is_blocked = true, trust_score = 0"#)
-            .bind(snowflake::generate().to_string())
+            .bind(snowflake::generate_id().to_string())
             .bind(&domain)
             .execute(&state.db.pool)
             .await
@@ -588,7 +590,7 @@ async fn remove_peer(
         .map_err(NexusError::from)?;
 
     if result.is_none() {
-        return Err(NexusError::NotFound("Peer not found".into()));
+        return Err(NexusError::NotFound { resource: "Peer not found".to_string() });
     }
 
     write_audit(&state.db.pool, auth.user_id, "peer_removed", &domain, json!({})).await;
@@ -635,8 +637,8 @@ async fn list_requests(
         "message":              r.try_get::<Option<String>, _>("message").unwrap_or(None),
         "remote_display_name":  r.try_get::<Option<String>, _>("remote_display_name").unwrap_or(None),
         "remote_description":   r.try_get::<Option<String>, _>("remote_description").unwrap_or(None),
-        "created_at":           r.try_get::<Option<DateTime<Utc>>, _>("created_at").unwrap_or(None),
-        "resolved_at":          r.try_get::<Option<DateTime<Utc>>, _>("resolved_at").unwrap_or(None),
+        "created_at":           r.try_get::<Option<String>, _>("created_at").unwrap_or(None),
+        "resolved_at":          r.try_get::<Option<String>, _>("resolved_at").unwrap_or(None),
     })).collect();
 
     Ok(Json(json!({ "requests": requests, "total": requests.len() })))
@@ -659,17 +661,17 @@ async fn accept_request(
         .fetch_optional(&state.db.pool)
         .await
         .map_err(NexusError::from)?
-        .ok_or_else(|| NexusError::NotFound("Request not found".into()))?;
+        .ok_or_else(|| NexusError::NotFound { resource: "Request not found".to_string() })?;
 
     let direction: String = row.try_get("direction").unwrap_or_default();
     let status: String    = row.try_get("status").unwrap_or_default();
     let domain: String    = row.try_get("remote_domain").unwrap_or_default();
 
     if direction != "inbound" {
-        return Err(NexusError::Validation("Only inbound requests can be accepted".into()));
+        return Err(NexusError::Validation { message: "Only inbound requests can be accepted".to_string() });
     }
     if status != "pending" {
-        return Err(NexusError::Validation(format!("Request is already {}", status)));
+        return Err(NexusError::Validation { message: format!("Request is already {}", status) });
     }
 
     // Mark as accepted.
@@ -690,7 +692,7 @@ async fn accept_request(
            ON CONFLICT (server_name) DO UPDATE SET
                trust_score = GREATEST(federated_servers.trust_score, 50),
                is_blocked  = false"#)
-        .bind(snowflake::generate().to_string())
+        .bind(snowflake::generate_id().to_string())
         .bind(&domain)
         .bind(row.try_get::<Option<String>, _>("remote_display_name").unwrap_or(None))
         .bind(row.try_get::<Option<String>, _>("remote_description").unwrap_or(None))
@@ -721,13 +723,13 @@ async fn reject_request(
         .fetch_optional(&state.db.pool)
         .await
         .map_err(NexusError::from)?
-        .ok_or_else(|| NexusError::NotFound("Request not found".into()))?;
+        .ok_or_else(|| NexusError::NotFound { resource: "Request not found".to_string() })?;
 
     let status: String = row.try_get("status").unwrap_or_default();
     let domain: String = row.try_get("remote_domain").unwrap_or_default();
 
     if status != "pending" {
-        return Err(NexusError::Validation(format!("Request is already {}", status)));
+        return Err(NexusError::Validation { message: format!("Request is already {}", status) });
     }
 
     sqlx::query(
@@ -774,7 +776,7 @@ async fn get_audit_log(
            ORDER BY created_at DESC
            LIMIT $3"#)
         .bind(q.domain)
-        .bind(q.before)
+        .bind(q.before.map(|d| d.to_rfc3339()))
         .bind(limit)
         .fetch_all(&state.db.pool)
         .await
@@ -785,8 +787,8 @@ async fn get_audit_log(
         "admin_id":      r.try_get::<Option<String>, _>("admin_id").unwrap_or(None),
         "action":        r.try_get::<String, _>("action").unwrap_or_default(),
         "target_domain": r.try_get::<String, _>("target_domain").unwrap_or_default(),
-        "details":       r.try_get::<Value, _>("details").unwrap_or(json!({})),
-        "created_at":    r.try_get::<Option<DateTime<Utc>>, _>("created_at").unwrap_or(None),
+        "details":       r.try_get::<Option<String>, _>("details").ok().flatten().and_then(|s| serde_json::from_str::<Value>(&s).ok()).unwrap_or(json!({})),
+        "created_at":    r.try_get::<Option<String>, _>("created_at").unwrap_or(None),
     })).collect();
 
     Ok(Json(json!({ "entries": entries, "total": entries.len() })))
