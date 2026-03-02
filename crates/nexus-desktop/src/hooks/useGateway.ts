@@ -10,7 +10,7 @@
  *   5. Events arrive as {"op":"Dispatch","d":{"event":"EVENT_NAME","data":{...}}}
  */
 import { useEffect, useRef } from "react";
-import { useStore, Message, VoiceParticipant, UserBadge, CanvasBlock } from "../store";
+import { useStore, Message, VoiceParticipant, UserBadge, CanvasBlock, ServerEvent } from "../store";
 import { isTauri, invoke } from "../invoke";
 
 let _sendNotification: ((title: string, body: string) => void) | null = null;
@@ -319,7 +319,7 @@ export function useGateway() {
         case "GUILD_SCHEDULED_EVENT_UPDATE": {
           const raw = data as Record<string, unknown>;
           const serverId = raw.server_id as string;
-          useStore.getState().upsertServerEvent(serverId, data as Parameters<typeof useStore.getState().upsertServerEvent>[1]);
+          useStore.getState().upsertServerEvent(serverId, data as ServerEvent);
           break;
         }
 
