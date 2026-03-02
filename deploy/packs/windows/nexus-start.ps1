@@ -45,9 +45,15 @@ Write-Info "Checking Docker daemon ..."
 $attempts = 0
 while ($attempts -lt 15) {
     try {
-        docker info 2>&1 | Out-Null
+        $oldEap = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        docker info 1>$null 2>$null
+        $ErrorActionPreference = $oldEap
+
         break
     } catch {
+        if ($null -ne $oldEap) { $ErrorActionPreference = $oldEap }
+
         Write-Host "." -NoNewline
         Start-Sleep -Seconds 3
         $attempts++
@@ -57,7 +63,11 @@ if ($attempts -eq 15) {
     Write-Info "Starting Docker Desktop ..."
     Start-Process "C:\Program Files\Docker\Docker\Docker Desktop.exe"
     Start-Sleep -Seconds 20
-    docker info 2>&1 | Out-Null
+
+    $oldEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    docker info 1>$null 2>$null
+    $ErrorActionPreference = $oldEap
 }
 Write-Ok "Docker is running."
 
