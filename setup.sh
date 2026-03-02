@@ -39,11 +39,38 @@ check_cmd() {
 check_cmd docker
 check_cmd curl
 check_cmd openssl
+check_cmd cargo
+check_cmd node
+check_cmd npm
 
 if ! docker compose version &>/dev/null; then
     die "Docker Compose v2 not available. Run: docker plugin install docker/compose-plugin"
 fi
 success "Docker Compose v2 found"
+
+if cargo --list | grep -qE '^[[:space:]]+tauri[[:space:]]'; then
+    success "Tauri CLI found"
+else
+    warn "Tauri CLI not found, installing..."
+    cargo install tauri-cli --version "^2.0" || die "Failed to install tauri-cli"
+    success "Tauri CLI installed"
+fi
+
+info "Checking desktop npm dependencies..."
+if [ -d "crates/nexus-desktop/node_modules" ]; then
+    success "Desktop dependencies already installed (node_modules exists)"
+else
+    warn "Desktop dependencies missing, running npm install..."
+    (
+      cd crates/nexus-desktop
+      npm install
+    ) || die "npm install failed in crates/nexus-desktop"
+    success "Desktop dependencies installed"
+fi
+
+if [[ "$(uname -s)" == "Linux" ]]; then
+  warn "Linux detected: you may need WebKitGTK/GTK build dependencies for Tauri."
+fi
 echo ""
 
 # ── Gather configuration ──────────────────────────────────────────────────────

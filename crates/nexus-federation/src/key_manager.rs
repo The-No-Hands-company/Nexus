@@ -74,7 +74,7 @@ impl KeyManager {
         sqlx::query(
             "INSERT INTO federation_keys \
              (key_id, seed_bytes, public_key_b64, expires_at, is_active) \
-             VALUES ($1, $2, $3, $4, $5) \
+             VALUES ($1, $2, $3, $4::timestamptz, $5) \
              ON CONFLICT (key_id) DO NOTHING",
         )
         .bind(&kp.key_id)

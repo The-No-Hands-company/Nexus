@@ -46,8 +46,12 @@ pub fn run() {
             // Register push-to-talk shortcut (default: CapsLock, user-configurable)
             hotkeys::register_defaults(app)?;
 
-            // Start background update check (every 4 hours)
-            updater::schedule_check(app.handle().clone());
+            // Start background update check only outside debug/dev builds
+            if !cfg!(debug_assertions) {
+                updater::schedule_check(app.handle().clone());
+            } else {
+                tracing::info!("Dev build: updater check disabled");
+            }
 
             tracing::info!("Nexus desktop v{} ready", env!("CARGO_PKG_VERSION"));
             Ok(())
