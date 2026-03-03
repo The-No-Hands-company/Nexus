@@ -7,6 +7,8 @@ use nexus_common::models::rich::AttachmentRow;
 
 use uuid::Uuid;
 
+use crate::select_cols::{ATTACHMENT_COLS, ATTACHMENT_COLS_A};
+
 // ============================================================
 // Create
 // ============================================================
@@ -30,7 +32,7 @@ pub async fn create_attachment(
     sha256: Option<&str>,
 ) -> Result<AttachmentRow, sqlx::Error> {
     sqlx::query_as::<_, AttachmentRow>(
-        r#"
+        &format!(r#"
         INSERT INTO attachments (
             id, uploader_id, server_id, channel_id,
             filename, content_type, size, storage_key,
@@ -45,8 +47,8 @@ pub async fn create_attachment(
             $12, $13, 'pending',
             CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
         )
-        RETURNING *
-        "#,
+        RETURNING {}
+        "#, ATTACHMENT_COLS),
     )
     .bind(id.to_string())
     .bind(uploader_id.to_string())
@@ -71,7 +73,7 @@ pub async fn create_attachment(
 
 /// Find an attachment by ID.
 pub async fn find_by_id(pool: &sqlx::AnyPool, id: Uuid) -> Result<Option<AttachmentRow>, sqlx::Error> {
-    sqlx::query_as::<_, AttachmentRow>("SELECT * FROM attachments WHERE id = $1")
+    sqlx::query_as::<_, AttachmentRow>(&format!("SELECT {} FROM attachments WHERE id = $1", ATTACHMENT_COLS))
         .bind(id.to_string())
         .fetch_optional(pool)
         .await
@@ -83,7 +85,7 @@ pub async fn list_for_message(
     message_id: Uuid,
 ) -> Result<Vec<AttachmentRow>, sqlx::Error> {
     sqlx::query_as::<_, AttachmentRow>(
-        "SELECT * FROM attachments WHERE message_id = $1 ORDER BY created_at",
+        &format!("SELECT {} FROM attachments WHERE message_id = $1 ORDER BY created_at", ATTACHMENT_COLS),
     )
     .bind(message_id.to_string())
     .fetch_all(pool)
@@ -99,13 +101,13 @@ pub async fn list_for_uploader(
 ) -> Result<Vec<AttachmentRow>, sqlx::Error> {
     if let Some(before) = before_id {
         sqlx::query_as::<_, AttachmentRow>(
-            r#"
-            SELECT a.* FROM attachments a
+            &format!(r#"
+            SELECT {} FROM attachments a
             WHERE a.uploader_id = $1
               AND a.id < $2
             ORDER BY a.created_at DESC
             LIMIT $3
-            "#,
+            "#, ATTACHMENT_COLS_A),
         )
         .bind(uploader_id.to_string())
         .bind(before.to_string())
@@ -114,12 +116,12 @@ pub async fn list_for_uploader(
         .await
     } else {
         sqlx::query_as::<_, AttachmentRow>(
-            r#"
-            SELECT * FROM attachments
+            &format!(r#"
+            SELECT {} FROM attachments
             WHERE uploader_id = $1
             ORDER BY created_at DESC
             LIMIT $2
-            "#,
+            "#, ATTACHMENT_COLS),
         )
         .bind(uploader_id.to_string())
         .bind(limit)
@@ -140,12 +142,12 @@ pub async fn mark_ready(
     blurhash: Option<&str>,
 ) -> Result<AttachmentRow, sqlx::Error> {
     sqlx::query_as::<_, AttachmentRow>(
-        r#"
+        &format!(r#"
         UPDATE attachments
         SET status = 'ready', url = $1, blurhash = $2, updated_at = CURRENT_TIMESTAMP
         WHERE id = $3
-        RETURNING *
-        "#,
+        RETURNING {}
+        "#, ATTACHMENT_COLS),
     )
     .bind(id.to_string())
     .bind(url)

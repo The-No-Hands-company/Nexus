@@ -105,3 +105,43 @@ pub const MESSAGE_COLS_M: &str =
 pub const RELATIONSHIP_COLS: &str =
     "id::text AS id, requester_id::text AS requester_id, addressee_id::text AS addressee_id, \
      status::text AS status, created_at::text AS created_at, updated_at::text AS updated_at";
+
+// ── server_emoji ──────────────────────────────────────────────────────────────
+pub const EMOJI_COLS: &str =
+    "id::text AS id, server_id::text AS server_id, creator_id::text AS creator_id, \
+     name, storage_key, url, animated, managed, available, \
+     created_at::text AS created_at";
+
+// ── attachments ───────────────────────────────────────────────────────────────
+pub const ATTACHMENT_COLS: &str =
+    "id::text AS id, uploader_id::text AS uploader_id, server_id::text AS server_id, \
+     channel_id::text AS channel_id, message_id::text AS message_id, \
+     filename, content_type, size, storage_key, url, \
+     width, height, duration_secs, spoiler, blurhash, sha256, status, \
+     created_at::text AS created_at, updated_at::text AS updated_at";
+
+/// Same as `ATTACHMENT_COLS` but with `a.` table-alias prefix for JOIN queries.
+pub const ATTACHMENT_COLS_A: &str =
+    "a.id::text AS id, a.uploader_id::text AS uploader_id, a.server_id::text AS server_id, \
+     a.channel_id::text AS channel_id, a.message_id::text AS message_id, \
+     a.filename, a.content_type, a.size, a.storage_key, a.url, \
+     a.width, a.height, a.duration_secs, a.spoiler, a.blurhash, a.sha256, a.status, \
+     a.created_at::text AS created_at, a.updated_at::text AS updated_at";
+
+// ── threads ───────────────────────────────────────────────────────────────────
+/// Columns for the `threads` table (no prefix).  Used in RETURNING clauses
+/// where `parent_channel_id` is appended as a separate expression.
+pub const THREAD_COLS: &str =
+    "channel_id::text AS channel_id, parent_message_id::text AS parent_message_id, \
+     owner_id::text AS owner_id, title, message_count, member_count, \
+     auto_archive_minutes, archived, archived_at::text AS archived_at, locked, \
+     COALESCE(array_to_json(tags), '[]'::json)::text AS tags, \
+     created_at::text AS created_at, updated_at::text AS updated_at";
+
+/// Same as `THREAD_COLS` but with `t.` table-alias prefix for JOIN queries.
+pub const THREAD_COLS_T: &str =
+    "t.channel_id::text AS channel_id, t.parent_message_id::text AS parent_message_id, \
+     t.owner_id::text AS owner_id, t.title, t.message_count, t.member_count, \
+     t.auto_archive_minutes, t.archived, t.archived_at::text AS archived_at, t.locked, \
+     COALESCE(array_to_json(t.tags), '[]'::json)::text AS tags, \
+     t.created_at::text AS created_at, t.updated_at::text AS updated_at";

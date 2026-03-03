@@ -6,6 +6,8 @@
 use nexus_common::models::rich::ThreadRow;
 use uuid::Uuid;
 
+use crate::select_cols::{THREAD_COLS, THREAD_COLS_T};
+
 // Module-level helper for member list query — uses String to avoid AnyPool Uuid decode issues
 #[derive(sqlx::FromRow)]
 struct ThreadMemberRow {
@@ -30,7 +32,7 @@ pub async fn create_thread(
 ) -> Result<ThreadRow, sqlx::Error> {
     let tags_json = serde_json::to_string(tags).unwrap_or_else(|_| "[]".to_string());
     sqlx::query_as::<_, ThreadRow>(
-        r#"
+        &format!(r#"
         INSERT INTO threads (
             channel_id, parent_message_id, owner_id, title,
             message_count, member_count, auto_archive_minutes,
@@ -38,8 +40,8 @@ pub async fn create_thread(
             created_at, updated_at
         )
         VALUES ($1, $2, $3, $4, 0, 1, $5, false, false, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        RETURNING *, $7 AS parent_channel_id
-        "#,
+        RETURNING {}, $7 AS parent_channel_id
+        "#, THREAD_COLS),
     )
     .bind(channel_id.to_string())
     .bind(parent_message_id.map(|x| x.to_string()))
@@ -59,12 +61,12 @@ pub async fn create_thread(
 /// Get a thread by its channel ID, including parent_channel_id.
 pub async fn find_by_id(pool: &sqlx::AnyPool, channel_id: Uuid) -> Result<Option<ThreadRow>, sqlx::Error> {
     sqlx::query_as::<_, ThreadRow>(
-        r#"
-        SELECT t.*, c.parent_id AS parent_channel_id
+        &format!(r#"
+        SELECT {}, c.parent_id::text AS parent_channel_id
         FROM threads t
         JOIN channels c ON c.id = t.channel_id
         WHERE t.channel_id = $1
-        "#,
+        "#, THREAD_COLS_T),
     )
     .bind(channel_id.to_string())
     .fetch_optional(pool)
@@ -78,8 +80,8 @@ pub async fn list_active(
     limit: i64,
 ) -> Result<Vec<ThreadRow>, sqlx::Error> {
     sqlx::query_as::<_, ThreadRow>(
-        r#"
-        SELECT t.*, c.parent_id AS parent_channel_id
+        &format!(r#"
+        SELECT {}, c.parent_id::text AS parent_channel_id
         FROM threads t
         JOIN channels c ON c.id = t.channel_id
         WHERE c.parent_id = $1
@@ -87,7 +89,7 @@ pub async fn list_active(
           AND t.locked = false
         ORDER BY t.updated_at DESC
         LIMIT $2
-        "#,
+        "#, THREAD_COLS_T),
     )
     .bind(parent_channel_id.to_string())
     .bind(limit)
@@ -104,8 +106,8 @@ pub async fn list_archived(
 ) -> Result<Vec<ThreadRow>, sqlx::Error> {
     if let Some(b) = before {
         sqlx::query_as::<_, ThreadRow>(
-            r#"
-            SELECT t.*, c.parent_id AS parent_channel_id
+            &format!(r#"
+            SELECT {}, c.parent_id::text AS parent_channel_id
             FROM threads t
             JOIN channels c ON c.id = t.channel_id
             WHERE c.parent_id = $1
@@ -113,7 +115,7 @@ pub async fn list_archived(
               AND t.archived_at < $2
             ORDER BY t.archived_at DESC
             LIMIT $3
-            "#,
+            "#, THREAD_COLS_T),
         )
         .bind(parent_channel_id.to_string())
         .bind(b.to_rfc3339())
@@ -122,15 +124,15 @@ pub async fn list_archived(
         .await
     } else {
         sqlx::query_as::<_, ThreadRow>(
-            r#"
-            SELECT t.*, c.parent_id AS parent_channel_id
+            &format!(r#"
+            SELECT {}, c.parent_id::text AS parent_channel_id
             FROM threads t
             JOIN channels c ON c.id = t.channel_id
             WHERE c.parent_id = $1
               AND t.archived = true
             ORDER BY t.archived_at DESC
             LIMIT $2
-            "#,
+            "#, THREAD_COLS_T),
         )
         .bind(parent_channel_id.to_string())
         .bind(limit)
@@ -169,14 +171,16 @@ pub async fn update_thread(
             SET
                 title = COALESCE($1, title),
                 archived = COALESCE($2, archived),
-                {archived_at_clause}
+                {}
                 locked = COALESCE($3, locked),
                 auto_archive_minutes = COALESCE($4, auto_archive_minutes),
                 tags = COALESCE($5, tags),
                 updated_at = CURRENT_TIMESTAMP
             WHERE channel_id = $6
-            RETURNING *, (SELECT parent_id FROM channels WHERE id = $7) AS parent_channel_id
-            "#
+            RETURNING {}, (SELECT parent_id FROM channels WHERE id = $7)::text AS parent_channel_id
+            "#,
+            archived_at_clause,
+            THREAD_COLS,
         ),
     )
     .bind(title)

@@ -423,6 +423,12 @@ pub async fn list_server_invites(
     Ok(raw.into_iter().map(InviteClient::from).collect())
 }
 
+/// The API only returns `{ "code": "..." }` for invite creation.
+#[derive(Deserialize)]
+struct CreateInviteResponse {
+    code: String,
+}
+
 /// Create a new invite for a server.
 #[tauri::command]
 pub async fn create_invite(
@@ -447,8 +453,15 @@ pub async fn create_invite(
         let text = resp.text().await.unwrap_or_default();
         return Err(text);
     }
-    let raw: RawInvite = resp.json().await.map_err(|e| e.to_string())?;
-    Ok(InviteClient::from(raw))
+    let r: CreateInviteResponse = resp.json().await.map_err(|e| e.to_string())?;
+    Ok(InviteClient {
+        code: r.code,
+        server_id: server_id.to_string(),
+        max_uses,
+        uses: 0,
+        expires_at: None,
+        created_at: String::new(),
+    })
 }
 
 /// Delete (revoke) a server invite by code.
