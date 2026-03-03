@@ -398,6 +398,20 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
       return undefined as unknown as T;
     }
 
+    case "refresh_token": {
+      if (!_refreshToken) throw new Error("No refresh token");
+      const resp = await apiFetch<Raw>("POST", "/api/v1/auth/refresh", {
+        refresh_token: _refreshToken,
+      });
+      _token = resp.access_token as string;
+      localStorage.setItem("nexus:dev:token", _token);
+      if (typeof resp.refresh_token === "string") {
+        _refreshToken = resp.refresh_token;
+        localStorage.setItem("nexus:dev:refreshToken", _refreshToken);
+      }
+      return _token as unknown as T;
+    }
+
     // ── Servers ───────────────────────────────────────────────────────────
     case "list_servers": {
       const raw = await apiFetch<Raw[]>("GET", "/api/v1/servers");
