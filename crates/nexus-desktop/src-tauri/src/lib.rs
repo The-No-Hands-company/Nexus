@@ -93,6 +93,12 @@ pub fn run() {
             commands::bots::install_bot,
             commands::bots::uninstall_bot,
             commands::bots::get_public_bot_info,
+            // Boost / supporter tiers
+            commands::boosters::get_server_boost_tier,
+            commands::boosters::list_server_boosters,
+            commands::boosters::boost_server,
+            commands::boosters::remove_boost,
+            commands::boosters::set_vanity_url,
             commands::channels::list_channels,
             commands::channels::get_channel,
             commands::channels::create_channel,

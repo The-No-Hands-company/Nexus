@@ -4,6 +4,7 @@
 //! All HTTP calls use the `reqwest` client with the base URL from [`AppState::session`].
 
 pub mod auth;
+pub mod boosters;
 pub mod bots;
 pub mod channels;
 pub mod e2ee;

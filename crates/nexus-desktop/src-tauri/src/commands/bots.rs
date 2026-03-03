@@ -15,7 +15,7 @@ use super::api_client;
 
 /// Installed bot record (mirrors server `BotServerInstall`).
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
 pub struct BotInstall {
     pub id: Uuid,
     pub bot_id: Uuid,
@@ -28,7 +28,7 @@ pub struct BotInstall {
 
 /// Public bot info returned by the unauthenticated lookup endpoint.
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all(serialize = "camelCase", deserialize = "snake_case"))]
 pub struct PublicBotInfo {
     pub id: Uuid,
     pub name: String,
