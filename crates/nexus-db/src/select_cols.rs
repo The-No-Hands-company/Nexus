@@ -128,6 +128,19 @@ pub const ATTACHMENT_COLS_A: &str =
      a.width, a.height, a.duration_secs, a.spoiler, a.blurhash, a.sha256, a.status, \
      a.created_at::text AS created_at, a.updated_at::text AS updated_at";
 
+// ── bot_applications ──────────────────────────────────────────────────────────
+pub const BOT_COLS: &str =
+    "id::text AS id, owner_id::text AS owner_id, name, description, avatar, \
+     token_hash, public_key, redirect_uris::text AS redirect_uris, permissions, \
+     verified, is_public, interactions_endpoint_url, flags, \
+     created_at::text AS created_at, updated_at::text AS updated_at";
+
+// ── bot_server_installs ───────────────────────────────────────────────────────
+pub const BOT_INSTALL_COLS: &str =
+    "id::text AS id, bot_id::text AS bot_id, server_id::text AS server_id, \
+     installed_by::text AS installed_by, scopes::text AS scopes, permissions, \
+     installed_at::text AS installed_at";
+
 // ── threads ───────────────────────────────────────────────────────────────────
 /// Columns for the `threads` table (no prefix).  Used in RETURNING clauses
 /// where `parent_channel_id` is appended as a separate expression.

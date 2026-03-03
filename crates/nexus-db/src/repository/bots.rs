@@ -5,6 +5,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 use nexus_common::models::bot::{BotApplication, BotServerInstall};
+use crate::select_cols::{BOT_COLS, BOT_INSTALL_COLS};
 
 fn row_to_bot(row: &sqlx::any::AnyRow) -> BotApplication {
     BotApplication {
@@ -46,7 +47,7 @@ fn row_to_server_install(row: &sqlx::any::AnyRow) -> BotServerInstall {
 // ============================================================================
 
 pub async fn get_bot(pool: &sqlx::AnyPool, bot_id: Uuid) -> Result<Option<BotApplication>> {
-    let row = sqlx::query("SELECT * FROM bot_applications WHERE id = $1")
+    let row = sqlx::query(&format!("SELECT {} FROM bot_applications WHERE id = $1", BOT_COLS))
         .bind(bot_id.to_string())
         .fetch_optional(pool)
         .await?;
@@ -55,7 +56,7 @@ pub async fn get_bot(pool: &sqlx::AnyPool, bot_id: Uuid) -> Result<Option<BotApp
 
 pub async fn get_bots_by_owner(pool: &sqlx::AnyPool, owner_id: Uuid) -> Result<Vec<BotApplication>> {
     let rows = sqlx::query(
-        "SELECT * FROM bot_applications WHERE owner_id = $1 ORDER BY created_at DESC",
+        &format!("SELECT {} FROM bot_applications WHERE owner_id = $1 ORDER BY created_at DESC", BOT_COLS),
     )
     .bind(owner_id.to_string())
     .fetch_all(pool)
@@ -67,7 +68,7 @@ pub async fn get_bot_by_token_hash(
     pool: &sqlx::AnyPool,
     token_hash: &str,
 ) -> Result<Option<BotApplication>> {
-    let row = sqlx::query("SELECT * FROM bot_applications WHERE token_hash = $1")
+    let row = sqlx::query(&format!("SELECT {} FROM bot_applications WHERE token_hash = $1", BOT_COLS))
         .bind(token_hash)
         .fetch_optional(pool)
         .await?;
@@ -88,11 +89,11 @@ pub async fn create_bot(
 ) -> Result<BotApplication> {
     let uris = serde_json::to_string(redirect_uris)?;
     let row = sqlx::query(
-        r#"INSERT INTO bot_applications
+        &format!(r#"INSERT INTO bot_applications
                (id, owner_id, name, description, token_hash, public_key, is_public,
                 redirect_uris, interactions_endpoint_url)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-           RETURNING *"#,
+           RETURNING {}"#, BOT_COLS),
     )
     .bind(id.to_string())
     .bind(owner_id.to_string())
@@ -120,7 +121,7 @@ pub async fn update_bot(
 ) -> Result<Option<BotApplication>> {
     let uris = redirect_uris.map(|r| serde_json::to_string(r)).transpose()?;
     let row = sqlx::query(
-        r#"UPDATE bot_applications SET
+        &format!(r#"UPDATE bot_applications SET
                name        = COALESCE($1, name),
                description = COALESCE($2, description),
                avatar      = COALESCE($3, avatar),
@@ -129,7 +130,7 @@ pub async fn update_bot(
                interactions_endpoint_url = COALESCE($6, interactions_endpoint_url),
                updated_at  = CURRENT_TIMESTAMP
            WHERE id = $7
-           RETURNING *"#,
+           RETURNING {}"#, BOT_COLS),
     )
     .bind(name)
     .bind(description)
@@ -176,12 +177,12 @@ pub async fn install_bot_to_server(
 ) -> Result<BotServerInstall> {
     let scopes_json = serde_json::to_string(scopes)?;
     let row = sqlx::query(
-        r#"INSERT INTO bot_server_installs (bot_id, server_id, installed_by, scopes, permissions)
+        &format!(r#"INSERT INTO bot_server_installs (bot_id, server_id, installed_by, scopes, permissions)
            VALUES ($1, $2, $3, $4, $5)
            ON CONFLICT (bot_id, server_id) DO UPDATE
                SET scopes = EXCLUDED.scopes,
                    permissions = EXCLUDED.permissions
-           RETURNING *"#,
+           RETURNING {}"#, BOT_INSTALL_COLS),
     )
     .bind(bot_id.to_string())
     .bind(server_id.to_string())
@@ -195,7 +196,7 @@ pub async fn install_bot_to_server(
 
 pub async fn get_server_bots(pool: &sqlx::AnyPool, server_id: Uuid) -> Result<Vec<BotServerInstall>> {
     let rows = sqlx::query(
-        "SELECT * FROM bot_server_installs WHERE server_id = $1 ORDER BY installed_at DESC",
+        &format!("SELECT {} FROM bot_server_installs WHERE server_id = $1 ORDER BY installed_at DESC", BOT_INSTALL_COLS),
     )
     .bind(server_id.to_string())
     .fetch_all(pool)
@@ -206,7 +207,7 @@ pub async fn get_server_bots(pool: &sqlx::AnyPool, server_id: Uuid) -> Result<Ve
 /// Return all servers a given bot is installed in.
 pub async fn get_bot_servers(pool: &sqlx::AnyPool, bot_id: Uuid) -> Result<Vec<BotServerInstall>> {
     let rows = sqlx::query(
-        "SELECT * FROM bot_server_installs WHERE bot_id = $1 ORDER BY installed_at DESC",
+        &format!("SELECT {} FROM bot_server_installs WHERE bot_id = $1 ORDER BY installed_at DESC", BOT_INSTALL_COLS),
     )
     .bind(bot_id.to_string())
     .fetch_all(pool)
