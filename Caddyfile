@@ -1,0 +1,42 @@
+# Nexus Caddyfile
+#
+# Usage:
+#   Development (LAN, no TLS):
+#     caddy run --config Caddyfile
+#
+#   Production (public domain with auto-TLS):
+#     Set YOUR_DOMAIN below and run: caddy run --config Caddyfile
+#
+# Caddy automatically provisions and renews Let's Encrypt certificates for
+# public hostnames. For LAN/local use it serves plain HTTP.
+#
+# To install Caddy: https://caddyserver.com/docs/install
+# Or via Podman/Docker: see the caddy service in docker-compose.yml
+
+# ── Replace with your public domain (or keep as your LAN IP for local use) ────
+{$NEXUS_DOMAIN:localhost} {
+    # Reverse proxy API + WebSocket gateway
+    reverse_proxy /api/*          localhost:8080
+    reverse_proxy /gateway        localhost:8081 {
+        transport http {
+            # Pass WebSocket upgrade headers through
+        }
+    }
+
+    # Federation S2S endpoints (must be accessible from other servers)
+    reverse_proxy /_nexus/*       localhost:8080
+    reverse_proxy /.well-known/*  localhost:8080
+
+    # Matrix AS bridge (optional)
+    reverse_proxy /_matrix/*      localhost:8080
+
+    # Prometheus metrics (restrict to internal access)
+    @metrics path /metrics
+    respond @metrics 403
+
+    # Logging
+    log {
+        output stdout
+        format console
+    }
+}

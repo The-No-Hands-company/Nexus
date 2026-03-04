@@ -26,6 +26,7 @@ use axum::{
     routing::{get, put},
     Json, Router,
 };
+use nexus_common::gateway_event::{event_types, GatewayEvent};
 use nexus_db::repository::users;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -986,11 +987,19 @@ async fn receive_friend_request(
     headers: HeaderMap,
     Json(body): Json<nexus_federation::FederatedFriendRequest>,
 ) -> impl IntoResponse {
-    let origin = match extract_federation_origin(&headers) {
+    const URI: &str = "/_nexus/federation/v1/friend_request";
+
+    // Serialize body back to Value for signature verification before consuming it.
+    let body_value = match serde_json::to_value(&body) {
+        Ok(v) => v,
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "internal error" }))).into_response(),
+    };
+
+    let origin = match verify_inbound_request(&state, &headers, "PUT", URI, Some(&body_value)).await {
         Ok(o) => o,
-        Err(e) => {
-            warn!("Rejected federated friend request: {}", e);
-            return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response();
+        Err((status, msg)) => {
+            warn!("Rejected federated friend request: {}", msg);
+            return (status, Json(json!({ "error": msg }))).into_response();
         }
     };
 
@@ -1076,6 +1085,26 @@ async fn receive_friend_request(
                 "Federated friend request stored: {}@{} → {}",
                 body.requester_username, origin, target.username
             );
+
+            // Push live notification to the target user's connected clients.
+            let qualified = format!("{}@{}", body.requester_username, origin);
+            let _ = state.gateway_tx.send(GatewayEvent {
+                event_type: event_types::RELATIONSHIP_UPDATE.into(),
+                data: json!({
+                    "id": rel_id.to_string(),
+                    "type": "pending_incoming",
+                    "user": {
+                        "id": remote_user.id,
+                        "username": qualified,
+                        "display_name": body.requester_display_name,
+                        "avatar_url": body.requester_avatar,
+                    }
+                }),
+                server_id: None,
+                channel_id: None,
+                user_id: Some(target.id),
+            });
+
             (StatusCode::OK, Json(json!({ "status": "ok" }))).into_response()
         }
         Err(e) => {
@@ -1098,11 +1127,18 @@ async fn receive_friend_request_response(
     headers: HeaderMap,
     Json(body): Json<nexus_federation::FederatedFriendResponse>,
 ) -> impl IntoResponse {
-    let origin = match extract_federation_origin(&headers) {
+    const URI: &str = "/_nexus/federation/v1/friend_request/respond";
+
+    let body_value = match serde_json::to_value(&body) {
+        Ok(v) => v,
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "internal error" }))).into_response(),
+    };
+
+    let origin = match verify_inbound_request(&state, &headers, "PUT", URI, Some(&body_value)).await {
         Ok(o) => o,
-        Err(e) => {
-            warn!("Rejected federated friend response: {}", e);
-            return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response();
+        Err((status, msg)) => {
+            warn!("Rejected federated friend response: {}", msg);
+            return (status, Json(json!({ "error": msg }))).into_response();
         }
     };
 
@@ -1163,6 +1199,8 @@ async fn receive_friend_request_response(
         }
     };
 
+    let qualified_responder = format!("{}@{}", body.responder_username, origin);
+
     match body.action.as_str() {
         "accepted" => {
             if let Err(e) =
@@ -1175,6 +1213,23 @@ async fn receive_friend_request_response(
                 "Federated friendship accepted: {} ↔ {}@{}",
                 requester_id, body.responder_username, origin
             );
+            // Notify the requester's connected clients that their friend request was accepted.
+            let _ = state.gateway_tx.send(GatewayEvent {
+                event_type: event_types::RELATIONSHIP_UPDATE.into(),
+                data: json!({
+                    "id": rel.id.to_string(),
+                    "type": "friend",
+                    "user": {
+                        "id": responder_id,
+                        "username": qualified_responder,
+                        "display_name": body.responder_display_name,
+                        "avatar_url": body.responder_avatar,
+                    }
+                }),
+                server_id: None,
+                channel_id: None,
+                user_id: Some(requester_id),
+            });
         }
         "denied" => {
             if let Err(e) =
@@ -1186,6 +1241,21 @@ async fn receive_friend_request_response(
                 "Federated friend request denied: {} from {}@{}",
                 requester_id, body.responder_username, origin
             );
+            // Notify the requester that the request was denied so their pending list updates live.
+            let _ = state.gateway_tx.send(GatewayEvent {
+                event_type: event_types::RELATIONSHIP_UPDATE.into(),
+                data: json!({
+                    "id": rel.id.to_string(),
+                    "type": "removed",
+                    "user": {
+                        "id": responder_id,
+                        "username": qualified_responder,
+                    }
+                }),
+                server_id: None,
+                channel_id: None,
+                user_id: Some(requester_id),
+            });
         }
         _ => unreachable!(),
     }
@@ -1215,4 +1285,102 @@ fn extract_federation_origin(headers: &HeaderMap) -> Result<String, String> {
         }
     }
     Err("NexusFederation header missing 'origin' field".to_owned())
+}
+
+/// Parse the `key=` field from a `NexusFederation` Authorization header.
+fn extract_key_id_from_auth(auth: &str) -> Result<String, String> {
+    let inner = auth
+        .strip_prefix("NexusFederation ")
+        .ok_or("Authorization scheme must be 'NexusFederation'")?;
+    for part in inner.split(',') {
+        let part = part.trim();
+        if let Some(key_id) = part.strip_prefix("key=\"").and_then(|s| s.strip_suffix('"')) {
+            return Ok(key_id.to_owned());
+        }
+    }
+    Err("NexusFederation header missing 'key' field".to_owned())
+}
+
+/// Fully verify an inbound S2S request:
+/// 1. Parse `origin` + `key_id` from the `Authorization: NexusFederation…` header.
+/// 2. Load the origin's cached public key from `federated_servers`.
+/// 3. If the key is not cached, fetch `/_nexus/key/v2/server` from the origin and cache it.
+/// 4. Verify the Ed25519 signature over the canonical request object.
+///
+/// Returns the verified origin server name on success.
+async fn verify_inbound_request(
+    state: &Arc<AppState>,
+    headers: &HeaderMap,
+    method: &str,
+    uri: &str,
+    body: Option<&Value>,
+) -> Result<String, (StatusCode, String)> {
+    let auth_header = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Missing Authorization header".to_owned()))?
+        .to_owned();
+
+    let origin = extract_federation_origin(headers)
+        .map_err(|e| (StatusCode::UNAUTHORIZED, e))?;
+
+    let key_id = extract_key_id_from_auth(&auth_header)
+        .map_err(|e| (StatusCode::UNAUTHORIZED, e))?;
+
+    // Load cached verify keys for this origin.
+    let mut verify_keys = load_server_verify_keys(&state.db.pool, &origin).await;
+
+    // If the specific key_id is not cached, fetch it from the remote server.
+    if !verify_keys.contains_key(&key_id) {
+        match state.federation_client.fetch_server_keys(&origin).await {
+            Ok(key_doc) => {
+                for (kid, vk) in &key_doc.verify_keys {
+                    verify_keys.insert(kid.clone(), Value::String(vk.key.clone()));
+                }
+                // Persist for future requests (upsert into federated_servers).
+                if let Ok(keys_json) = serde_json::to_string(&verify_keys) {
+                    let _ = sqlx::query(
+                        "INSERT INTO federated_servers (server_name, verify_keys, last_seen_at) \
+                         VALUES ($1, $2, NOW()) \
+                         ON CONFLICT (server_name) DO UPDATE \
+                         SET verify_keys = $2, last_seen_at = NOW()",
+                    )
+                    .bind(&origin)
+                    .bind(&keys_json)
+                    .execute(&state.db.pool)
+                    .await;
+                }
+            }
+            Err(e) => {
+                warn!("Could not fetch signing keys for {}: {}", origin, e);
+                return Err((
+                    StatusCode::UNAUTHORIZED,
+                    format!("Cannot retrieve server keys for '{}': {}", origin, e),
+                ));
+            }
+        }
+    }
+
+    // Find the public key for this key_id.
+    let pubkey_b64 = verify_keys
+        .get(&key_id)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            (
+                StatusCode::UNAUTHORIZED,
+                format!("Unknown key '{}' for server '{}'", key_id, origin),
+            )
+        })?
+        .to_owned();
+
+    // Verify the Ed25519 signature over the canonical request object.
+    nexus_federation::signatures::verify_request(
+        &auth_header,
+        &state.server_name,
+        method,
+        uri,
+        body,
+        &pubkey_b64,
+    )
+    .map_err(|e| (StatusCode::UNAUTHORIZED, format!("Signature verification failed: {}", e)))
 }

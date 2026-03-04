@@ -89,6 +89,10 @@ pub mod event_types {
     pub const SERVER_BOOST: &str = "SERVER_BOOST";
     /// A server's boost tier changed
     pub const SERVER_TIER_UPDATE: &str = "SERVER_TIER_UPDATE";
+    // v0.8 Federation
+    /// A friendship / relationship was added, updated, or removed.
+    /// Payload: `{ id, type, user: { id, username, display_name, avatar } }`
+    pub const RELATIONSHIP_UPDATE: &str = "RELATIONSHIP_UPDATE";
 }
 
 /// Events broadcast through the gateway to connected clients.

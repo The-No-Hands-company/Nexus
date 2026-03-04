@@ -107,3 +107,32 @@ volumes:
   scylla_data:
   minio_data:
   meilisearch_data:
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Optional: Caddy reverse proxy with automatic TLS (Let's Encrypt)
+#
+# Uncomment the service below for internet-accessible federation (HTTPS required).
+# Set NEXUS_DOMAIN to your public domain or LAN IP in .env before enabling.
+#
+# For LAN use without TLS, the Nexus API (port 8080) can be reached directly
+# by peer servers — no Caddy needed.
+# ────────────────────────────────────────────────────────────────────────────────
+#  caddy:
+#    image: docker.io/caddy:2-alpine
+#    container_name: nexus-caddy
+#    restart: unless-stopped
+#    ports:
+#      - "80:80"     # HTTP (redirects to HTTPS)
+#      - "443:443"   # HTTPS (auto-TLS via Let's Encrypt)
+#    volumes:
+#      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+#      - caddy_data:/data
+#      - caddy_config:/config
+#    environment:
+#      NEXUS_DOMAIN: ${NEXUS_DOMAIN:-localhost}
+#    depends_on:
+#      - postgres
+#
+#  # Add these to the volumes section when enabling Caddy:
+#  # caddy_data:
+#  # caddy_config:
