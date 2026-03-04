@@ -9,6 +9,7 @@ pub mod bots;
 pub mod channels;
 pub mod e2ee;
 pub mod emojis;
+pub mod friends;
 pub mod messages;
 pub mod presence;
 pub mod servers;
