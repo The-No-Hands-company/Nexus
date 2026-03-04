@@ -398,6 +398,50 @@ export function useGateway() {
         }
         // ────────────────────────────────────────────────────────────────────
 
+        // ── Federation relationship events ───────────────────────────────────
+        case "RELATIONSHIP_UPDATE": {
+          // Always re-sync the relationship list so FriendsPanel stays current.
+          useStore.getState().loadRelationships();
+
+          const raw = data as {
+            id: string;
+            type: "pending_incoming" | "friend" | "removed";
+            user: { id: string; username: string; display_name?: string; avatar_url?: string };
+          };
+
+          if (raw.type === "pending_incoming") {
+            const name = raw.user.display_name ?? raw.user.username;
+            addInAppNotification({
+              id: raw.id,
+              channelId: "",           // empty signals "go to /home" in NotificationTray
+              channelName: undefined,
+              authorId: raw.user.id,
+              authorUsername: raw.user.username,
+              content: `${name} sent you a friend request`,
+              createdAt: new Date().toISOString(),
+            });
+            if (document.hidden) {
+              sendOsNotification(
+                "Friend Request",
+                `${name} sent you a friend request`,
+              );
+            }
+          } else if (raw.type === "friend") {
+            const name = raw.user.display_name ?? raw.user.username;
+            addInAppNotification({
+              id: raw.id,
+              channelId: "",
+              channelName: undefined,
+              authorId: raw.user.id,
+              authorUsername: raw.user.username,
+              content: `${name} accepted your friend request`,
+              createdAt: new Date().toISOString(),
+            });
+          }
+          break;
+        }
+        // ────────────────────────────────────────────────────────────────────
+
         default:
           break;
       }

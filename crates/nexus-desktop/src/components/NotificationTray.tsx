@@ -47,8 +47,13 @@ export default function NotificationTray() {
   }, [open, panelRef]);
 
   const goToNotification = (notif: InAppNotification) => {
-    setActiveChannel(notif.channelId);
-    navigate(`/channel/${notif.channelId}`);
+    if (!notif.channelId) {
+      // Friend-request or other non-channel notification — open the Friends panel
+      navigate("/home");
+    } else {
+      setActiveChannel(notif.channelId);
+      navigate(`/channel/${notif.channelId}`);
+    }
     setOpen(false);
   };
 
