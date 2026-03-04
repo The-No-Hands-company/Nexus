@@ -125,3 +125,57 @@ pub async fn count_users(pool: &sqlx::AnyPool) -> Result<i64, sqlx::Error> {
         .await?;
     Ok(row.0)
 }
+
+// ── Federation helpers ────────────────────────────────────────────────────────
+
+/// Upsert a shadow user record for a remote federated user.
+///
+/// The remote user's UUID (from their home server) is used as the primary key —
+/// UUIDs are globally unique, so collisions are practically impossible.  On
+/// conflict the display name and avatar are refreshed.
+pub async fn upsert_remote_user(
+    pool: &sqlx::AnyPool,
+    id: Uuid,
+    username: &str,
+    server_name: &str,
+    display_name: Option<&str>,
+    avatar: Option<&str>,
+) -> Result<User, sqlx::Error> {
+    let q = format!(
+        "INSERT INTO users \
+             (id, username, server_name, is_remote, display_name, avatar, \
+              password_hash, presence, flags, created_at, updated_at) \
+         VALUES ($1::uuid, $2, $3, TRUE, $4, $5, '', 'offline', 0, \
+                 CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) \
+         ON CONFLICT (id) DO UPDATE SET \
+             display_name = EXCLUDED.display_name, \
+             avatar       = EXCLUDED.avatar, \
+             updated_at   = CURRENT_TIMESTAMP \
+         RETURNING {USER_COLS}"
+    );
+    sqlx::query_as::<_, User>(&q)
+        .bind(id.to_string())
+        .bind(username)
+        .bind(server_name)
+        .bind(display_name)
+        .bind(avatar)
+        .fetch_one(pool)
+        .await
+}
+
+/// Find a remote shadow user by (username, server_name).
+pub async fn find_remote_by_username_and_server(
+    pool: &sqlx::AnyPool,
+    username: &str,
+    server_name: &str,
+) -> Result<Option<User>, sqlx::Error> {
+    let q = format!(
+        "SELECT {USER_COLS} FROM users \
+         WHERE LOWER(username) = LOWER($1) AND server_name = $2 AND is_remote = TRUE"
+    );
+    sqlx::query_as::<_, User>(&q)
+        .bind(username)
+        .bind(server_name)
+        .fetch_optional(pool)
+        .await
+}

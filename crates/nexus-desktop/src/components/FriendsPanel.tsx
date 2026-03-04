@@ -189,7 +189,9 @@ export default function FriendsPanel() {
       {showAddFriend && (
         <div className="px-4 py-3 bg-bg-800 border-b border-bg-600/50">
           <p className="text-xs text-muted mb-1">
-            Enter the exact username of the person you want to add.
+            Enter a username to add a local user, or{" "}
+            <span className="font-mono text-accent-400">username@server.tld</span>{" "}
+            to add someone on another Nexus server.
           </p>
           <div className="flex gap-2">
             <input
@@ -197,7 +199,7 @@ export default function FriendsPanel() {
               value={addUsername}
               onChange={(e) => setAddUsername(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleAddFriend()}
-              placeholder="Username"
+              placeholder="username  or  username@server.tld"
               className="flex-1 bg-bg-700 text-fg text-sm rounded px-2 py-1 border border-bg-600 outline-none focus:border-accent-500 placeholder:text-muted"
             />
             <button

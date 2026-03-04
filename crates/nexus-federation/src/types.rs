@@ -104,6 +104,12 @@ pub enum FederationEventType {
     /// Bridge relay from an external network (Matrix, Discord).
     #[serde(rename = "nexus.bridge.relay")]
     BridgeRelay,
+    /// A cross-server friend request sent to a user on this or another instance.
+    #[serde(rename = "nexus.friend_request")]
+    FriendRequest,
+    /// A response (accept / deny) to a previously sent federated friend request.
+    #[serde(rename = "nexus.friend_request.response")]
+    FriendRequestResponse,
     /// Catch-all for unknown event types.
     #[serde(untagged)]
     Unknown(String),
@@ -344,6 +350,54 @@ pub struct FederationStatus {
     /// Total federated events processed since last restart.
     pub events_processed: u64,
     pub uptime_seconds: u64,
+}
+
+// ─── Federated friend request wire format ─────────────────────────────────────
+
+/// Payload sent via `PUT /_nexus/federation/v1/friend_request`.
+///
+/// Sent by the **requesting** server to the **target** server when a user
+/// wishes to befriend someone on another Nexus instance.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FederatedFriendRequest {
+    /// UUID of the requester on the **origin** server.
+    pub requester_id: String,
+    /// Username of the requester (no `@server` suffix).
+    pub requester_username: String,
+    /// Display name of the requester (optional).
+    pub requester_display_name: Option<String>,
+    /// Avatar key or URL of the requester (optional).
+    pub requester_avatar: Option<String>,
+    /// The origin server name (e.g. `nexus.example.com`).
+    pub origin_server: String,
+    /// The target user's local username on the **destination** server.
+    pub target_username: String,
+    /// ISO-8601 timestamp of the request.
+    pub timestamp: DateTime<Utc>,
+}
+
+/// Payload sent via `PUT /_nexus/federation/v1/friend_request/respond`.
+///
+/// Sent by the **responding** server back to the **requesting** server when
+/// the target user accepts or denies a federated friend request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FederatedFriendResponse {
+    /// UUID of the original requester (on the requesting server).
+    pub requester_id: String,
+    /// UUID of the responder (on the responding/destination server).
+    pub responder_id: String,
+    /// Username of the responder.
+    pub responder_username: String,
+    /// Display name of the responder (optional).
+    pub responder_display_name: Option<String>,
+    /// Avatar key or URL of the responder (optional).
+    pub responder_avatar: Option<String>,
+    /// The server that the responder belongs to.
+    pub origin_server: String,
+    /// `"accepted"` or `"denied"`.
+    pub action: String,
+    /// ISO-8601 timestamp.
+    pub timestamp: DateTime<Utc>,
 }
 
 // ─── Utilities ────────────────────────────────────────────────────────────────

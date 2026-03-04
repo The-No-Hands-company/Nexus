@@ -62,6 +62,9 @@ pub fn federation_router() -> Router<Arc<AppState>> {
         .route("/_nexus/federation/v1/backfill/{room_id}", get(backfill))
         // v0.8/08-03: User profile endpoint (MXID resolution)
         .route("/_nexus/federation/v1/user/{user_id}", get(user_profile))
+        // v0.9: Cross-server friend requests
+        .route("/_nexus/federation/v1/friend_request", put(receive_friend_request))
+        .route("/_nexus/federation/v1/friend_request/respond", put(receive_friend_request_response))
         // Matrix Application Service bridge (inbound)
         .route("/_matrix/app/v1/transactions/{txn_id}", put(matrix_as_transaction))
 }
@@ -832,6 +835,8 @@ async fn user_profile(
                 StatusCode::OK,
                 Json(json!({
                     "user_id":      mxid,
+                    "id":           user.id.to_string(),
+                    "username":     user.username,
                     "displayname":  user.display_name,
                     "avatar_url":   user.avatar,
                     "bio":          user.bio,
@@ -950,6 +955,228 @@ async fn upsert_federated_user(
     .await?;
 
     Ok(())
+}
+
+// ─── Federated friend requests ────────────────────────────────────────────────
+
+/// `PUT /_nexus/federation/v1/friend_request`
+///
+/// Receives an inbound cross-server friend request from a remote Nexus instance.
+/// The handler:
+/// 1. Authenticates the request via the `NexusFederation` Authorization header.
+/// 2. Looks up the target username in the local `users` table.
+/// 3. Upserts a shadow user account for the requester (preserving their UUID).
+/// 4. Creates a `pending` relationship row so the local user sees the request.
+async fn receive_friend_request(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<nexus_federation::FederatedFriendRequest>,
+) -> impl IntoResponse {
+    let origin = match extract_federation_origin(&headers) {
+        Ok(o) => o,
+        Err(e) => {
+            warn!("Rejected federated friend request: {}", e);
+            return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response();
+        }
+    };
+
+    debug!(
+        "Federated friend request from {}@{} targeting local user '{}'",
+        body.requester_username, origin, body.target_username
+    );
+
+    // Find the local target user (must be a real local account, not a shadow).
+    let target = match nexus_db::repository::users::find_by_username(
+        &state.db.pool,
+        &body.target_username,
+    )
+    .await
+    {
+        Ok(Some(u)) if !u.is_remote => u,
+        Ok(Some(_)) => {
+            return (StatusCode::NOT_FOUND, Json(json!({ "error": "user not found" }))).into_response();
+        }
+        Ok(None) => {
+            return (StatusCode::NOT_FOUND, Json(json!({ "error": "user not found" }))).into_response();
+        }
+        Err(e) => {
+            warn!("DB error looking up target user: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "internal error" }))).into_response();
+        }
+    };
+
+    // Parse the requester UUID.
+    let requester_id = match uuid::Uuid::parse_str(&body.requester_id) {
+        Ok(id) => id,
+        Err(_) => {
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": "invalid requester_id" }))).into_response();
+        }
+    };
+
+    // Upsert shadow user for the requester.
+    let remote_user = match nexus_db::repository::users::upsert_remote_user(
+        &state.db.pool,
+        requester_id,
+        &body.requester_username,
+        &origin,
+        body.requester_display_name.as_deref(),
+        body.requester_avatar.as_deref(),
+    )
+    .await
+    {
+        Ok(u) => u,
+        Err(e) => {
+            warn!("Failed to upsert remote user {}@{}: {}", body.requester_username, origin, e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "internal error" }))).into_response();
+        }
+    };
+
+    // Guard against duplicate relationships.
+    match nexus_db::repository::relationships::find_between(
+        &state.db.pool,
+        remote_user.id,
+        target.id,
+    )
+    .await
+    {
+        Ok(Some(_)) => {
+            return (StatusCode::CONFLICT, Json(json!({ "error": "relationship already exists" }))).into_response();
+        }
+        Ok(None) => {}
+        Err(e) => warn!("DB error checking existing relationship: {}", e),
+    }
+
+    // Create the pending relationship (remote_user → local target).
+    let rel_id = nexus_common::snowflake::generate_id();
+    match nexus_db::repository::relationships::create(
+        &state.db.pool,
+        rel_id,
+        remote_user.id,
+        target.id,
+        "pending",
+    )
+    .await
+    {
+        Ok(_) => {
+            info!(
+                "Federated friend request stored: {}@{} → {}",
+                body.requester_username, origin, target.username
+            );
+            (StatusCode::OK, Json(json!({ "status": "ok" }))).into_response()
+        }
+        Err(e) => {
+            warn!("Failed to create federated relationship: {}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "internal error" }))).into_response()
+        }
+    }
+}
+
+/// `PUT /_nexus/federation/v1/friend_request/respond`
+///
+/// Receives an accept or deny for a previously sent federated friend request.
+/// The handler:
+/// 1. Authenticates the request.
+/// 2. Upserts a shadow user for the responder.
+/// 3. Finds the local relationship row (requester = local user, addressee = shadow responder).
+/// 4. Updates or deletes the relationship accordingly.
+async fn receive_friend_request_response(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(body): Json<nexus_federation::FederatedFriendResponse>,
+) -> impl IntoResponse {
+    let origin = match extract_federation_origin(&headers) {
+        Ok(o) => o,
+        Err(e) => {
+            warn!("Rejected federated friend response: {}", e);
+            return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response();
+        }
+    };
+
+    debug!(
+        "Federated friend response from {}@{}: action={}",
+        body.responder_username, origin, body.action
+    );
+
+    if !matches!(body.action.as_str(), "accepted" | "denied") {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": "action must be 'accepted' or 'denied'" })),
+        )
+        .into_response();
+    }
+
+    // Parse UUIDs.
+    let requester_id = match uuid::Uuid::parse_str(&body.requester_id) {
+        Ok(id) => id,
+        Err(_) => {
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": "invalid requester_id" }))).into_response();
+        }
+    };
+    let responder_id = match uuid::Uuid::parse_str(&body.responder_id) {
+        Ok(id) => id,
+        Err(_) => {
+            return (StatusCode::BAD_REQUEST, Json(json!({ "error": "invalid responder_id" }))).into_response();
+        }
+    };
+
+    // Upsert shadow user for the responder so local queries can join on their ID.
+    let _ = nexus_db::repository::users::upsert_remote_user(
+        &state.db.pool,
+        responder_id,
+        &body.responder_username,
+        &origin,
+        body.responder_display_name.as_deref(),
+        body.responder_avatar.as_deref(),
+    )
+    .await;
+
+    // Find the relationship: original requester (local) sent the request,
+    // the responder (now a shadow user) is the addressee.
+    let rel = match nexus_db::repository::relationships::find_between(
+        &state.db.pool,
+        requester_id,
+        responder_id,
+    )
+    .await
+    {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return (StatusCode::NOT_FOUND, Json(json!({ "error": "relationship not found" }))).into_response();
+        }
+        Err(e) => {
+            warn!("DB error looking up relationship: {}", e);
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "internal error" }))).into_response();
+        }
+    };
+
+    match body.action.as_str() {
+        "accepted" => {
+            if let Err(e) =
+                nexus_db::repository::relationships::update_status(&state.db.pool, rel.id, "accepted").await
+            {
+                warn!("Failed to accept federated friendship: {}", e);
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "internal error" }))).into_response();
+            }
+            info!(
+                "Federated friendship accepted: {} ↔ {}@{}",
+                requester_id, body.responder_username, origin
+            );
+        }
+        "denied" => {
+            if let Err(e) =
+                nexus_db::repository::relationships::delete(&state.db.pool, rel.id).await
+            {
+                warn!("Failed to remove denied federated relationship: {}", e);
+            }
+            info!(
+                "Federated friend request denied: {} from {}@{}",
+                requester_id, body.responder_username, origin
+            );
+        }
+        _ => unreachable!(),
+    }
+
+    (StatusCode::OK, Json(json!({ "status": "ok" }))).into_response()
 }
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────

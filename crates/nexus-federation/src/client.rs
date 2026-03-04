@@ -256,6 +256,38 @@ impl FederationClient {
         self.signed_get(destination, &base_url, &uri).await
     }
 
+    // ── Friend request federation ────────────────────────────────────────────
+
+    /// Send a cross-server friend request to a user on a remote Nexus instance.
+    ///
+    /// `PUT /_nexus/federation/v1/friend_request`
+    pub async fn send_friend_request_to_remote(
+        &self,
+        destination: &str,
+        req: &crate::types::FederatedFriendRequest,
+    ) -> Result<(), FederationError> {
+        let uri = "/_nexus/federation/v1/friend_request";
+        let body = serde_json::to_value(req)?;
+        let base_url = self.discovery.resolve(destination).await?;
+        self.signed_put::<serde_json::Value>(destination, &base_url, uri, &body).await?;
+        Ok(())
+    }
+
+    /// Forward an accept / deny response for a federated friend request.
+    ///
+    /// `PUT /_nexus/federation/v1/friend_request/respond`
+    pub async fn respond_to_remote_friend_request(
+        &self,
+        destination: &str,
+        resp: &crate::types::FederatedFriendResponse,
+    ) -> Result<(), FederationError> {
+        let uri = "/_nexus/federation/v1/friend_request/respond";
+        let body = serde_json::to_value(resp)?;
+        let base_url = self.discovery.resolve(destination).await?;
+        self.signed_put::<serde_json::Value>(destination, &base_url, uri, &body).await?;
+        Ok(())
+    }
+
     // ── v0.8.5 Discovery access ──────────────────────────────────────────────
 
     /// Expose the underlying discovery cache so callers can resolve base URLs.

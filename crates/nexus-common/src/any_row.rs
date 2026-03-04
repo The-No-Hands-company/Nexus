@@ -164,6 +164,8 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for User {
             })?,
             flags: row.try_get("flags")?,
             totp_enabled: row.try_get("totp_enabled").unwrap_or(false),
+            server_name: row.try_get("server_name").unwrap_or(None),
+            is_remote: row.try_get("is_remote").unwrap_or(false),
             created_at: dt(row, "created_at")?,
             updated_at: dt(row, "updated_at")?,
         })

@@ -15,7 +15,7 @@
 // ── users ─────────────────────────────────────────────────────────────────────
 pub const USER_COLS: &str =
     "id::text AS id, username, display_name, email, password_hash, avatar, banner, \
-     bio, status, presence::text AS presence, flags, totp_enabled, \
+     bio, status, presence::text AS presence, flags, totp_enabled, server_name, is_remote, \
      created_at::text AS created_at, updated_at::text AS updated_at";
 
 // ── servers ───────────────────────────────────────────────────────────────────

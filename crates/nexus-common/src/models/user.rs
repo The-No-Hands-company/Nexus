@@ -50,6 +50,14 @@ pub struct User {
     #[serde(skip_serializing)]
     pub totp_enabled: bool,
 
+    /// For federated (remote) users: the home server name (e.g. `nexus.other.tld`).
+    /// `None` for local users.
+    pub server_name: Option<String>,
+
+    /// `true` when this is a shadow account representing a user on another server.
+    #[serde(default)]
+    pub is_remote: bool,
+
     /// Account creation timestamp
     pub created_at: DateTime<Utc>,
 
