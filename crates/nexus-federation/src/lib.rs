@@ -42,6 +42,7 @@ pub mod signatures;
 pub mod types;
 
 pub use client::FederationClient;
+pub use discovery::has_explicit_port as discovery_has_explicit_port;
 pub use error::FederationError;
 pub use key_manager::KeyManager;
 pub use keys::ServerKeyPair;

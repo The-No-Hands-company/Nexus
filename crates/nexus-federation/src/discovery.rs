@@ -89,38 +89,70 @@ impl DiscoveryCache {
     // ── Resolution logic ─────────────────────────────────────────────────────
 
     async fn do_resolve(&self, server_name: &str) -> Result<String, FederationError> {
-        // Step 1: if server_name includes a port, use it directly.
+        // Step 1: explicit port — try HTTPS first, fall back to HTTP.
+        // This handles LAN / dev setups (192.168.x.x:8080) that don't have TLS.
         if has_explicit_port(server_name) {
-            let base = format!("https://{}", server_name);
-            debug!("Discovery (explicit port): {} → {}", server_name, base);
-            return Ok(base);
+            let https_base = format!("https://{}", server_name);
+            if self.probe_base_url(&https_base).await {
+                debug!("Discovery (explicit port, HTTPS): {} → {}", server_name, https_base);
+                return Ok(https_base);
+            }
+            let http_base = format!("http://{}", server_name);
+            debug!("Discovery (explicit port, HTTP fallback): {} → {}", server_name, http_base);
+            return Ok(http_base);
         }
 
-        // Step 2: try .well-known.
+        // Step 2: try .well-known (HTTPS then HTTP).
         if let Some(base) = self.try_well_known(server_name).await {
             debug!("Discovery (well-known): {} → {}", server_name, base);
             return Ok(base);
         }
 
-        // Step 3: fallback to direct HTTPS on default federation port.
+        // Step 3: localhost / bare IP without port — assume local HTTP on API port.
+        if is_local_address(server_name) {
+            let base = format!("http://{}:8080", server_name);
+            debug!("Discovery (local fallback): {} → {}", server_name, base);
+            return Ok(base);
+        }
+
+        // Step 4: HTTPS on standard federation port.
         let base = format!("https://{}:{}", server_name, DEFAULT_FED_PORT);
-        debug!("Discovery (fallback): {} → {}", server_name, base);
+        debug!("Discovery (HTTPS fallback): {} → {}", server_name, base);
         Ok(base)
     }
 
+    /// Quick connectivity probe — returns `true` if the base URL is reachable.
+    /// Uses a lightweight GET on `/.well-known/nexus/server`; a 4xx is still
+    /// "reachable", only connection errors return `false`.
+    async fn probe_base_url(&self, base_url: &str) -> bool {
+        let url = format!("{}/.well-known/nexus/server", base_url);
+        match self.http.get(&url).send().await {
+            Ok(_) => true,
+            Err(e) if e.is_connect() || e.is_timeout() => false,
+            Err(_) => true, // other errors mean server responded somehow
+        }
+    }
+
     async fn try_well_known(&self, server_name: &str) -> Option<String> {
-        let url = format!("https://{}/.well-known/nexus/server", server_name);
-        let resp = self.http.get(&url).send().await.ok()?;
-        if !resp.status().is_success() {
-            return None;
+        // Try HTTPS first, then HTTP (for servers behind a proxy or with TLS).
+        for scheme in &["https", "http"] {
+            let url = format!("{}://{}/.well-known/nexus/server", scheme, server_name);
+            if let Ok(resp) = self.http.get(&url).send().await {
+                if resp.status().is_success() {
+                    if let Ok(wk) = resp.json::<WellKnownServer>().await {
+                        // Follow the delegated server name.
+                        let resolved = if has_explicit_port(&wk.server) {
+                            // Preserve whatever scheme was reachable.
+                            format!("{}://{}", scheme, wk.server)
+                        } else {
+                            format!("https://{}:{}", wk.server, DEFAULT_FED_PORT)
+                        };
+                        return Some(resolved);
+                    }
+                }
+            }
         }
-        let wk: WellKnownServer = resp.json().await.ok()?;
-        // Follow the delegated server name.
-        if has_explicit_port(&wk.server) {
-            Some(format!("https://{}", wk.server))
-        } else {
-            Some(format!("https://{}:{}", wk.server, DEFAULT_FED_PORT))
-        }
+        None
     }
 }
 
@@ -132,7 +164,7 @@ impl Default for DiscoveryCache {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-fn has_explicit_port(server_name: &str) -> bool {
+pub fn has_explicit_port(server_name: &str) -> bool {
     // IPv6 literal with port: [::1]:8448
     if server_name.starts_with('[') {
         return server_name.contains("]:"); // [host]:port
@@ -142,9 +174,36 @@ fn has_explicit_port(server_name: &str) -> bool {
     colon_count > 0 && colon_count < 2
 }
 
+/// Returns `true` for localhost / loopback / RFC-1918 addresses (no port).
+/// Used to pick HTTP over HTTPS as the default scheme for local dev.
+fn is_local_address(server_name: &str) -> bool {
+    let host = server_name.split(':').next().unwrap_or(server_name);
+    if host == "localhost" {
+        return true;
+    }
+    // Loopback
+    if host.starts_with("127.") {
+        return true;
+    }
+    // RFC-1918: 10.x, 172.16-31.x, 192.168.x
+    if host.starts_with("10.") || host.starts_with("192.168.") {
+        return true;
+    }
+    if let Some(rest) = host.strip_prefix("172.") {
+        if let Some(octet) = rest.split('.').next() {
+            if let Ok(n) = octet.parse::<u8>() {
+                if (16..=31).contains(&n) {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
-    use super::has_explicit_port;
+    use super::{has_explicit_port, is_local_address};
 
     #[test]
     fn explicit_port_detection() {
@@ -152,5 +211,16 @@ mod tests {
         assert!(!has_explicit_port("nexus.example.com"));
         assert!(has_explicit_port("[::1]:8448"));
         assert!(!has_explicit_port("::1")); // bare IPv6 — no port
+    }
+
+    #[test]
+    fn local_address_detection() {
+        assert!(is_local_address("localhost"));
+        assert!(is_local_address("127.0.0.1"));
+        assert!(is_local_address("192.168.0.179"));
+        assert!(is_local_address("10.0.0.1"));
+        assert!(is_local_address("172.16.0.1"));
+        assert!(!is_local_address("nexus.example.com"));
+        assert!(!is_local_address("8.8.8.8"));
     }
 }

@@ -91,11 +91,25 @@ async fn server_key_document(State(state): State<Arc<AppState>>) -> impl IntoRes
 /// Falls back gracefully to a minimal response for older remotes that only
 /// look at the `m.server` field.
 async fn well_known_server(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    // Prefer explicit env overrides, otherwise use the configured server_name.
     let server_name =
         std::env::var("NEXUS_FEDERATION_SERVER").unwrap_or_else(|_| {
             std::env::var("NEXUS_SERVER_NAME")
                 .unwrap_or_else(|_| state.server_name.clone())
         });
+
+    // If server_name has no explicit port, append the API port so remote
+    // servers can discover us correctly (especially on LAN / non-standard ports).
+    // Standard ports (443, 8448) are implied; anything else must be explicit.
+    let m_server = if nexus_federation::discovery_has_explicit_port(&server_name) {
+        server_name.clone()
+    } else {
+        let port: u16 = nexus_common::config::get().server.port;
+        match port {
+            443 | 8448 => server_name.clone(),
+            p => format!("{}:{}", server_name, p),
+        }
+    };
 
     // Load optional identity from instance_settings.
     let identity: serde_json::Value = sqlx::query(
@@ -128,7 +142,7 @@ async fn well_known_server(State(state): State<Arc<AppState>>) -> impl IntoRespo
     let version = concat!("Nexus ", env!("CARGO_PKG_VERSION"));
 
     Json(json!({
-        "m.server":          server_name,
+        "m.server":          m_server,
         "display_name":      identity.get("display_name").and_then(|v| v.as_str()),
         "description":       identity.get("description").and_then(|v| v.as_str()),
         "admin_contact":     identity.get("admin_contact").and_then(|v| v.as_str()),
