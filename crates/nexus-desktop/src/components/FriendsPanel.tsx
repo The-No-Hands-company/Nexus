@@ -14,6 +14,19 @@ import { useStore, Relationship } from "../store";
 import { invoke } from "../invoke";
 import clsx from "clsx";
 
+/** Extract a human-readable message from a raw API error string or JSON body. */
+function parseApiError(e: unknown): string {
+  const raw = String(e).replace(/^Error: /, "");
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (typeof parsed.message === "string") return parsed.message;
+    if (typeof parsed.error === "string") return parsed.error;
+  } catch {
+    // not JSON — use as-is
+  }
+  return raw;
+}
+
 type Tab = "online" | "all" | "pending";
 
 interface UserBrief {
@@ -67,7 +80,7 @@ export default function FriendsPanel() {
       setAddUsername("");
       loadRelationships();
     } catch (e) {
-      setAddError(String(e).replace(/^Error: /, ""));
+      setAddError(parseApiError(e));
     }
   };
 
