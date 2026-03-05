@@ -2,8 +2,8 @@
 # Deploy with: fly deploy
 # Docs: https://fly.io/docs/reference/configuration/
 
-app = "nexus"
-primary_region = "ams"
+app = "nexus-tnhc"         # change to whatever name fly apps create accepted
+primary_region = "ams"    # closest to you: ams=Amsterdam, lhr=London, iad=US-East
 
 [build]
   dockerfile = "Dockerfile"
@@ -14,6 +14,8 @@ primary_region = "ams"
   SERVER__GATEWAY_PORT = "8081"
   SERVER__VOICE_PORT = "8082"
   SERVER__FEDERATION_PORT = "8448"
+  # Must match your fly app name: <app-name>.fly.dev
+  SERVER__NAME = "nexus-tnhc.fly.dev"
   RUST_LOG = "nexus=info,tower_http=warn"
   # Set secrets via: fly secrets set JWT_SECRET=... DATABASE__URL=...
 
