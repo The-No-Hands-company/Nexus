@@ -118,7 +118,7 @@ async fn list_servers(
         "SELECT server_name, description, icon_url, public_room_count, total_users \
          FROM directory_servers \
          ORDER BY server_name ASC \
-         LIMIT ?",
+         LIMIT $1",
     )
     .bind(limit)
     .fetch_all(&state.db.pool)
@@ -171,11 +171,11 @@ async fn list_rooms(
     let limit = q.limit.unwrap_or(20).min(100) as i64;
 
     let rows = sqlx::query(
-        "SELECT room_id, name, topic, member_count, origin_server, join_rule \
+        "SELECT room_id, room_name, room_topic, member_count, origin_server, join_rule \
          FROM federated_rooms \
          WHERE join_rule = 'public' \
          ORDER BY member_count DESC \
-         LIMIT ?",
+         LIMIT $1",
     )
     .bind(limit)
     .fetch_all(&state.db.pool)
@@ -186,8 +186,8 @@ async fn list_rooms(
             .into_iter()
             .map(|r| RoomEntry {
                 room_id:      r.try_get("room_id").unwrap_or_default(),
-                name:         r.try_get("name").ok().flatten(),
-                topic:        r.try_get("topic").ok().flatten(),
+                name:         r.try_get("room_name").ok().flatten(),
+                topic:        r.try_get("room_topic").ok().flatten(),
                 member_count: r.try_get::<i32, _>("member_count").unwrap_or(0) as u64,
                 server_name:  r.try_get("origin_server").unwrap_or_default(),
                 join_rule:    r.try_get("join_rule").unwrap_or_else(|_| "public".into()),
@@ -218,13 +218,13 @@ async fn search_rooms(
 
     let rows = if let Some(ref server) = server_filter {
         sqlx::query(
-            "SELECT room_id, name, topic, member_count, origin_server, join_rule \
+            "SELECT room_id, room_name, room_topic, member_count, origin_server, join_rule \
              FROM federated_rooms \
              WHERE join_rule = 'public' \
-               AND origin_server = ? \
-               AND (name ILIKE ? OR topic ILIKE ?) \
+               AND origin_server = $1 \
+               AND (room_name ILIKE $2 OR room_topic ILIKE $2) \
              ORDER BY member_count DESC \
-             LIMIT ?",
+             LIMIT $3",
         )
         .bind(server)
         .bind(&query_str)
@@ -233,12 +233,12 @@ async fn search_rooms(
         .await
     } else {
         sqlx::query(
-            "SELECT room_id, name, topic, member_count, origin_server, join_rule \
+            "SELECT room_id, room_name, room_topic, member_count, origin_server, join_rule \
              FROM federated_rooms \
              WHERE join_rule = 'public' \
-               AND (name ILIKE ? OR topic ILIKE ?) \
+               AND (room_name ILIKE $1 OR room_topic ILIKE $1) \
              ORDER BY member_count DESC \
-             LIMIT ?",
+             LIMIT $2",
         )
         .bind(&query_str)
         .bind(limit)
@@ -251,8 +251,8 @@ async fn search_rooms(
             .into_iter()
             .map(|r| RoomEntry {
                 room_id:      r.try_get("room_id").unwrap_or_default(),
-                name:         r.try_get("name").ok().flatten(),
-                topic:        r.try_get("topic").ok().flatten(),
+                name:         r.try_get("room_name").ok().flatten(),
+                topic:        r.try_get("room_topic").ok().flatten(),
                 member_count: r.try_get::<i32, _>("member_count").unwrap_or(0) as u64,
                 server_name:  r.try_get("origin_server").unwrap_or_default(),
                 join_rule:    r.try_get("join_rule").unwrap_or_else(|_| "public".into()),
@@ -281,7 +281,7 @@ async fn resolve_server(
     let row = sqlx::query(
         "SELECT server_name, base_url, server_version, is_blocked \
          FROM federated_servers \
-         WHERE server_name = ?",
+         WHERE server_name = $1",
     )
     .bind(&server_name)
     .fetch_optional(&state.db.pool)
@@ -399,6 +399,21 @@ async fn join_federated_room(
                 room_id,
                 resp.state.len()
             );
+
+            // Track local user membership so they receive real-time PDU events.
+            if let Err(e) = sqlx::query(
+                "INSERT INTO federated_room_members (room_id, user_id) \
+                 VALUES ($1, $2) \
+                 ON CONFLICT (room_id, user_id) DO NOTHING",
+            )
+            .bind(&room_id)
+            .bind(auth.user_id.to_string())
+            .execute(&state.db.pool)
+            .await
+            {
+                warn!("Failed to track federated room membership for {}: {}", room_id, e);
+            }
+
             (
                 StatusCode::OK,
                 Json(json!({
