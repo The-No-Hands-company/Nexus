@@ -5,6 +5,7 @@
 
 pub mod auth;
 pub mod boosters;
+pub mod directory;
 pub mod bots;
 pub mod channels;
 pub mod e2ee;

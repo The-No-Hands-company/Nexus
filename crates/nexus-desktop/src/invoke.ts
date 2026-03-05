@@ -1117,6 +1117,31 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
       return apiFetch<T>("GET", `/api/v1/federation/search${qs}`);
     }
 
+    // ── Server Directory / Federated room browser ─────────────────────────
+    case "directory_list_servers": {
+      const limit = args.limit ?? 50;
+      return apiFetch<T>("GET", `/api/v1/directory/servers?limit=${limit}`);
+    }
+
+    case "directory_list_rooms": {
+      const params = new URLSearchParams();
+      params.set("limit", String(args.limit ?? 50));
+      if (args.server) params.set("server", args.server as string);
+      return apiFetch<T>("GET", `/api/v1/directory/rooms?${params}`);
+    }
+
+    case "directory_search_rooms": {
+      const params = new URLSearchParams();
+      params.set("q", String(args.query ?? ""));
+      params.set("limit", String(args.limit ?? 50));
+      if (args.server) params.set("server", args.server as string);
+      return apiFetch<T>("GET", `/api/v1/directory/rooms/search?${params}`);
+    }
+
+    case "directory_join_room": {
+      return apiFetch<T>("POST", "/api/v1/directory/rooms/join", { room_id: args.roomId });
+    }
+
       throw new Error(`[browser] Unhandled invoke command: "${cmd}"`);
   }
 }

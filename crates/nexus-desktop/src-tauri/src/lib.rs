@@ -139,6 +139,11 @@ pub fn run() {
             // Hotkeys
             hotkeys::set_ptt_shortcut,
             hotkeys::get_ptt_shortcut,
+            // Server directory / federated room browser
+            commands::directory::directory_list_servers,
+            commands::directory::directory_list_rooms,
+            commands::directory::directory_search_rooms,
+            commands::directory::directory_join_room,
         ])
         .on_window_event(|window, event| {
             // Intercept close on main window → minimise to tray instead
