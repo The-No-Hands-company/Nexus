@@ -2,7 +2,7 @@
 # Multi-stage build for minimal production image
 
 # === Build Stage ===
-FROM rust:latest AS builder
+FROM rust:latest-bookworm AS builder
 
 WORKDIR /build
 
@@ -37,8 +37,9 @@ RUN mkdir -p crates/nexus-common/src && echo "pub fn dummy() {}" > crates/nexus-
     mkdir -p crates/nexus-desktop/src-tauri/src && echo "fn main() {}" > crates/nexus-desktop/src-tauri/src/main.rs && \
     echo "fn main() {}" > crates/nexus-desktop/src-tauri/src/lib.rs
 
-# Build dependencies only (cached layer)
-RUN cargo build --release 2>/dev/null || true
+# Build dependencies only for the server binary (cached layer)
+# Target --bin nexus to skip Tauri/desktop deps and improve build speed
+RUN cargo build --release --bin nexus 2>/dev/null || true
 
 # Copy actual source code
 COPY crates/ crates/
@@ -53,7 +54,7 @@ RUN cargo build --release --bin nexus
 FROM debian:bookworm-slim AS runtime
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates libssl3 && \
+    apt-get install -y --no-install-recommends ca-certificates libssl3 curl && \
     rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
