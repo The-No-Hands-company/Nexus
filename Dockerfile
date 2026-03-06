@@ -2,7 +2,7 @@
 # Multi-stage build for minimal production image
 
 # === Build Stage ===
-FROM rust:1.85-bookworm AS builder
+FROM rust:latest AS builder
 
 WORKDIR /build
 
