@@ -94,6 +94,7 @@ pub fn init() -> Result<&'static AppConfig, config::ConfigError> {
 pub struct AppConfig {
     pub server: ServerConfig,
     pub database: DatabaseConfig,
+    #[serde(default)]
     pub redis: RedisConfig,
     pub scylla: ScyllaConfig,
     pub auth: AuthConfig,
@@ -124,7 +125,7 @@ pub struct DatabaseConfig {
     pub min_connections: u32,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Default)]
 pub struct RedisConfig {
     /// Redis connection URL — optional; omit for lite / in-process-only mode.
     pub url: Option<String>,
