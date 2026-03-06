@@ -23,7 +23,16 @@ pub fn init() -> Result<&'static AppConfig, config::ConfigError> {
     // Load .env file if present (development)
     let _ = dotenvy::dotenv();
 
-    let cfg = config::Config::builder()
+    // 12-factor / platform fallbacks — read bare DATABASE_URL and REDIS_URL
+    // as set by Fly.io postgres attach, Heroku, Railway, Render, etc.
+    // NEXUS__DATABASE__URL / NEXUS__REDIS__URL always win (higher priority).
+    // Only injected when the variable is actually set (non-empty), so that
+    // Option<String> fields (like redis.url) deserialise to None rather than
+    // Some("") when no Redis is configured.
+    let db_url_platform    = std::env::var("DATABASE_URL").ok().filter(|s| !s.is_empty());
+    let redis_url_platform = std::env::var("REDIS_URL").ok().filter(|s| !s.is_empty());
+
+    let mut builder = config::Config::builder()
         // Defaults
         .set_default("server.host", "0.0.0.0")?
         .set_default("server.port", 8080)?
@@ -41,7 +50,6 @@ pub fn init() -> Result<&'static AppConfig, config::ConfigError> {
         .set_default("storage.secret_key", "")?
         .set_default("storage.region", "us-east-1")?
         .set_default("storage.data_dir", "./data/uploads")?
-        .set_default("search.url", "http://localhost:7700")?
         .set_default("search.api_key", "")?
         .set_default("limits.max_servers_per_user", 200)?
         .set_default("limits.max_channels_per_server", 500)?
@@ -52,11 +60,25 @@ pub fn init() -> Result<&'static AppConfig, config::ConfigError> {
         .set_default("limits.max_attachment_count", 10)?
         .set_default("scylla.nodes", "127.0.0.1:9042")?
         .set_default("scylla.keyspace", "nexus")?
+        // Search: default to empty so the server starts without MeiliSearch.
+        // Set NEXUS__SEARCH__URL=http://localhost:7700 to enable it.
+        .set_default("search.url", "")?
         // Self-hosting feature flags
-        .set_default("features.require_email_verification", true)?
+        .set_default("features.require_email_verification", true)?;
+
+    // 12-factor platform fallbacks — only inject when the env var is actually set.
+    if let Some(url) = db_url_platform {
+        builder = builder.set_default("database.url", url)?;
+    }
+    if let Some(url) = redis_url_platform {
+        builder = builder.set_default("redis.url", url)?;
+    }
+
+    let cfg = builder
         // Optional config file
         .add_source(config::File::with_name("config").required(false))
-        // Environment variables (NEXUS_SERVER__HOST, NEXUS_DATABASE__URL, etc.)
+        // Environment variables (NEXUS__SERVER__HOST, NEXUS__DATABASE__URL, etc.)
+        // These have the highest priority and override everything above.
         .add_source(
             config::Environment::with_prefix("NEXUS")
                 .separator("__")

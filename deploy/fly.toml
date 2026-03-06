@@ -1,23 +1,37 @@
-# fly.toml — Nexus deployment on Fly.io
-# Deploy with: fly deploy
-# Docs: https://fly.io/docs/reference/configuration/
+# ─────────────────────────────────────────────────────────────────────────────
+# fly.toml — Nexus Fly.io deployment TEMPLATE
+#
+# DO NOT put your personal app name or domain here — this file is committed to
+# the public repo and shared by all users.
+#
+# To deploy your own instance:
+#   1. Copy this file:  cp deploy/fly.toml deploy/fly.personal.toml
+#   2. Edit fly.personal.toml — replace YOUR_APP_NAME with your real app name
+#   3. Deploy:          fly deploy -c deploy/fly.personal.toml
+#
+# fly.personal.toml is listed in .gitignore and will never be committed.
+# ─────────────────────────────────────────────────────────────────────────────
 
-app = "nexus-tnhc"         # change to whatever name fly apps create accepted
-primary_region = "ams"    # closest to you: ams=Amsterdam, lhr=London, iad=US-East
+app = "YOUR_APP_NAME"   # e.g. nexus-yourname — must match `fly apps create`
+primary_region = "ams"  # ams=Amsterdam  lhr=London  iad=US-East  sea=US-West
 
 [build]
   dockerfile = "Dockerfile"
 
 [env]
-  SERVER__HOST = "0.0.0.0"
-  SERVER__PORT = "8080"
-  SERVER__GATEWAY_PORT = "8081"
-  SERVER__VOICE_PORT = "8082"
-  SERVER__FEDERATION_PORT = "8448"
-  # Must match your fly app name: <app-name>.fly.dev
-  SERVER__NAME = "nexus-tnhc.fly.dev"
+  NEXUS__SERVER__HOST             = "0.0.0.0"
+  NEXUS__SERVER__PORT             = "8080"
+  NEXUS__SERVER__GATEWAY_PORT     = "8081"
+  NEXUS__SERVER__VOICE_PORT       = "8082"
+  NEXUS__SERVER__FEDERATION_PORT  = "8448"
+  # Set this to YOUR_APP_NAME.fly.dev  (or your custom domain if you have one)
+  NEXUS__SERVER__NAME             = "YOUR_APP_NAME.fly.dev"
   RUST_LOG = "nexus=info,tower_http=warn"
-  # Set secrets via: fly secrets set JWT_SECRET=... DATABASE__URL=...
+  # Secrets — never put values here, use: fly secrets set KEY=value
+  # Required secrets:
+  #   NEXUS__AUTH__JWT_SECRET   — openssl rand -hex 64
+  #   NEXUS__REDIS__URL         — from Upstash (https://upstash.com) or fly redis
+  # DATABASE_URL is set automatically by: fly postgres attach <db-name> --app <app-name>
 
 [[services]]
   protocol = "tcp"
