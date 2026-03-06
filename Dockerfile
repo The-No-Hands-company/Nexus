@@ -6,6 +6,15 @@ FROM rust:latest AS builder
 
 WORKDIR /build
 
+# Install build dependencies (needed by aws-lc-sys and other C-based crates)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    cmake clang libclang-dev golang-go perl pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Limit parallel compilation to reduce peak memory usage on shared builders
+ENV CARGO_BUILD_JOBS=2
+
 # Cache dependencies by building them first
 COPY Cargo.toml Cargo.lock ./
 COPY crates/nexus-common/Cargo.toml crates/nexus-common/Cargo.toml
@@ -15,6 +24,7 @@ COPY crates/nexus-gateway/Cargo.toml crates/nexus-gateway/Cargo.toml
 COPY crates/nexus-voice/Cargo.toml crates/nexus-voice/Cargo.toml
 COPY crates/nexus-federation/Cargo.toml crates/nexus-federation/Cargo.toml
 COPY crates/nexus-server/Cargo.toml crates/nexus-server/Cargo.toml
+COPY crates/nexus-desktop/src-tauri/Cargo.toml crates/nexus-desktop/src-tauri/Cargo.toml
 
 # Create dummy source files for dependency caching
 RUN mkdir -p crates/nexus-common/src && echo "pub fn dummy() {}" > crates/nexus-common/src/lib.rs && \
@@ -23,7 +33,9 @@ RUN mkdir -p crates/nexus-common/src && echo "pub fn dummy() {}" > crates/nexus-
     mkdir -p crates/nexus-gateway/src && echo "pub fn dummy() {}" > crates/nexus-gateway/src/lib.rs && \
     mkdir -p crates/nexus-voice/src && echo "pub fn dummy() {}" > crates/nexus-voice/src/lib.rs && \
     mkdir -p crates/nexus-federation/src && echo "pub fn dummy() {}" > crates/nexus-federation/src/lib.rs && \
-    mkdir -p crates/nexus-server/src && echo "fn main() {}" > crates/nexus-server/src/main.rs
+    mkdir -p crates/nexus-server/src && echo "fn main() {}" > crates/nexus-server/src/main.rs && \
+    mkdir -p crates/nexus-desktop/src-tauri/src && echo "fn main() {}" > crates/nexus-desktop/src-tauri/src/main.rs && \
+    echo "fn main() {}" > crates/nexus-desktop/src-tauri/src/lib.rs
 
 # Build dependencies only (cached layer)
 RUN cargo build --release 2>/dev/null || true
