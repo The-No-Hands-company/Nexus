@@ -16,7 +16,7 @@ app = "YOUR_APP_NAME"   # e.g. nexus-yourname — must match `fly apps create`
 primary_region = "ams"  # ams=Amsterdam  lhr=London  iad=US-East  sea=US-West
 
 [build]
-  dockerfile = "Dockerfile"
+  dockerfile = "../Dockerfile"
 
 [env]
   NEXUS__SERVER__HOST             = "0.0.0.0"
