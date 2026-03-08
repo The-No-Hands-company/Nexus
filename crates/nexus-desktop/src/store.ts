@@ -532,10 +532,32 @@ interface StoreState {
 // Module-level map so typing-clear timeouts survive re-renders
 const _typingTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+// ── Session persistence ───────────────────────────────────────────────────────
+const SESSION_KEY = "nexus:session";
+
+function loadPersistedSession(): Session | null {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (raw) return JSON.parse(raw) as Session;
+  } catch { /* corrupt data — ignore */ }
+  return null;
+}
+
+function persistSession(session: Session | null) {
+  if (session) {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  } else {
+    localStorage.removeItem(SESSION_KEY);
+  }
+}
+
 export const useStore = create<StoreState>((set, get) => ({
   // ─── Auth ─────────────────────────────────────────────────────────────
-  session: null,
-  setSession: (session) => set({ session }),
+  session: loadPersistedSession(),
+  setSession: (session) => {
+    persistSession(session);
+    set({ session });
+  },
 
   // ─── Servers ──────────────────────────────────────────────────────────
   servers: [],
@@ -715,6 +737,7 @@ export const useStore = create<StoreState>((set, get) => ({
     }
     _typingTimers.forEach(clearTimeout);
     _typingTimers.clear();
+    persistSession(null);
     set({
       session: null,
       servers: [],

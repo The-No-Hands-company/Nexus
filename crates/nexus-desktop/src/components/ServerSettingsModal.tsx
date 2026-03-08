@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { invoke } from "../invoke";
+import { invoke, getServerUrl } from "../invoke";
 import { useStore, Server } from "../store";
 import clsx from "clsx";
 import RoleManagementPanel from "./RoleManagementPanel";
@@ -130,7 +130,7 @@ export default function ServerSettingsModal({ server, onClose }: Props) {
 
   const copyInviteLink = useCallback(
     (code: string) => {
-      const link = `${window.location.origin}/invite/${code}`;
+      const link = `${getServerUrl()}/invite/${code}`;
       navigator.clipboard.writeText(link).catch(() => {});
       setCopied(code);
       setTimeout(() => setCopied(""), 2000);
@@ -336,7 +336,7 @@ export default function ServerSettingsModal({ server, onClose }: Props) {
               {newCode && (
                 <div className="flex items-center gap-2 rounded-lg border border-green-700/50 bg-green-900/20 px-3 py-2">
                   <span className="flex-1 font-mono text-sm text-green-300">
-                    {window.location.origin}/invite/{newCode}
+                    {getServerUrl()}/invite/{newCode}
                   </span>
                   <button
                     onClick={() => copyInviteLink(newCode)}

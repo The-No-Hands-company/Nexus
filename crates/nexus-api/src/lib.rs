@@ -4,6 +4,7 @@
 //! authentication, and client-facing functionality.
 
 pub mod auth;
+pub mod email;
 pub mod middleware;
 pub mod routes;
 
@@ -15,6 +16,8 @@ use nexus_federation::{client::FederationClient, ServerKeyPair};
 use nexus_voice::state::VoiceStateManager;
 use std::{sync::Arc, time::Instant};
 use tokio::sync::broadcast;
+
+use crate::email::EmailService;
 
 /// Shared application state available to all route handlers.
 #[derive(Clone)]
@@ -42,6 +45,8 @@ pub struct AppState {
     pub started_at: Instant,
     /// Prometheus metrics handle — render current metrics text with `prometheus.render()`.
     pub prometheus: PrometheusHandle,
+    /// Email delivery service (Resend). Disabled when `NEXUS__EMAIL__API_KEY` is unset.
+    pub email: EmailService,
 }
 
 /// Build the complete API router with all routes and middleware.

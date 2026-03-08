@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { invoke } from "../invoke";
+import { invoke, getServerUrl } from "../invoke";
 
 interface Props {
   serverId: string;
@@ -21,7 +21,7 @@ export default function InviteModal({ serverId, serverName, onClose }: Props) {
   }, [serverId]);
 
   const inviteUrl = code
-    ? `${window.location.origin}/invite/${code}`
+    ? `${getServerUrl()}/invite/${code}`
     : null;
 
   const copy = async () => {

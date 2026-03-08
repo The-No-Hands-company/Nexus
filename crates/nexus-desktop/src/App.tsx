@@ -2,7 +2,7 @@ import { Routes, Route, Navigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useStore } from "./store";
-import { isTauri } from "./invoke";
+import { isTauri, invoke } from "./invoke";
 import LoginPage from "./pages/Login";
 import RegisterPage from "./pages/Register";
 import MainLayout from "./pages/MainLayout";
@@ -19,6 +19,14 @@ initAppearance();
 export default function App() {
   const { session, setUpdateAvailable } = useStore();
   const [searchOpen, setSearchOpen] = useState(false);
+
+  // On mount (or hot-reload), re-sync the server URL from the persisted session
+  // so the Rust backend and JS _serverUrl stay in sync.
+  useEffect(() => {
+    if (session?.serverUrl) {
+      invoke("set_server_url", { url: session.serverUrl }).catch(() => {});
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Cmd+K / Ctrl+K global search shortcut
   useEffect(() => {

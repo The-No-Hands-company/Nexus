@@ -19,7 +19,9 @@ interface LoginResponse {
 export default function LoginPage() {
   const { setSession } = useStore();
 
-  const [serverUrl, setServerUrl] = useState("http://localhost:8080");
+  const [serverUrl, setServerUrl] = useState(
+    () => localStorage.getItem("nexus:lastServerUrl") || "http://localhost:8080"
+  );
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);

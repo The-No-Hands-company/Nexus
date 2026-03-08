@@ -228,6 +228,13 @@ async fn run_server(
     ));
 
     // ── REST API ──────────────────────────────────────────────────────────────
+    let email_service = nexus_api::email::EmailService::new(config.email.clone());
+    if email_service.is_enabled() {
+        tracing::info!(from = %config.email.from, "email delivery enabled (Resend)");
+    } else {
+        tracing::info!("email delivery disabled (no NEXUS__EMAIL__API_KEY)");
+    }
+
     let api_state = AppState {
         db: db.clone(),
         gateway_tx: gateway_tx.clone(),
@@ -239,6 +246,7 @@ async fn run_server(
         federation_client,
         started_at: std::time::Instant::now(),
         prometheus: prometheus_handle,
+        email: email_service,
     };
     let api_router = build_router(api_state);
     let host: std::net::IpAddr = "0.0.0.0".parse()?;

@@ -15,7 +15,13 @@ export const isTauri = (): boolean =>
 // it here and mirror it in localStorage so it survives a page refresh.
 
 let _serverUrl: string =
-  localStorage.getItem("nexus:dev:serverUrl") ?? "http://localhost:8080";
+  localStorage.getItem("nexus:lastServerUrl") ?? localStorage.getItem("nexus:dev:serverUrl") ?? "http://localhost:8080";
+
+/** Return the currently configured server URL (e.g. "https://nexus-tnhc.fly.dev"). */
+export function getServerUrl(): string {
+  return _serverUrl;
+}
+
 let _token: string | null = localStorage.getItem("nexus:dev:token");
 let _refreshToken: string | null = localStorage.getItem("nexus:dev:refreshToken");
 
@@ -1152,6 +1158,14 @@ export async function invoke<T>(
   cmd: string,
   args?: Record<string, unknown>
 ): Promise<T> {
+  // Keep JS-side _serverUrl in sync regardless of runtime mode so that
+  // getServerUrl() always returns the correct value for invite links etc.
+  // Also persist to localStorage so Login/Register pages can pre-fill it.
+  if (cmd === "set_server_url" && args?.url) {
+    _serverUrl = args.url as string;
+    localStorage.setItem("nexus:lastServerUrl", _serverUrl);
+  }
+
   if (isTauri()) {
     // Dynamic import so the Tauri module is never bundled when running in browser
     const { invoke: tauriInvoke } = await import("@tauri-apps/api/core");

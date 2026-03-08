@@ -5,7 +5,7 @@ use tauri::State;
 use uuid::Uuid;
 
 use crate::state::AppState;
-use super::api_client;
+use super::{api_client, friendly_api_error, friendly_network_error};
 
 /// Raw shape returned by the Nexus API (snake_case)
 #[derive(Deserialize, Debug, Clone)]
@@ -52,7 +52,12 @@ pub async fn list_servers(state: State<'_, AppState>) -> Result<Vec<ServerClient
         .get(format!("{base}/api/v1/servers"))
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(friendly_network_error)?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(friendly_api_error(status, &body));
+    }
     let raw: Vec<RawServer> = resp.json().await.map_err(|e| e.to_string())?;
     Ok(raw.into_iter().map(ServerClient::from).collect())
 }
@@ -68,7 +73,12 @@ pub async fn get_server(
         .get(format!("{base}/api/v1/servers/{server_id}"))
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(friendly_network_error)?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(friendly_api_error(status, &body));
+    }
     let raw: RawServer = resp.json().await.map_err(|e| e.to_string())?;
     Ok(ServerClient::from(raw))
 }
@@ -93,10 +103,11 @@ pub async fn create_server(
         .json(&body)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(friendly_network_error)?;
     if !resp.status().is_success() {
+        let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(text);
+        return Err(friendly_api_error(status, &text));
     }
     let raw: RawServer = resp.json().await.map_err(|e| e.to_string())?;
     Ok(ServerClient::from(raw))
@@ -164,10 +175,11 @@ pub async fn list_roles(
         .get(format!("{base}/api/v1/servers/{server_id}/roles"))
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(friendly_network_error)?;
     if !resp.status().is_success() {
+        let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(text);
+        return Err(friendly_api_error(status, &text));
     }
     let raw: Vec<RawRole> = resp.json().await.map_err(|e| e.to_string())?;
     Ok(raw.into_iter().map(RoleClient::from).collect())
@@ -198,10 +210,11 @@ pub async fn create_role(
         .json(&body)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(friendly_network_error)?;
     if !resp.status().is_success() {
+        let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(text);
+        return Err(friendly_api_error(status, &text));
     }
     let raw: RawRole = resp.json().await.map_err(|e| e.to_string())?;
     Ok(RoleClient::from(raw))
@@ -233,10 +246,11 @@ pub async fn update_role(
         .json(&body)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(friendly_network_error)?;
     if !resp.status().is_success() {
+        let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(text);
+        return Err(friendly_api_error(status, &text));
     }
     let raw: RawRole = resp.json().await.map_err(|e| e.to_string())?;
     Ok(RoleClient::from(raw))
@@ -255,10 +269,11 @@ pub async fn delete_role(
         .delete(format!("{base}/api/v1/servers/{server_id}/roles/{role_id}"))
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(friendly_network_error)?;
     if !resp.status().is_success() {
+        let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(text);
+        return Err(friendly_api_error(status, &text));
     }
     Ok(())
 }
@@ -294,10 +309,11 @@ pub async fn update_server(
         .json(&body)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(friendly_network_error)?;
     if !resp.status().is_success() {
+        let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(text);
+        return Err(friendly_api_error(status, &text));
     }
     let raw: RawServer = resp.json().await.map_err(|e| e.to_string())?;
     Ok(ServerClient::from(raw))
@@ -315,10 +331,11 @@ pub async fn delete_server(
         .delete(format!("{base}/api/v1/servers/{server_id}"))
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(friendly_network_error)?;
     if !resp.status().is_success() {
+        let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(text);
+        return Err(friendly_api_error(status, &text));
     }
     Ok(())
 }
@@ -338,10 +355,11 @@ pub async fn transfer_server_ownership(
         .json(&body)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(friendly_network_error)?;
     if !resp.status().is_success() {
+        let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(text);
+        return Err(friendly_api_error(status, &text));
     }
     Ok(())
 }
@@ -358,10 +376,11 @@ pub async fn leave_server(
         .post(format!("{base}/api/v1/servers/{server_id}/leave"))
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(friendly_network_error)?;
     if !resp.status().is_success() {
+        let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(text);
+        return Err(friendly_api_error(status, &text));
     }
     Ok(())
 }
@@ -414,10 +433,11 @@ pub async fn list_server_invites(
         .get(format!("{base}/api/v1/servers/{server_id}/invites"))
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(friendly_network_error)?;
     if !resp.status().is_success() {
+        let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(text);
+        return Err(friendly_api_error(status, &text));
     }
     let raw: Vec<RawInvite> = resp.json().await.map_err(|e| e.to_string())?;
     Ok(raw.into_iter().map(InviteClient::from).collect())
@@ -448,10 +468,11 @@ pub async fn create_invite(
         .json(&body)
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(friendly_network_error)?;
     if !resp.status().is_success() {
+        let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(text);
+        return Err(friendly_api_error(status, &text));
     }
     let r: CreateInviteResponse = resp.json().await.map_err(|e| e.to_string())?;
     Ok(InviteClient {
@@ -477,10 +498,11 @@ pub async fn delete_invite(
         .delete(format!("{base}/api/v1/servers/{server_id}/invites/{code}"))
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(friendly_network_error)?;
     if !resp.status().is_success() {
+        let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(text);
+        return Err(friendly_api_error(status, &text));
     }
     Ok(())
 }

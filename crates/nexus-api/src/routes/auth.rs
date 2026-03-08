@@ -159,15 +159,17 @@ async fn register(
     .await?;
 
     // Issue email verification token if email was provided
-    if user.email.is_some() {
+    if let Some(ref email_addr) = user.email {
         let (raw_token, token_hash, expires_at) = email_verification::generate_token();
         if let Err(e) =
             email_verification::upsert_token(&state.db.pool, user.id, &token_hash, expires_at).await
         {
             tracing::warn!(user_id = %user.id, error = %e, "Failed to store email verification token");
         } else {
-            // TODO: hand raw_token to email-sending service when SMTP is wired.
-            // Until then, log at DEBUG so developers can retrieve it without leaking to prod logs.
+            // Send verification email via Resend (no-op if API key not configured)
+            if let Err(e) = state.email.send_verification_email(email_addr, &user.username, &raw_token).await {
+                tracing::warn!(user_id = %user.id, error = %e, "Failed to send verification email");
+            }
             tracing::debug!(
                 user_id = %user.id,
                 token = %raw_token,

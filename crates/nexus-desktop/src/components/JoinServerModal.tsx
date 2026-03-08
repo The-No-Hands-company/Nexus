@@ -17,7 +17,7 @@ export default function JoinServerModal({ onClose }: Props) {
   // Extract the code from either a raw code or a full URL
   function parseCode(raw: string): string {
     raw = raw.trim();
-    // URL like http://localhost:1420/invite/abc123xy
+    // URL like https://nexus-tnhc.fly.dev/invite/abc123xy
     const match = raw.match(/\/invite\/([a-zA-Z0-9]+)/);
     if (match) return match[1];
     return raw;
@@ -79,7 +79,7 @@ export default function JoinServerModal({ onClose }: Props) {
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="http://localhost:1420/invite/abc123xy  or  abc123xy"
+              placeholder="https://nexus.example.com/invite/abc123xy  or  abc123xy"
               autoFocus
               className="bg-bg-900 border border-bg-600 rounded-lg px-3 py-2 text-white placeholder:text-muted text-sm focus:outline-none focus:border-accent-500 transition-colors"
             />

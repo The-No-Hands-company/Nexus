@@ -64,7 +64,11 @@ pub fn init() -> Result<&'static AppConfig, config::ConfigError> {
         // Set NEXUS__SEARCH__URL=http://localhost:7700 to enable it.
         .set_default("search.url", "")?
         // Self-hosting feature flags
-        .set_default("features.require_email_verification", true)?;
+        .set_default("features.require_email_verification", true)?
+        // Email / Resend defaults (email sending is disabled when api_key is empty)
+        .set_default("email.api_key", "")?
+        .set_default("email.from", "Nexus <noreply@nexus.local>")?
+        .set_default("email.base_url", "")?;
 
     // 12-factor platform fallbacks — only inject when the env var is actually set.
     if let Some(url) = db_url_platform {
@@ -102,6 +106,8 @@ pub struct AppConfig {
     pub search: SearchConfig,
     pub limits: LimitsConfig,
     pub features: FeaturesConfig,
+    #[serde(default)]
+    pub email: EmailConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -179,6 +185,33 @@ pub struct LimitsConfig {
     pub max_message_length: u32,
     pub max_file_size_bytes: u64,
     pub max_attachment_count: u32,
+}
+
+/// Email delivery configuration (Resend).
+///
+/// Set via environment variables:
+///   `NEXUS__EMAIL__API_KEY=re_xxxx`
+///   `NEXUS__EMAIL__FROM=Nexus <noreply@yourdomain.com>`
+///   `NEXUS__EMAIL__BASE_URL=https://nexus-tnhc.fly.dev`
+///
+/// When `api_key` is empty, email sending is disabled and verification
+/// tokens are logged at DEBUG level instead.
+#[derive(Debug, Deserialize, Clone, Default)]
+pub struct EmailConfig {
+    /// Resend API key (starts with `re_`). Empty = email disabled.
+    pub api_key: String,
+    /// "From" address, e.g. `Nexus <noreply@yourdomain.com>`.
+    pub from: String,
+    /// Public base URL of this Nexus instance, used to build verification links.
+    /// E.g. `https://nexus-tnhc.fly.dev`.
+    pub base_url: String,
+}
+
+impl EmailConfig {
+    /// Returns `true` when a valid Resend API key is configured.
+    pub fn is_enabled(&self) -> bool {
+        !self.api_key.is_empty()
+    }
 }
 
 /// Self-hosting and deployment feature flags.

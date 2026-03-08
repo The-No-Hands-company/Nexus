@@ -5,7 +5,7 @@ use tauri::State;
 use uuid::Uuid;
 
 use crate::state::AppState;
-use super::api_client;
+use super::{api_client, friendly_api_error, friendly_network_error};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct LoginRequest {
@@ -60,12 +60,12 @@ pub async fn register(
         .json(&RegisterRequest { username, email, password })
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(friendly_network_error)?;
 
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(format!("Registration failed ({status}): {body}"));
+        return Err(friendly_api_error(status, &body));
     }
 
     let auth: AuthResponse = resp.json().await.map_err(|e| e.to_string())?;
@@ -96,12 +96,12 @@ pub async fn login(
         .json(&LoginRequest { username, password })
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(friendly_network_error)?;
 
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        return Err(format!("Login failed ({status}): {body}"));
+        return Err(friendly_api_error(status, &body));
     }
 
     let auth: AuthResponse = resp.json().await.map_err(|e| e.to_string())?;
@@ -148,10 +148,12 @@ pub async fn refresh_token(
         .json(&serde_json::json!({ "refresh_token": refresh }))
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(friendly_network_error)?;
 
     if !resp.status().is_success() {
-        return Err("Token refresh failed".into());
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(friendly_api_error(status, &body));
     }
 
     let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
@@ -176,10 +178,12 @@ pub async fn get_current_user(
         .get(format!("{base}/api/v1/users/@me"))
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(friendly_network_error)?;
 
     if !resp.status().is_success() {
-        return Err(format!("Failed to fetch user: {}", resp.status()));
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(friendly_api_error(status, &body));
     }
 
     resp.json::<CurrentUser>().await.map_err(|e| e.to_string())

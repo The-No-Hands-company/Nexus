@@ -116,7 +116,12 @@ async fn resend_verification(
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
 
-    // TODO: dispatch to email-sending service when SMTP is wired.
+    // Send verification email via Resend (no-op if API key not configured)
+    if let Some(ref email_addr) = user.email {
+        if let Err(e) = state.email.send_verification_email(email_addr, &user.username, &raw_token).await {
+            tracing::warn!(user_id = %user.id, error = %e, "Failed to send verification email");
+        }
+    }
     tracing::debug!(
         user_id = %user.id,
         token = %raw_token,

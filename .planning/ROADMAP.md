@@ -625,15 +625,49 @@ Optional per-channel "stream mode": messages are grouped by topic (like Zulip to
 
 ## Phase 10: Mobile (v1.0) 🔲 Planned
 
-- [ ] React Native iOS + Android
-- [ ] Push notifications (FCM/APNs, self-hosted option via UnifiedPush — no Google dependency required)
-- [ ] Voice/video on mobile
-- [ ] Offline message queue (local store-and-forward, send on reconnect)
+> **Highest immediate priority.** Unlocks daily use for the majority of users. No features matter if people can't use Nexus on their phone.
 
-## Phase 11: Phantom Privacy Layer (v1.x — depends on Phantom maturity)
+### 10-01: Core Mobile Client
+
+- [ ] React Native (iOS + Android) with shared logic from desktop where possible
+- [ ] Full feature parity with desktop (servers, channels, DMs, threads, forums, stages, voice)
+- [ ] E2EE device management on mobile (key upload, device verification, safety numbers)
+- [ ] Federation UX on mobile (peering status, federated server directory)
+
+### 10-02: Push Notifications
+
+- [ ] UnifiedPush support (self-hosted preferred — no Google dependency required)
+- [ ] FCM / APNs fallback for users who want mainstream push
+- [ ] Per-channel / per-server notification overrides (mute, mentions-only, all)
+- [ ] @mention and DM notification badges
+
+### 10-03: Mobile Voice & Video
+
+- [ ] Mobile WebRTC (reuse existing SFU architecture)
+- [ ] Battery and permission optimizations (background audio keep-alive, mic/camera permissions)
+- [ ] Voice video grid layout (Brady Bunch view — SFU ready, UI needed)
+- [ ] Screen share on mobile (system-level screen capture APIs)
+
+### 10-04: Offline Support
+
+- [ ] Local message queue (SQLite / RocksDB) — store-and-forward, auto-sync on reconnect
+- [ ] Draft persistence across sessions (sync with server-side drafts API)
+- [ ] Offline channel browsing (cached message history)
+
+### 10-05: Mobile-Specific UX
+
+- [ ] Swipe gestures (swipe to reply, swipe between channels/servers)
+- [ ] Quick reply from notification shade
+- [ ] Compact voice HUD (floating mini-player during voice calls)
+- [ ] Background play for voice channels and voice notes
+- [ ] Haptic feedback for reactions and interactions
+
+## Phase 11: Phantom Privacy Layer (v1.1–1.3 — depends on Phantom maturity)
 
 > **Depends on:** [Phantom](https://github.com/The-No-Hands-company/Phantom) reaching production readiness
 > — a post-quantum anonymous networking protocol being developed in parallel.
+>
+> **Long-term flagship differentiator.** This is the killer feature that makes Nexus categorically different from every competitor. Privacy becomes mathematical, not policy-based.
 
 This phase integrates Phantom into Nexus to make privacy guarantees **mathematical rather than policy-based**. Nodes routing traffic between Nexus servers will be unable to determine who is talking to whom, where messages originate, or which users are online — by cryptographic construction, not by trust in the operator.
 
@@ -657,6 +691,192 @@ Phantom is an infant today. This phase will happen when it is ready, not before.
 - [ ] "Phantom mode" toggle per-server (routes traffic through the anonymous network)
 - [ ] Verifiable privacy: users can independently verify that traffic is being handled correctly
 - [ ] Threat model documentation that users can actually read and understand
+
+### 11-04: E2EE as Default
+
+- [ ] Make E2EE default for all new channels and DMs (opt-out with warning rather than opt-in)
+- [ ] Verifiable privacy badges — "Phantom-routed" icon on messages and servers
+- [ ] Anonymous join / mention flows using zero-knowledge proofs for presence without revealing identity
+- [ ] Cross-device E2EE key sync (secure backup / restore flow for key material)
+
+---
+
+## Phase 15: Creator & Community Economy (v1.4) 🟡 Partially Complete
+
+> **High priority for engagement and retention.** Builds on existing events, stickers, and bots infrastructure. Addresses Discord Nitro paywalls and creator migration demand.
+>
+> Some items (badges, boosts, Canvas) were implemented during earlier phases. Remaining items focus on monetization and discovery.
+
+### 15-01: Server Supporter Tiers (Boosts) ✅ Complete
+
+- ✅ Supporter tiers with custom emoji/sticker slot increases, vanity roles/colors, priority voice slots
+- ✅ `boostTier` and `boosterCount` fields on servers
+- ✅ Vanity invite code support (`vanityCode` on servers)
+
+### 15-02: User Badges & Achievements ✅ Complete
+
+- ✅ Per-server and global badges (e.g., "Top Contributor", "Early Adopter")
+- ✅ Opt-in badge display on user profiles
+
+### 15-03: Rich Document Channels (Canvas) ✅ Complete
+
+- ✅ Collaborative Markdown/editable embeds (Notion-lite, real-time via gateway)
+
+### 15-04: Creator Monetization
+
+- [ ] Tip jar integration (external payment links — Stripe, crypto, or custom)
+- [ ] Subscription channel previews (teaser content visible to non-subscribers)
+- [ ] Self-hosted payment processing (no central cut — server owner controls payments)
+- [ ] Creator analytics dashboard (subscriber count, engagement metrics — no user tracking)
+
+### 15-05: Server Discovery Improvements
+
+- [ ] Server tags and categories (gaming, education, tech, art, etc.)
+- [ ] Popularity metrics without user tracking (member count, activity score — computed locally)
+- [ ] Featured servers rotation in the public directory
+- [ ] Server preview (read-only channel peek before joining)
+
+---
+
+## Phase 16: Advanced Collaboration & Productivity (v1.5) 🔲 Planned
+
+> **Medium priority.** Targets Slack/Teams overlap and knowledge communities. Leverages existing threads, forums, and stream mode infrastructure.
+
+### 16-01: Integrated Tasks & Checklists
+
+- [ ] Task items within channels (assign to users, due dates, priority levels)
+- [ ] Reminder notifications via gateway events
+- [ ] Task board view (Kanban-style) per channel or server
+- [ ] `/task` slash command for quick task creation from chat
+
+### 16-02: Calendar Integration
+
+- [ ] Sync server events to external calendars (ICS export / CalDAV subscription)
+- [ ] Calendar view within the desktop/mobile client
+- [ ] Recurring events support (daily, weekly, monthly patterns)
+- [ ] Event reminders with configurable lead times
+
+### 16-03: File Versioning & History
+
+- [ ] Git-like version history for document attachments
+- [ ] Diff view for text-based file changes
+- [ ] Rollback to previous versions (MANAGE_MESSAGES permission)
+- [ ] Storage quota management per server
+
+### 16-04: On-Device AI Assists
+
+- [ ] Optional self-hosted LLM integration for message summaries (catch up on missed conversations)
+- [ ] Auto-moderation suggestions (flag potentially toxic content for mod review — no cloud dependency)
+- [ ] Smart reply suggestions (on-device inference, privacy-first)
+- [ ] Channel digest generation (daily/weekly summaries of activity)
+
+---
+
+## Phase 17: Multimedia & Expression Enhancements (v1.6) 🔲 Planned
+
+> **Medium priority.** Targets casual / younger users migrating from Telegram and Discord. High engagement impact for relatively low implementation effort.
+
+### 17-01: Voice & Video Notes
+
+- [ ] Record and send voice notes in-chat (compressed Opus, waveform preview)
+- [ ] Video notes (short clips, inline playback)
+- [ ] On-device speech-to-text transcripts for voice notes (privacy-first, no cloud)
+- [ ] Playback speed controls (1x, 1.5x, 2x)
+
+### 17-02: Stories & Ephemeral Status
+
+- [ ] 24-hour ephemeral status updates visible to friends and server members
+- [ ] Rich media stories (images, video clips, text overlays)
+- [ ] Story viewer list (who saw it — opt-in privacy control)
+- [ ] Auto-cleanup background task (purge expired stories)
+
+### 17-03: In-Chat Drawing & Annotation
+
+- [ ] Quick sketch tool (freehand drawing, shapes, colors)
+- [ ] Image markup / annotation (draw on screenshots, highlight regions)
+- [ ] Shared whiteboard for voice channels (real-time collaborative canvas)
+
+### 17-04: Advanced Voice Features
+
+- [ ] Spatial audio (opt-in positional sound in voice channels)
+- [ ] Enhanced echo cancellation and noise gate tuning
+- [ ] Low-latency push-to-talk optimizations for mobile
+- [ ] Voice channel background music bot integration (ambient sounds, music queue)
+
+### 17-05: Media Gallery
+
+- [ ] Per-channel and per-server media gallery view
+- [ ] Filter by media type (images, videos, files, links)
+- [ ] Search by date range
+- [ ] Bulk download support
+
+---
+
+## Phase 18: Accessibility & Inclusivity (v1.7) 🔲 Planned
+
+> **Ongoing priority.** Builds on existing ARIA landmark and keyboard navigation work. Ensures Nexus is usable by everyone, not just power users.
+
+### 18-01: Screen Reader Enhancements
+
+- [ ] Full screen reader audit and fixes beyond current ARIA landmarks
+- [ ] Announce real-time events (new messages, reactions, typing) accessibly
+- [ ] Keyboard-navigable emoji picker, sticker picker, and context menus
+- [ ] Focus management improvements for modal stacking
+
+### 18-02: Visual Accessibility
+
+- [ ] High-contrast theme variants (WCAG AAA compliant)
+- [ ] Per-user font size and font family customization
+- [ ] Reduced motion mode (disable all animations)
+- [ ] Color-blind friendly indicators (don't rely solely on color for status)
+
+### 18-03: Language & Communication
+
+- [ ] On-device language auto-detection and message translation (no cloud — local models)
+- [ ] RTL (right-to-left) layout support for Arabic, Hebrew, etc.
+- [ ] Unicode and emoji rendering consistency across platforms
+
+### 18-04: Voice Accessibility
+
+- [ ] Live captioning for voice channels (on-device speech recognition, opt-in)
+- [ ] Caption overlay in voice/video calls
+- [ ] Transcript generation for voice recordings
+- [ ] Text-to-speech for chat messages (opt-in per user)
+
+---
+
+## Phase 19: Ecosystem & Onboarding (v1.8+) 🔲 Planned
+
+> **Lower priority — post-mobile.** Reduces friction for new users and server admins. Makes Nexus easy to adopt at scale.
+
+### 19-01: Import & Migration Tools
+
+- [ ] Discord export importer (parse Discord data package → Nexus messages, channels, roles)
+- [ ] Matrix room importer (bridge existing Matrix rooms into Nexus channels)
+- [ ] Slack export importer (channels, threads, users, files)
+- [ ] Bulk user invitation tool (CSV upload, email invites)
+
+### 19-02: Onboarding Wizard
+
+- [ ] Lite mode quick-start wizard (first-run setup: create server, invite friends, pick theme)
+- [ ] Server templates (pre-configured channel layouts for gaming, education, teams, open-source)
+- [ ] Interactive tour for new users (highlight key features on first login)
+- [ ] Admin setup checklist (roles, permissions, moderation, federation — guided steps)
+
+### 19-03: Admin Analytics Dashboard
+
+- [ ] Anonymous server usage statistics (messages/day, active users, voice minutes — computed locally)
+- [ ] Growth trends and member retention graphs
+- [ ] Moderation activity summary (reports resolved, bans issued, filters triggered)
+- [ ] Zero telemetry to any central server — all data stays on the instance
+
+### 19-04: Plugin Marketplace
+
+- [ ] Federated plugin discovery (discoverable via the server directory protocol)
+- [ ] Signed plugin packages (Ed25519 signatures for integrity verification)
+- [ ] Plugin ratings and reviews (distributed, no central authority)
+- [ ] One-click install from within the client
+- [ ] Plugin sandboxing audit and hardening (capability-based permissions)
 
 ---
 
@@ -715,6 +935,10 @@ Phantom is an infant today. This phase will happen when it is ready, not before.
 | Discord: proprietary everything | Every API surface is open and documented |
 | Centralised moderation only | Per-server word filters, reports, and user-controlled privacy |
 | No modern key exchange | Kyber-1024 / X25519 hybrid KEM (Phase 11) |
+| Discord 2026 age/ID/facial verification | No ID, no phone, no face scan — ever |
+| Privacy as policy promise | Mathematical privacy via Phantom (Phase 11) |
+| Matrix bridge complexity / latency | True federation without bridges or compatibility shims |
+| Docker-only self-hosting (most alternatives) | Single-binary lite mode — download, run, invite friends |
 
 ### Feature Gap Analysis (Priority)
 
@@ -755,15 +979,33 @@ Phantom is an infant today. This phase will happen when it is ready, not before.
 | Voice video grid (Brady Bunch view) | SFU ready, UI missing | Phase 10 |
 | Screen share on mobile | Not yet built | Phase 10 |
 
-### Community Most-Wanted Top 10
+#### New Priorities (2026 roadmap update)
 
-1. **Forum channels** — GitHub, ProductHunt, and Discord-alternative communities consistently call this out
-2. **Polls** — universally requested across Discord, Telegram, and Slack user surveys
-3. **Group DM management** — name, icon, add/remove members
-4. **Message scheduling** — power users and community managers
-5. **Server events + RSVP** — gaming and community servers
-6. **Sticker packs** — casual / younger user engagement
-7. **Disappearing messages** — privacy-focused users
-8. **Message bookmarks** — knowledge workers
-9. **Stage channels** — AMAs, town halls, podcasts
-10. **Rich document channels (Canvas)** — teams and educational communities
+| Feature | Status | Phase |
+|---|---|---|
+| Creator monetization (tip jar, subscriptions) | Not yet built | Phase 15 |
+| Server discovery (tags, categories, preview) | Not yet built | Phase 15 |
+| Integrated tasks & checklists | Not yet built | Phase 16 |
+| Calendar integration (ICS/CalDAV sync) | Not yet built | Phase 16 |
+| On-device AI assists (summaries, smart replies) | Not yet built | Phase 16 |
+| Voice / video notes with transcripts | Not yet built | Phase 17 |
+| Stories / ephemeral status | Not yet built | Phase 17 |
+| Media gallery view | Not yet built | Phase 17 |
+| Voice channel live captioning | Not yet built | Phase 18 |
+| Discord / Slack import tools | Not yet built | Phase 19 |
+| Plugin marketplace (federated) | Not yet built | Phase 19 |
+
+### Community Most-Wanted Top 10 (2026 Update)
+
+> Updated to reflect what the community is asking for now that Phases 1–14 are complete.
+
+1. **Robust mobile apps** — top request everywhere; no features matter if people can't use Nexus on their phone
+2. **Stronger default privacy** — E2EE everywhere + Phantom integration; the unique Nexus edge
+3. **Creator tools & monetization** — tip jars, subscriptions, supporter tiers without a central cut
+4. **Better voice** — spatial audio, mobile parity, voice notes with transcripts
+5. **Collaborative docs & tasks** — Canvas + task management for teams and knowledge communities
+6. **Stories & ephemeral content** — 24h status updates, casual engagement for younger users
+7. **Import / migration ease** — Discord, Slack, Matrix import tools to lower switching cost
+8. **On-device AI helpers** — message summaries, auto-moderation, smart replies (privacy-first)
+9. **Advanced search** — cross-federated full-text search, semantic search, media filters
+10. **Voice channel captions & transcripts** — accessibility and productivity win
