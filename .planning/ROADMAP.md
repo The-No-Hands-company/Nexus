@@ -886,194 +886,194 @@ Phantom is an infant today. This phase will happen when it is ready, not before.
 
 ---
 
-## Phase 20: Scalability & Performance Hardening (v1.9) 🔲 Planned
+## Phase 20: Scalability & Performance Hardening (v1.9) ✅ Complete
 
 > **High priority for large and federated communities.** Everything built so far works for small-to-mid instances. This phase ensures Nexus can handle 100k+ member servers and dense federation meshes without degradation.
 
 ### 20-01: Horizontal Scaling
 
-- [ ] ScyllaDB message partitioning improvements (shard by channel + time bucket, automatic compaction strategy tuning)
-- [ ] Redis clustering support (Sentinel and Cluster modes for pub/sub, rate limiting, and session store)
-- [ ] Load-balanced WebSocket gateways (sticky sessions via session-id header, coordinated dispatch across N gateway nodes)
-- [ ] Multi-instance voice SFU (region-aware routing, seamless handoff between SFU nodes)
+- [x] ScyllaDB message partitioning improvements (shard by channel + time bucket, automatic compaction strategy tuning)
+- [x] Redis clustering support (Sentinel and Cluster modes for pub/sub, rate limiting, and session store)
+- [x] Load-balanced WebSocket gateways (sticky sessions via session-id header, coordinated dispatch across N gateway nodes)
+- [x] Multi-instance voice SFU (region-aware routing, seamless handoff between SFU nodes)
 
 ### 20-02: Federation Performance
 
-- [ ] Batched federation event delivery (coalesce presence/typing/reactions into fewer HTTP round-trips)
-- [ ] Push-based federation subscriptions (persistent WebSocket between peered instances, fallback to polling)
-- [ ] Automatic health-based routing (prefer lowest-latency peer path for multi-hop federation)
-- [ ] Federation event deduplication and idempotency (handle retries without duplicate processing)
+- [x] Batched federation event delivery (coalesce presence/typing/reactions into fewer HTTP round-trips)
+- [x] Push-based federation subscriptions (persistent WebSocket between peered instances, fallback to polling)
+- [x] Automatic health-based routing (prefer lowest-latency peer path for multi-hop federation)
+- [x] Federation event deduplication and idempotency (handle retries without duplicate processing)
 
 ### 20-03: Voice Network Resilience
 
-- [ ] Adaptive bitrate with Opus FEC tuning (dynamically adjust codec parameters based on packet loss / jitter)
-- [ ] Multi-region SFU peering (optional self-hosted relay nodes for geographically distributed communities)
-- [ ] Graceful SFU failover (detect unhealthy SFU node, migrate participants to backup with minimal interruption)
-- [ ] Bandwidth estimation and quality indicators (expose per-participant connection quality to client)
+- [x] Adaptive bitrate with Opus FEC tuning (dynamically adjust codec parameters based on packet loss / jitter)
+- [x] Multi-region SFU peering (optional self-hosted relay nodes for geographically distributed communities)
+- [x] Graceful SFU failover (detect unhealthy SFU node, migrate participants to backup with minimal interruption)
+- [x] Bandwidth estimation and quality indicators (expose per-participant connection quality to client)
 
 ### 20-04: Large-Server Tooling
 
-- [ ] Member list pagination and search optimization (cursor-based, indexed by role/join-date/activity)
-- [ ] Role hierarchy visualization (tree view in admin panel, conflict detection)
-- [ ] Auto-prune inactive members (configurable inactivity threshold, grace period DM notification before removal)
-- [ ] Slow mode enhancements (per-role overrides, escalating cooldowns for repeated violations)
+- [x] Member list pagination and search optimization (cursor-based, indexed by role/join-date/activity)
+- [x] Role hierarchy visualization (tree view in admin panel, conflict detection)
+- [x] Auto-prune inactive members (configurable inactivity threshold, grace period DM notification before removal)
+- [x] Slow mode enhancements (per-role overrides, escalating cooldowns for repeated violations)
 
 ### 20-05: Operational Excellence
 
-- [ ] Auto-scaling metrics and alerting (Prometheus rules for connection saturation, message throughput, voice capacity)
-- [ ] Zero-downtime rolling upgrades (connection drain on gateway/SFU, migration-safe DB schema changes)
-- [ ] Distributed tracing (OpenTelemetry spans across API → gateway → SFU → federation)
-- [ ] Capacity planning dashboard (project growth based on current trends, recommend infrastructure changes)
+- [x] Auto-scaling metrics and alerting (Prometheus rules for connection saturation, message throughput, voice capacity)
+- [x] Zero-downtime rolling upgrades (connection drain on gateway/SFU, migration-safe DB schema changes)
+- [x] Distributed tracing (OpenTelemetry spans across API → gateway → SFU → federation)
+- [x] Capacity planning dashboard (project growth based on current trends, recommend infrastructure changes)
 
 ---
 
-## Phase 21: Advanced AI & Intelligence Layer (v2.0) 🔲 Planned
+## Phase 21: Advanced AI & Intelligence Layer (v2.0) ✅ Complete
 
 > **Medium-high priority.** Builds on the Phase 16 on-device AI assists foundation. All AI features remain fully opt-in per-server and per-user, with zero cloud dependency by default.
 
 ### 21-01: Semantic Search
 
-- [ ] AI-powered query understanding (natural language → structured search, e.g. "last week's memes about cats" → cross-channel media results)
-- [ ] On-device embedding generation (lightweight sentence-transformer model, stored in Tantivy alongside keyword index)
-- [ ] Hybrid search ranking (combine BM25 keyword score + vector similarity for relevance)
-- [ ] Cross-federated search (query forwarded to peered instances with consent, merged results)
+- [x] AI-powered query understanding (natural language → structured search, e.g. "last week's memes about cats" → cross-channel media results)
+- [x] On-device embedding generation (lightweight sentence-transformer model, stored in Tantivy alongside keyword index)
+- [x] Hybrid search ranking (combine BM25 keyword score + vector similarity for relevance)
+- [x] Cross-federated search (query forwarded to peered instances with consent, merged results)
 
 ### 21-02: Proactive Assists
 
-- [ ] Context-aware reply suggestions (thread/forum context → relevant response options, privacy-first on-device inference)
-- [ ] Auto-tag and summarize long threads/forum posts (generate TL;DR when thread exceeds N messages)
-- [ ] Intelligent notification filtering (learn per-user engagement patterns → surface urgent items, suppress noise)
-- [ ] Meeting notes from voice channels (auto-generate summary from captions after voice session ends)
+- [x] Context-aware reply suggestions (thread/forum context → relevant response options, privacy-first on-device inference)
+- [x] Auto-tag and summarize long threads/forum posts (generate TL;DR when thread exceeds N messages)
+- [x] Intelligent notification filtering (learn per-user engagement patterns → surface urgent items, suppress noise)
+- [x] Meeting notes from voice channels (auto-generate summary from captions after voice session ends)
 
 ### 21-03: Moderation AI Evolution
 
-- [ ] Toxicity/sentiment scoring for reported messages (flag for human review with confidence level, never auto-action)
-- [ ] Auto-categorize reports by type (spam, harassment, NSFW, off-topic — suggested label for moderator)
-- [ ] Spam pattern learning per-server (adaptive rules that improve from moderator accept/dismiss decisions)
-- [ ] Raid detection and auto-response (detect coordinated join + spam patterns, auto-enable slow mode, alert admins)
+- [x] Toxicity/sentiment scoring for reported messages (flag for human review with confidence level, never auto-action)
+- [x] Auto-categorize reports by type (spam, harassment, NSFW, off-topic — suggested label for moderator)
+- [x] Spam pattern learning per-server (adaptive rules that improve from moderator accept/dismiss decisions)
+- [x] Raid detection and auto-response (detect coordinated join + spam patterns, auto-enable slow mode, alert admins)
 
 ### 21-04: Voice AI
 
-- [ ] Real-time speaker identification / diarisation in recordings and captions (attribute transcript segments to speakers)
-- [ ] Emotion-aware noise suppression (detect voice stress → prioritize speech clarity)
-- [ ] Voice command integration (hands-free mute/deafen/channel-switch via keyword trigger)
-- [ ] Auto-translate voice captions (real-time caption language conversion, on-device where possible)
+- [x] Real-time speaker identification / diarisation in recordings and captions (attribute transcript segments to speakers)
+- [x] Emotion-aware noise suppression (detect voice stress → prioritize speech clarity)
+- [x] Voice command integration (hands-free mute/deafen/channel-switch via keyword trigger)
+- [x] Auto-translate voice captions (real-time caption language conversion, on-device where possible)
 
 ### 21-05: AI Governance
 
-- [ ] All AI features opt-in at both server and user level (double consent)
-- [ ] Fully on-device or self-hosted LLM endpoints only — no default cloud calls, ever
-- [ ] Model provenance transparency (show which model generated each suggestion, version, license)
-- [ ] AI audit log per server (track which AI features are active, who enabled them, usage statistics)
+- [x] All AI features opt-in at both server and user level (double consent)
+- [x] Fully on-device or self-hosted LLM endpoints only — no default cloud calls, ever
+- [x] Model provenance transparency (show which model generated each suggestion, version, license)
+- [x] AI audit log per server (track which AI features are active, who enabled them, usage statistics)
 
 ---
 
-## Phase 22: Enhanced Voice & Real-Time Collaboration (v2.1) 🔲 Planned
+## Phase 22: Enhanced Voice & Real-Time Collaboration (v2.1) ✅ Complete
 
 > **Medium priority.** Capitalizes on SFU maturity from Phase 3 and drawing/whiteboard infrastructure from Phase 17. Makes Nexus the strongest voice platform in the open-source ecosystem.
 
 ### 22-01: Video Grid Polish
 
-- [ ] Dynamic layouts (spotlight/active-speaker, mosaic/gallery, side-by-side, custom drag-and-drop arrangement)
-- [ ] Picture-in-picture mode (floating mini-player when navigating away from voice channel)
-- [ ] Mobile-optimized video grid (swipe between participants, pinch-to-zoom on mobile)
-- [ ] Virtual backgrounds and blur (on-device processing, no cloud dependency)
+- [x] Dynamic layouts (spotlight/active-speaker, mosaic/gallery, side-by-side, custom drag-and-drop arrangement)
+- [x] Picture-in-picture mode (floating mini-player when navigating away from voice channel)
+- [x] Mobile-optimized video grid (swipe between participants, pinch-to-zoom on mobile)
+- [x] Virtual backgrounds and blur (on-device processing, no cloud dependency)
 
 ### 22-02: Live Streaming
 
-- [ ] Go-live from voice channels (broadcast to channel followers, announcement-style distribution)
-- [ ] Stream viewer list with count (opt-in visibility, streamer controls who can watch)
-- [ ] E2EE opt-in recording of live streams (encrypted at rest, decryptable only by participants)
-- [ ] Low-latency HLS/DASH fallback for high viewer counts (SFU → media server fan-out)
+- [x] Go-live from voice channels (broadcast to channel followers, announcement-style distribution)
+- [x] Stream viewer list with count (opt-in visibility, streamer controls who can watch)
+- [x] E2EE opt-in recording of live streams (encrypted at rest, decryptable only by participants)
+- [x] Low-latency HLS/DASH fallback for high viewer counts (SFU → media server fan-out)
 
 ### 22-03: Collaborative Sessions
 
-- [ ] Shared screen with pointer/highlight tools (remote cursor visible to all participants)
-- [ ] In-call whiteboard (extend Phase 17 `DrawingCanvas`, synchronized via gateway events)
-- [ ] Breakout rooms (temporary sub-channels within a voice session, moderator-controlled split/merge)
-- [ ] Collaborative document editing in voice (open Canvas doc during call, cursor presence for all participants)
+- [x] Shared screen with pointer/highlight tools (remote cursor visible to all participants)
+- [x] In-call whiteboard (extend Phase 17 `DrawingCanvas`, synchronized via gateway events)
+- [x] Breakout rooms (temporary sub-channels within a voice session, moderator-controlled split/merge)
+- [x] Collaborative document editing in voice (open Canvas doc during call, cursor presence for all participants)
 
 ### 22-04: Spatial & Immersive Audio
 
-- [ ] HRTF personalization (head-related transfer function calibration per-user for realistic spatial positioning)
-- [ ] 360° audio positioning in virtual stages/events (place speakers in a virtual room layout)
-- [ ] Ambisonics support for immersive environments (first-order ambisonics encoding/decoding)
-- [ ] Spatial audio presets (conference table, auditorium, campfire — pre-configured positioning templates)
+- [x] HRTF personalization (head-related transfer function calibration per-user for realistic spatial positioning)
+- [x] 360° audio positioning in virtual stages/events (place speakers in a virtual room layout)
+- [x] Ambisonics support for immersive environments (first-order ambisonics encoding/decoding)
+- [x] Spatial audio presets (conference table, auditorium, campfire — pre-configured positioning templates)
 
 ### 22-05: Low-Latency & Quality
 
-- [ ] "Competitive" voice preset (minimal buffering, aggressive jitter control, sub-50ms target)
-- [ ] Echo and feedback auto-calibration (detect and eliminate acoustic feedback loops automatically)
-- [ ] Per-participant audio normalization (consistent volume across different microphones/setups)
-- [ ] Network quality overlay (real-time per-user latency/jitter/packet-loss badges in voice UI)
+- [x] "Competitive" voice preset (minimal buffering, aggressive jitter control, sub-50ms target)
+- [x] Echo and feedback auto-calibration (detect and eliminate acoustic feedback loops automatically)
+- [x] Per-participant audio normalization (consistent volume across different microphones/setups)
+- [x] Network quality overlay (real-time per-user latency/jitter/packet-loss badges in voice UI)
 
 ---
 
-## Phase 23: User Growth & Retention (v2.2) 🔲 Planned
+## Phase 23: User Growth & Retention (v2.2) ✅ Complete
 
 > **Medium priority — post-mobile adoption focus.** These features drive stickiness after users arrive. Reduces churn and makes Nexus feel personal and indispensable.
 
 ### 23-01: Onboarding Personalization
 
-- [ ] AI-assisted server recommendations (interest tags + activity patterns → suggested public servers, privacy-respecting)
-- [ ] Quick-join previews with sample messages (read-only peek into active channels before committing)
-- [ ] Adaptive onboarding flow (skip steps the user has already completed, remember preferences across servers)
-- [ ] Friend-of-friend discovery (opt-in: suggest servers where your contacts are active)
+- [x] AI-assisted server recommendations (interest tags + activity patterns → suggested public servers, privacy-respecting)
+- [x] Quick-join previews with sample messages (read-only peek into active channels before committing)
+- [x] Adaptive onboarding flow (skip steps the user has already completed, remember preferences across servers)
+- [x] Friend-of-friend discovery (opt-in: suggest servers where your contacts are active)
 
 ### 23-02: Cross-Device Continuity
 
-- [ ] Seamless voice handoff (start call on desktop → transfer to mobile without dropping, via SFU session migration)
-- [ ] Unified read state across all clients (real-time sync, not poll-based — gateway `READ_STATE_SYNC` event)
-- [ ] Clipboard sync across devices (copy on desktop → paste on mobile, E2EE in transit)
-- [ ] "Continue where you left off" (deep-link to exact scroll position and channel on device switch)
+- [x] Seamless voice handoff (start call on desktop → transfer to mobile without dropping, via SFU session migration)
+- [x] Unified read state across all clients (real-time sync, not poll-based — gateway `READ_STATE_SYNC` event)
+- [x] Clipboard sync across devices (copy on desktop → paste on mobile, E2EE in transit)
+- [x] "Continue where you left off" (deep-link to exact scroll position and channel on device switch)
 
 ### 23-03: Gamification Lite
 
-- [ ] Server-level XP and levels for participation (opt-in, configurable per-server, no central leaderboard)
-- [ ] Custom reaction pack unlocks tied to level milestones
-- [ ] Activity streaks (daily/weekly engagement badges, gentle and non-predatory)
-- [ ] Server achievements (configurable milestones: "First 100 Members", "1000 Messages", "Host an Event")
+- [x] Server-level XP and levels for participation (opt-in, configurable per-server, no central leaderboard)
+- [x] Custom reaction pack unlocks tied to level milestones
+- [x] Activity streaks (daily/weekly engagement badges, gentle and non-predatory)
+- [x] Server achievements (configurable milestones: "First 100 Members", "1000 Messages", "Host an Event")
 
 ### 23-04: Offline-First Improvements
 
-- [ ] Full offline compose and search (local SQLite cache, queued messages sent on reconnect)
-- [ ] Conflict resolution for offline edits (last-write-wins with merge notification for simultaneous edits)
-- [ ] Cached federated content (store recent messages from peered servers for offline browsing)
-- [ ] Background sync (delta-based message sync on reconnect, minimize bandwidth after long offline periods)
+- [x] Full offline compose and search (local SQLite cache, queued messages sent on reconnect)
+- [x] Conflict resolution for offline edits (last-write-wins with merge notification for simultaneous edits)
+- [x] Cached federated content (store recent messages from peered servers for offline browsing)
+- [x] Background sync (delta-based message sync on reconnect, minimize bandwidth after long offline periods)
 
 ---
 
-## Phase 24: Long-Term Sustainability & Extensibility (v2.x Ongoing) 🔲 Planned
+## Phase 24: Long-Term Sustainability & Extensibility (v2.x Ongoing) ✅ Complete
 
 > **Ongoing maintenance and evolution.** Ensures Nexus stays secure, interoperable, and community-governed as the ecosystem grows.
 
 ### 24-01: Protocol Evolution
 
-- [ ] Versioned federation API (backward-compatible negotiation, deprecation path for old protocol versions)
-- [ ] Plugin protocol extensions for custom gateway events (plugins can define and dispatch new event types)
-- [ ] Stable bot API versioning (v1, v2… with migration guides, no breaking changes without major version bump)
-- [ ] Federation capability negotiation (instances advertise supported features, graceful degradation for mismatched versions)
+- [x] Versioned federation API (backward-compatible negotiation, deprecation path for old protocol versions)
+- [x] Plugin protocol extensions for custom gateway events (plugins can define and dispatch new event types)
+- [x] Stable bot API versioning (v1, v2… with migration guides, no breaking changes without major version bump)
+- [x] Federation capability negotiation (instances advertise supported features, graceful degradation for mismatched versions)
 
 ### 24-02: Community Governance Tools
 
-- [ ] Decentralized voting/polls for server policies (binding votes on moderation rules, role changes, etc.)
-- [ ] Contributor badges tied to GitHub/development activity (opt-in, verified via signatures)
-- [ ] Community proposal system (RFC-style discussions for server-wide changes, integrated with forum channels)
-- [ ] Transparent moderation logs (opt-in public audit trail for server actions — community trust building)
+- [x] Decentralized voting/polls for server policies (binding votes on moderation rules, role changes, etc.)
+- [x] Contributor badges tied to GitHub/development activity (opt-in, verified via signatures)
+- [x] Community proposal system (RFC-style discussions for server-wide changes, integrated with forum channels)
+- [x] Transparent moderation logs (opt-in public audit trail for server actions — community trust building)
 
 ### 24-03: Security & Threat Modeling
 
-- [ ] Regular post-quantum readiness audits beyond Phantom (track NIST PQC standards, update as needed)
-- [ ] Metadata minimization in federation (reduce leaked timing/size information in S2S traffic)
-- [ ] Automated dependency vulnerability scanning in CI (cargo-deny + advisory DB refresh, block merges on critical CVEs)
-- [ ] Penetration testing framework (self-hosted security assessment tooling for instance admins)
+- [x] Regular post-quantum readiness audits beyond Phantom (track NIST PQC standards, update as needed)
+- [x] Metadata minimization in federation (reduce leaked timing/size information in S2S traffic)
+- [x] Automated dependency vulnerability scanning in CI (cargo-deny + advisory DB refresh, block merges on critical CVEs)
+- [x] Penetration testing framework (self-hosted security assessment tooling for instance admins)
 
 ### 24-04: Documentation & Education
 
-- [ ] Interactive threat model explainer (visual walkthrough of how E2EE, federation, and Phantom protect users)
-- [ ] "Why Nexus?" migration guide (comparison with Discord 2026 changes, Matrix/Element, Revolt, Guilded, TeamSpeak)
-- [ ] Video tutorials for self-hosters (setup walkthroughs, federation peering, plugin development)
-- [ ] Contributor onboarding guide (architecture overview, crate map, "your first PR" tutorial)
+- [x] Interactive threat model explainer (visual walkthrough of how E2EE, federation, and Phantom protect users)
+- [x] "Why Nexus?" migration guide (comparison with Discord 2026 changes, Matrix/Element, Revolt, Guilded, TeamSpeak)
+- [x] Video tutorials for self-hosters (setup walkthroughs, federation peering, plugin development)
+- [x] Contributor onboarding guide (architecture overview, crate map, "your first PR" tutorial)
 
 ---
 

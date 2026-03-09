@@ -1868,4 +1868,189 @@ export const useStore = create<StoreState>((set, get) => ({
       console.error("loadServerPluginInstalls error", e);
     }
   },
+
+  // ─── v1.9 Scalability & Performance Hardening ─────────────────────────
+  serverScalingConfigs: {},
+  loadServerScalingConfigs: async (serverId) => {
+    try {
+      const rows = await invoke<any[]>("list_scaling_configs", { serverId });
+      set((s) => ({ serverScalingConfigs: { ...s.serverScalingConfigs, [serverId]: rows } }));
+    } catch (e) {
+      console.error("loadServerScalingConfigs error", e);
+    }
+  },
+
+  sfuNodes: [],
+  loadSfuNodes: async () => {
+    try {
+      const rows = await invoke<any[]>("list_sfu_nodes");
+      set({ sfuNodes: rows });
+    } catch (e) {
+      console.error("loadSfuNodes error", e);
+    }
+  },
+
+  serverVoiceQualityLogs: {},
+  loadServerVoiceQualityLogs: async (serverId) => {
+    try {
+      const rows = await invoke<any[]>("list_voice_quality_logs", { serverId });
+      set((s) => ({ serverVoiceQualityLogs: { ...s.serverVoiceQualityLogs, [serverId]: rows } }));
+    } catch (e) {
+      console.error("loadServerVoiceQualityLogs error", e);
+    }
+  },
+
+  scalingMetrics: [],
+  loadScalingMetrics: async () => {
+    try {
+      const rows = await invoke<any[]>("list_scaling_metrics");
+      set({ scalingMetrics: rows });
+    } catch (e) {
+      console.error("loadScalingMetrics error", e);
+    }
+  },
+
+  upgradeRecords: [],
+  loadUpgradeRecords: async () => {
+    try {
+      const rows = await invoke<any[]>("list_upgrade_records");
+      set({ upgradeRecords: rows });
+    } catch (e) {
+      console.error("loadUpgradeRecords error", e);
+    }
+  },
+
+  // ─── v2.0 AI & Intelligence Layer ────────────────────────────────────
+  serverAiSuggestions: {},
+  loadServerAiSuggestions: async (serverId) => {
+    try {
+      const rows = await invoke<any[]>("list_ai_suggestions", { serverId });
+      set((s) => ({ serverAiSuggestions: { ...s.serverAiSuggestions, [serverId]: rows } }));
+    } catch (e) {
+      console.error("loadServerAiSuggestions error", e);
+    }
+  },
+
+  serverRaidDetections: {},
+  loadServerRaidDetections: async (serverId) => {
+    try {
+      const rows = await invoke<any[]>("list_raid_detections", { serverId });
+      set((s) => ({ serverRaidDetections: { ...s.serverRaidDetections, [serverId]: rows } }));
+    } catch (e) {
+      console.error("loadServerRaidDetections error", e);
+    }
+  },
+
+  aiConsent: [],
+  loadAiConsent: async () => {
+    try {
+      const rows = await invoke<any[]>("list_ai_consent");
+      set({ aiConsent: rows });
+    } catch (e) {
+      console.error("loadAiConsent error", e);
+    }
+  },
+
+  // ─── v2.1 Voice & Real-Time Collaboration ────────────────────────────
+  virtualBackgrounds: [],
+  loadVirtualBackgrounds: async () => {
+    try {
+      const rows = await invoke<any[]>("list_virtual_backgrounds");
+      set({ virtualBackgrounds: rows });
+    } catch (e) {
+      console.error("loadVirtualBackgrounds error", e);
+    }
+  },
+
+  serverLiveStreams: {},
+  loadServerLiveStreams: async (serverId) => {
+    try {
+      const rows = await invoke<any[]>("list_live_streams", { serverId });
+      set((s) => ({ serverLiveStreams: { ...s.serverLiveStreams, [serverId]: rows } }));
+    } catch (e) {
+      console.error("loadServerLiveStreams error", e);
+    }
+  },
+
+  voicePresets: [],
+  loadVoicePresets: async () => {
+    try {
+      const rows = await invoke<any[]>("list_voice_presets");
+      set({ voicePresets: rows });
+    } catch (e) {
+      console.error("loadVoicePresets error", e);
+    }
+  },
+
+  // ─── v2.2 User Growth & Retention ────────────────────────────────────
+  recommendations: [],
+  loadRecommendations: async () => {
+    try {
+      const rows = await invoke<any[]>("list_recommendations");
+      set({ recommendations: rows });
+    } catch (e) {
+      console.error("loadRecommendations error", e);
+    }
+  },
+
+  deviceSessions: [],
+  loadDeviceSessions: async () => {
+    try {
+      const rows = await invoke<any[]>("list_device_sessions");
+      set({ deviceSessions: rows });
+    } catch (e) {
+      console.error("loadDeviceSessions error", e);
+    }
+  },
+
+  serverAchievements: {},
+  loadServerAchievements: async (serverId) => {
+    try {
+      const rows = await invoke<any[]>("list_achievements", { serverId });
+      set((s) => ({ serverAchievements: { ...s.serverAchievements, [serverId]: rows } }));
+    } catch (e) {
+      console.error("loadServerAchievements error", e);
+    }
+  },
+
+  xpLeaderboard: {},
+  loadXpLeaderboard: async (serverId) => {
+    try {
+      const rows = await invoke<any[]>("list_xp_leaderboard", { serverId });
+      set((s) => ({ xpLeaderboard: { ...s.xpLeaderboard, [serverId]: rows } }));
+    } catch (e) {
+      console.error("loadXpLeaderboard error", e);
+    }
+  },
+
+  // ─── v2.x Sustainability & Extensibility ─────────────────────────────
+  serverGovernancePolls: {},
+  loadServerGovernancePolls: async (serverId) => {
+    try {
+      const rows = await invoke<any[]>("list_governance_polls", { serverId });
+      set((s) => ({ serverGovernancePolls: { ...s.serverGovernancePolls, [serverId]: rows } }));
+    } catch (e) {
+      console.error("loadServerGovernancePolls error", e);
+    }
+  },
+
+  serverGovernanceProposals: {},
+  loadServerGovernanceProposals: async (serverId) => {
+    try {
+      const rows = await invoke<any[]>("list_governance_proposals", { serverId });
+      set((s) => ({ serverGovernanceProposals: { ...s.serverGovernanceProposals, [serverId]: rows } }));
+    } catch (e) {
+      console.error("loadServerGovernanceProposals error", e);
+    }
+  },
+
+  migrationGuides: [],
+  loadMigrationGuides: async () => {
+    try {
+      const rows = await invoke<any[]>("list_migration_guides");
+      set({ migrationGuides: rows });
+    } catch (e) {
+      console.error("loadMigrationGuides error", e);
+    }
+  },
 }));

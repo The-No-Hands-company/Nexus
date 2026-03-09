@@ -55,3 +55,23 @@ pub use accessibility::*;
 
 // v1.8 Ecosystem & Onboarding
 pub use ecosystem::*;
+
+// v1.9 Scalability & Performance Hardening
+pub mod scalability;
+pub use scalability::*;
+
+// v2.0 AI & Intelligence Layer
+pub mod ai_intelligence;
+pub use ai_intelligence::*;
+
+// v2.1 Voice & Real-Time Collaboration
+pub mod voice_collab;
+pub use voice_collab::*;
+
+// v2.2 User Growth & Retention
+pub mod growth;
+pub use growth::*;
+
+// v2.x Sustainability & Extensibility
+pub mod sustainability;
+pub use sustainability::*;

@@ -1789,6 +1789,238 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
       );
     }
 
+    // ── v1.9 Scalability & Performance Hardening ─────────────────────────
+    case "list_scaling_configs": {
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/scaling-configs`);
+    }
+    case "upsert_scaling_config": {
+      return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/scaling-configs`, args.body);
+    }
+    case "get_scaling_config": {
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/scaling-configs/${args.configId}`);
+    }
+    case "list_sfu_nodes": {
+      return apiFetch<T>("GET", `/api/v1/admin/sfu-nodes`);
+    }
+    case "upsert_sfu_node": {
+      return apiFetch<T>("POST", `/api/v1/admin/sfu-nodes`, args.body);
+    }
+    case "list_federation_batches": {
+      return apiFetch<T>("GET", `/api/v1/admin/federation-batches`);
+    }
+    case "list_federation_routes": {
+      return apiFetch<T>("GET", `/api/v1/admin/federation-routes`);
+    }
+    case "list_voice_quality_logs": {
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/voice-quality-logs`);
+    }
+    case "create_voice_quality_log": {
+      return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/voice-quality-logs`, args.body);
+    }
+    case "get_prune_rule": {
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/prune-rules`);
+    }
+    case "upsert_prune_rule": {
+      return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/prune-rules`, args.body);
+    }
+    case "list_slow_mode_overrides": {
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/slow-mode-overrides`);
+    }
+    case "upsert_slow_mode_override": {
+      return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/slow-mode-overrides`, args.body);
+    }
+    case "list_scaling_metrics": {
+      return apiFetch<T>("GET", `/api/v1/admin/scaling-metrics`);
+    }
+    case "record_scaling_metric": {
+      return apiFetch<T>("POST", `/api/v1/admin/scaling-metrics`, args.body);
+    }
+    case "list_upgrade_records": {
+      return apiFetch<T>("GET", `/api/v1/admin/upgrade-records`);
+    }
+    case "create_upgrade_record": {
+      return apiFetch<T>("POST", `/api/v1/admin/upgrade-records`, args.body);
+    }
+
+    // ── v2.0 AI & Intelligence Layer ────────────────────────────────────
+    case "list_ai_suggestions": {
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/ai-suggestions`);
+    }
+    case "create_ai_suggestion": {
+      return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/ai-suggestions`, args.body);
+    }
+    case "get_thread_summary": {
+      return apiFetch<T>("GET", `/api/v1/channels/${args.channelId}/thread-summary`);
+    }
+    case "upsert_thread_summary": {
+      return apiFetch<T>("POST", `/api/v1/channels/${args.channelId}/thread-summary`, args.body);
+    }
+    case "list_flagged_toxicity": {
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/toxicity-flags`);
+    }
+    case "list_raid_detections": {
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/raids`);
+    }
+    case "list_voice_transcripts": {
+      return apiFetch<T>("GET", `/api/v1/channels/${args.channelId}/voice-transcripts`);
+    }
+    case "list_ai_consent": {
+      return apiFetch<T>("GET", `/api/v1/users/@me/ai-consent`);
+    }
+    case "upsert_ai_consent": {
+      return apiFetch<T>("POST", `/api/v1/users/@me/ai-consent`, args.body);
+    }
+    case "list_ai_audit_log": {
+      return apiFetch<T>("GET", `/api/v1/admin/ai-audit-log`);
+    }
+
+    // ── v2.1 Voice & Real-Time Collaboration ────────────────────────────
+    case "get_video_layout": {
+      return apiFetch<T>("GET", `/api/v1/channels/${args.channelId}/video-layout`);
+    }
+    case "upsert_video_layout": {
+      return apiFetch<T>("POST", `/api/v1/channels/${args.channelId}/video-layout`, args.body);
+    }
+    case "list_virtual_backgrounds": {
+      return apiFetch<T>("GET", `/api/v1/users/@me/virtual-backgrounds`);
+    }
+    case "create_virtual_background": {
+      return apiFetch<T>("POST", `/api/v1/users/@me/virtual-backgrounds`, args.body);
+    }
+    case "list_live_streams": {
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/live-streams`);
+    }
+    case "create_live_stream": {
+      return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/live-streams`, args.body);
+    }
+    case "list_breakout_rooms": {
+      return apiFetch<T>("GET", `/api/v1/channels/${args.channelId}/breakout-rooms`);
+    }
+    case "create_breakout_room": {
+      return apiFetch<T>("POST", `/api/v1/channels/${args.channelId}/breakout-rooms`, args.body);
+    }
+    case "list_collab_sessions": {
+      return apiFetch<T>("GET", `/api/v1/channels/${args.channelId}/collab-sessions`);
+    }
+    case "create_collab_session": {
+      return apiFetch<T>("POST", `/api/v1/channels/${args.channelId}/collab-sessions`, args.body);
+    }
+    case "get_spatial_audio": {
+      return apiFetch<T>("GET", `/api/v1/channels/${args.channelId}/spatial-audio`);
+    }
+    case "upsert_spatial_audio": {
+      return apiFetch<T>("POST", `/api/v1/channels/${args.channelId}/spatial-audio`, args.body);
+    }
+    case "list_voice_presets": {
+      return apiFetch<T>("GET", `/api/v1/voice-presets`);
+    }
+    case "get_voice_preset": {
+      return apiFetch<T>("GET", `/api/v1/voice-presets/${args.presetId}`);
+    }
+
+    // ── v2.2 User Growth & Retention ────────────────────────────────────
+    case "list_recommendations": {
+      return apiFetch<T>("GET", `/api/v1/users/@me/recommendations`);
+    }
+    case "dismiss_recommendation": {
+      return apiFetch<T>("GET", `/api/v1/users/@me/recommendations/${args.recId}/dismiss`);
+    }
+    case "get_onboarding_flow": {
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/onboarding-flow`);
+    }
+    case "upsert_onboarding_flow": {
+      return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/onboarding-flow`, args.body);
+    }
+    case "list_device_sessions": {
+      return apiFetch<T>("GET", `/api/v1/users/@me/device-sessions`);
+    }
+    case "upsert_device_session": {
+      return apiFetch<T>("POST", `/api/v1/users/@me/device-sessions`, args.body);
+    }
+    case "get_gamification_config": {
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/gamification`);
+    }
+    case "upsert_gamification_config": {
+      return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/gamification`, args.body);
+    }
+    case "get_user_xp": {
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/xp`);
+    }
+    case "add_xp": {
+      return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/xp`, args.body);
+    }
+    case "list_xp_leaderboard": {
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/xp/leaderboard`);
+    }
+    case "list_achievements": {
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/achievements`);
+    }
+    case "create_achievement": {
+      return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/achievements`, args.body);
+    }
+    case "award_achievement": {
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/achievements/${args.achievementId}/award`);
+    }
+    case "upsert_sync_cursor": {
+      return apiFetch<T>("POST", `/api/v1/users/@me/sync-cursors`, args.body);
+    }
+    case "enqueue_offline": {
+      return apiFetch<T>("POST", `/api/v1/users/@me/offline-queue`, args.body);
+    }
+    case "list_pending_offline": {
+      return apiFetch<T>("GET", `/api/v1/users/@me/offline-queue`);
+    }
+
+    // ── v2.x Sustainability & Extensibility ─────────────────────────────
+    case "list_protocol_versions": {
+      return apiFetch<T>("GET", `/api/v1/admin/protocol-versions?protocol=${args.protocol}`);
+    }
+    case "upsert_protocol_version": {
+      return apiFetch<T>("POST", `/api/v1/admin/protocol-versions`, args.body);
+    }
+    case "list_governance_polls": {
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/governance/polls`);
+    }
+    case "create_governance_poll": {
+      return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/governance/polls`, args.body);
+    }
+    case "cast_governance_vote": {
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/governance/polls/${args.pollId}/vote?option_index=${args.optionIndex}`);
+    }
+    case "list_governance_proposals": {
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/governance/proposals`);
+    }
+    case "create_governance_proposal": {
+      return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/governance/proposals`, args.body);
+    }
+    case "list_contributor_badges": {
+      return apiFetch<T>("GET", `/api/v1/users/${args.userId}/contributor-badges`);
+    }
+    case "award_contributor_badge": {
+      return apiFetch<T>("POST", `/api/v1/users/${args.userId}/contributor-badges/award`, args.body);
+    }
+    case "list_security_audits": {
+      return apiFetch<T>("GET", `/api/v1/admin/security-audits`);
+    }
+    case "create_security_audit": {
+      return apiFetch<T>("POST", `/api/v1/admin/security-audits`, args.body);
+    }
+    case "list_vulnerability_records": {
+      return apiFetch<T>("GET", `/api/v1/admin/vulnerability-records`);
+    }
+    case "create_vulnerability_record": {
+      return apiFetch<T>("POST", `/api/v1/admin/vulnerability-records`, args.body);
+    }
+    case "list_tutorial_progress": {
+      return apiFetch<T>("GET", `/api/v1/users/@me/tutorial-progress`);
+    }
+    case "upsert_tutorial_progress": {
+      return apiFetch<T>("POST", `/api/v1/users/@me/tutorial-progress`, args.body);
+    }
+    case "list_migration_guides": {
+      return apiFetch<T>("GET", `/api/v1/migration-guides`);
+    }
+
     default:
       throw new Error(`[browser] Unhandled invoke command: "${cmd}"`);
   }

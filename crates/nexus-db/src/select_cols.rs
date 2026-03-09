@@ -300,3 +300,236 @@ pub const PLUGIN_INSTALL_COLS: &str =
     "id::text AS id, plugin_id::text AS plugin_id, server_id::text AS server_id, \
      installed_by::text AS installed_by, version, is_enabled, \
      created_at::text AS created_at";
+
+// ── v1.9 Scalability & Performance Hardening ──────────────────────────────
+
+pub const SCALING_CONFIG_COLS: &str =
+    "id::text AS id, instance_id, region, shard_strategy, redis_mode, \
+     gateway_weight, max_connections, metadata, is_active, \
+     created_at::text AS created_at, updated_at::text AS updated_at";
+
+pub const SFU_NODE_COLS: &str =
+    "id::text AS id, instance_id, region, hostname, port, capacity, current_load, \
+     status, metadata, last_heartbeat::text AS last_heartbeat, \
+     created_at::text AS created_at";
+
+pub const FEDERATION_EVENT_BATCH_COLS: &str =
+    "id::text AS id, target_instance, events, event_count, status, retry_count, \
+     created_at::text AS created_at, sent_at::text AS sent_at";
+
+pub const FEDERATION_ROUTE_COLS: &str =
+    "id::text AS id, source_instance, target_instance, latency_ms, is_websocket, \
+     priority, status, last_probed::text AS last_probed, \
+     created_at::text AS created_at";
+
+pub const FEDERATION_DEDUP_COLS: &str =
+    "event_id, source_instance, received_at::text AS received_at";
+
+pub const VOICE_QUALITY_LOG_COLS: &str =
+    "id::text AS id, channel_id::text AS channel_id, user_id::text AS user_id, \
+     sfu_node_id::text AS sfu_node_id, bitrate, packet_loss, jitter_ms, latency_ms, \
+     fec_enabled, quality_score, created_at::text AS created_at";
+
+pub const MEMBER_PRUNE_RULE_COLS: &str =
+    "id::text AS id, server_id::text AS server_id, inactivity_days, grace_period_days, \
+     exclude_roles, notify_before, is_enabled, last_run_at::text AS last_run_at, \
+     pruned_count, created_at::text AS created_at, updated_at::text AS updated_at";
+
+pub const SLOW_MODE_OVERRIDE_COLS: &str =
+    "id::text AS id, channel_id::text AS channel_id, role_id::text AS role_id, \
+     cooldown_secs, escalation_mult, created_at::text AS created_at";
+
+pub const SCALING_METRIC_COLS: &str =
+    "id::text AS id, instance_id, metric_name, metric_value, unit, tags, \
+     recorded_at::text AS recorded_at";
+
+pub const UPGRADE_RECORD_COLS: &str =
+    "id::text AS id, from_version, to_version, status, \
+     started_at::text AS started_at, completed_at::text AS completed_at, \
+     notes, metadata";
+
+// ── v2.0 AI & Intelligence Layer ──────────────────────────────────────────
+
+pub const SEARCH_EMBEDDING_COLS: &str =
+    "id::text AS id, message_id::text AS message_id, channel_id::text AS channel_id, \
+     embedding, model_name, model_version, created_at::text AS created_at";
+
+pub const SEARCH_QUERY_COLS: &str =
+    "id::text AS id, user_id::text AS user_id, raw_query, parsed_filters, \
+     result_count, latency_ms, created_at::text AS created_at";
+
+pub const AI_SUGGESTION_COLS: &str =
+    "id::text AS id, user_id::text AS user_id, channel_id::text AS channel_id, \
+     suggestion_type, content, context_ids, model_name, accepted, \
+     created_at::text AS created_at";
+
+pub const THREAD_SUMMARY_COLS: &str =
+    "id::text AS id, thread_id::text AS thread_id, channel_id::text AS channel_id, \
+     summary, message_count, model_name, model_version, \
+     created_at::text AS created_at, updated_at::text AS updated_at";
+
+pub const TOXICITY_SCORE_COLS: &str =
+    "id::text AS id, message_id::text AS message_id, server_id::text AS server_id, \
+     score, categories, model_name, flagged, reviewed, \
+     created_at::text AS created_at";
+
+pub const RAID_DETECTION_COLS: &str =
+    "id::text AS id, server_id::text AS server_id, detection_type, severity, \
+     details, auto_actions, resolved, detected_at::text AS detected_at, \
+     resolved_at::text AS resolved_at";
+
+pub const VOICE_TRANSCRIPT_COLS: &str =
+    "id::text AS id, channel_id::text AS channel_id, session_id::text AS session_id, \
+     speaker_id::text AS speaker_id, segment_start, segment_end, text, language, \
+     confidence, created_at::text AS created_at";
+
+pub const VOICE_COMMAND_COLS: &str =
+    "id::text AS id, user_id::text AS user_id, channel_id::text AS channel_id, \
+     command_text, action, confidence, executed, created_at::text AS created_at";
+
+pub const AI_CONSENT_COLS: &str =
+    "user_id::text AS user_id, server_id::text AS server_id, feature, enabled, \
+     updated_at::text AS updated_at";
+
+pub const AI_AUDIT_ENTRY_COLS: &str =
+    "id::text AS id, server_id::text AS server_id, feature, action, \
+     actor_id::text AS actor_id, details, model_name, model_version, \
+     created_at::text AS created_at";
+
+// ── v2.1 Voice & Real-Time Collaboration ──────────────────────────────────
+
+pub const VIDEO_LAYOUT_COLS: &str =
+    "id::text AS id, channel_id::text AS channel_id, user_id::text AS user_id, \
+     layout_type, pinned_users, custom_positions, pip_enabled, \
+     created_at::text AS created_at, updated_at::text AS updated_at";
+
+pub const VIRTUAL_BACKGROUND_COLS: &str =
+    "id::text AS id, user_id::text AS user_id, name, bg_type, image_url, \
+     is_default, created_at::text AS created_at";
+
+pub const LIVE_STREAM_COLS: &str =
+    "id::text AS id, channel_id::text AS channel_id, streamer_id::text AS streamer_id, \
+     title, status, viewer_count, max_viewers, is_e2ee, recording_url, hls_url, \
+     started_at::text AS started_at, ended_at::text AS ended_at";
+
+pub const STREAM_VIEWER_COLS: &str =
+    "stream_id::text AS stream_id, user_id::text AS user_id, \
+     joined_at::text AS joined_at, left_at::text AS left_at";
+
+pub const BREAKOUT_ROOM_COLS: &str =
+    "id::text AS id, parent_channel::text AS parent_channel, name, capacity, status, \
+     created_by::text AS created_by, created_at::text AS created_at, \
+     closed_at::text AS closed_at";
+
+pub const COLLAB_SESSION_COLS: &str =
+    "id::text AS id, channel_id::text AS channel_id, session_type, \
+     document_id::text AS document_id, participants, is_active, \
+     created_at::text AS created_at, ended_at::text AS ended_at";
+
+pub const SPATIAL_AUDIO_CONFIG_COLS: &str =
+    "id::text AS id, channel_id::text AS channel_id, preset, \
+     room_width, room_depth, room_height, positions, hrtf_enabled, ambisonics_order, \
+     created_at::text AS created_at, updated_at::text AS updated_at";
+
+pub const VOICE_PRESET_COLS: &str =
+    "id::text AS id, name, description, target_latency_ms, jitter_buffer_ms, \
+     fec_level, dtx_enabled, normalization, is_builtin, \
+     created_at::text AS created_at";
+
+// ── v2.2 User Growth & Retention ──────────────────────────────────────────
+
+pub const SERVER_RECOMMENDATION_COLS: &str =
+    "id::text AS id, user_id::text AS user_id, server_id::text AS server_id, \
+     score, reason, dismissed, joined, created_at::text AS created_at";
+
+pub const ONBOARDING_FLOW_COLS: &str =
+    "id::text AS id, server_id::text AS server_id, steps, adaptive, skip_completed, \
+     is_active, created_at::text AS created_at, updated_at::text AS updated_at";
+
+pub const DEVICE_SESSION_COLS: &str =
+    "id::text AS id, user_id::text AS user_id, device_id, device_type, \
+     last_channel_id::text AS last_channel_id, scroll_position, is_active, \
+     last_seen_at::text AS last_seen_at, created_at::text AS created_at";
+
+pub const CLIPBOARD_SYNC_COLS: &str =
+    "id::text AS id, user_id::text AS user_id, source_device, content_type, \
+     encrypted_data, expires_at::text AS expires_at, created_at::text AS created_at";
+
+pub const USER_XP_COLS: &str =
+    "user_id::text AS user_id, server_id::text AS server_id, xp, level, \
+     last_xp_at::text AS last_xp_at";
+
+pub const GAMIFICATION_CONFIG_COLS: &str =
+    "server_id::text AS server_id, enabled, xp_per_message, xp_per_reaction, \
+     xp_per_voice_min, level_formula, streak_enabled, \
+     created_at::text AS created_at, updated_at::text AS updated_at";
+
+pub const ACHIEVEMENT_COLS: &str =
+    "id::text AS id, server_id::text AS server_id, name, description, icon_url, \
+     criteria, reward_xp, created_at::text AS created_at";
+
+pub const USER_ACHIEVEMENT_COLS: &str =
+    "user_id::text AS user_id, achievement_id::text AS achievement_id, \
+     earned_at::text AS earned_at";
+
+pub const ACTIVITY_STREAK_COLS: &str =
+    "user_id::text AS user_id, server_id::text AS server_id, \
+     current_streak, longest_streak, last_active_date::text AS last_active_date";
+
+pub const SYNC_CURSOR_COLS: &str =
+    "user_id::text AS user_id, device_id, channel_id::text AS channel_id, \
+     last_message_id::text AS last_message_id, last_synced_at::text AS last_synced_at";
+
+pub const OFFLINE_QUEUE_ITEM_COLS: &str =
+    "id::text AS id, user_id::text AS user_id, device_id, action_type, payload, \
+     status, conflict_data, created_at::text AS created_at, synced_at::text AS synced_at";
+
+// ── v2.x Sustainability & Extensibility ───────────────────────────────────
+
+pub const PROTOCOL_VERSION_COLS: &str =
+    "id::text AS id, protocol, version, status, capabilities, \
+     deprecation_date::text AS deprecation_date, sunset_date::text AS sunset_date, \
+     migration_guide, created_at::text AS created_at";
+
+pub const CAPABILITY_NEGOTIATION_COLS: &str =
+    "id::text AS id, local_instance, remote_instance, local_caps, remote_caps, \
+     agreed_caps, protocol_version, negotiated_at::text AS negotiated_at";
+
+pub const GOVERNANCE_POLL_COLS: &str =
+    "id::text AS id, server_id::text AS server_id, title, description, poll_type, \
+     options, min_participation, allow_multiple, anonymous, status, \
+     created_by::text AS created_by, opens_at::text AS opens_at, \
+     closes_at::text AS closes_at, created_at::text AS created_at";
+
+pub const POLL_VOTE_COLS: &str =
+    "poll_id::text AS poll_id, user_id::text AS user_id, option_index, \
+     voted_at::text AS voted_at";
+
+pub const GOVERNANCE_PROPOSAL_COLS: &str =
+    "id::text AS id, server_id::text AS server_id, title, body, status, \
+     author_id::text AS author_id, discussion_channel::text AS discussion_channel, \
+     poll_id::text AS poll_id, created_at::text AS created_at, \
+     updated_at::text AS updated_at";
+
+pub const CONTRIBUTOR_BADGE_COLS: &str =
+    "id::text AS id, user_id::text AS user_id, badge_type, source, verified, \
+     metadata, awarded_at::text AS awarded_at";
+
+pub const SECURITY_AUDIT_COLS: &str =
+    "id::text AS id, audit_type, status, findings, severity_summary, auditor, \
+     started_at::text AS started_at, completed_at::text AS completed_at, \
+     created_at::text AS created_at";
+
+pub const VULNERABILITY_RECORD_COLS: &str =
+    "id::text AS id, audit_id::text AS audit_id, cve_id, package_name, severity, \
+     description, remediation, status, discovered_at::text AS discovered_at, \
+     resolved_at::text AS resolved_at";
+
+pub const TUTORIAL_PROGRESS_COLS: &str =
+    "user_id::text AS user_id, tutorial_id, completed_steps, completed, \
+     started_at::text AS started_at, completed_at::text AS completed_at";
+
+pub const MIGRATION_GUIDE_COLS: &str =
+    "id::text AS id, from_platform, title, content, version, is_published, \
+     author_id::text AS author_id, created_at::text AS created_at, \
+     updated_at::text AS updated_at";

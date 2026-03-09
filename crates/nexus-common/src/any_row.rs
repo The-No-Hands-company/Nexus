@@ -37,6 +37,29 @@ use crate::models::{
         BulkInvitation, ImportJob, MarketplacePlugin, OnboardingProgress,
         PluginInstall, PluginReview, ServerAnalyticsSnapshot, ServerTemplate,
     },
+    scalability::{
+        ScalingConfig, SfuNode, FederationEventBatch, FederationRoute,
+        FederationDedupEntry, VoiceQualityLog, MemberPruneRule, SlowModeOverride,
+        ScalingMetric, UpgradeRecord,
+    },
+    ai_intelligence::{
+        SearchEmbedding, SearchQuery, AiSuggestion, ThreadSummary, ToxicityScore,
+        RaidDetection, VoiceTranscript, VoiceCommand, AiConsent, AiAuditEntry,
+    },
+    voice_collab::{
+        VideoLayout, VirtualBackground, LiveStream, StreamViewer, BreakoutRoom,
+        CollabSession, SpatialAudioConfig, VoicePreset,
+    },
+    growth::{
+        ServerRecommendation, OnboardingFlow, DeviceSession, ClipboardSync, UserXp,
+        GamificationConfig, Achievement, UserAchievement, ActivityStreak,
+        SyncCursor, OfflineQueueItem,
+    },
+    sustainability::{
+        ProtocolVersion, CapabilityNegotiation, GovernancePoll, PollVote,
+        GovernanceProposal, ContributorBadge, SecurityAudit, VulnerabilityRecord,
+        TutorialProgress, MigrationGuide,
+    },
     relationship::{Relationship, RelationshipStatus},
     rich::{AttachmentRow, ServerEmojiRow, ThreadRow},
     role::Role,
@@ -1071,6 +1094,871 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for PluginInstall {
             version: row.try_get("version")?,
             is_enabled: row.try_get("is_enabled").unwrap_or(true),
             created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// v1.9 Scalability & Performance Hardening
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── ScalingConfig ─────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for ScalingConfig {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(ScalingConfig {
+            id: uuid(row, "id")?,
+            instance_id: row.try_get("instance_id")?,
+            region: row.try_get("region")?,
+            shard_strategy: row.try_get("shard_strategy")?,
+            redis_mode: row.try_get("redis_mode")?,
+            gateway_weight: row.try_get("gateway_weight")?,
+            max_connections: row.try_get("max_connections")?,
+            metadata: json(row, "metadata")?,
+            is_active: row.try_get("is_active").unwrap_or(true),
+            created_at: dt(row, "created_at")?,
+            updated_at: dt(row, "updated_at")?,
+        })
+    }
+}
+
+// ── SfuNode ───────────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for SfuNode {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(SfuNode {
+            id: uuid(row, "id")?,
+            instance_id: row.try_get("instance_id")?,
+            region: row.try_get("region")?,
+            hostname: row.try_get("hostname")?,
+            port: row.try_get("port")?,
+            capacity: row.try_get("capacity")?,
+            current_load: row.try_get("current_load")?,
+            status: row.try_get("status")?,
+            metadata: json(row, "metadata")?,
+            last_heartbeat: dt(row, "last_heartbeat")?,
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── FederationEventBatch ──────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for FederationEventBatch {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(FederationEventBatch {
+            id: uuid(row, "id")?,
+            target_instance: row.try_get("target_instance")?,
+            events: json(row, "events")?,
+            event_count: row.try_get("event_count")?,
+            status: row.try_get("status")?,
+            retry_count: row.try_get("retry_count")?,
+            created_at: dt(row, "created_at")?,
+            sent_at: opt_dt(row, "sent_at")?,
+        })
+    }
+}
+
+// ── FederationRoute ───────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for FederationRoute {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(FederationRoute {
+            id: uuid(row, "id")?,
+            source_instance: row.try_get("source_instance")?,
+            target_instance: row.try_get("target_instance")?,
+            latency_ms: row.try_get("latency_ms")?,
+            is_websocket: row.try_get("is_websocket").unwrap_or(false),
+            priority: row.try_get("priority")?,
+            status: row.try_get("status")?,
+            last_probed: dt(row, "last_probed")?,
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── FederationDedupEntry ──────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for FederationDedupEntry {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(FederationDedupEntry {
+            event_id: row.try_get("event_id")?,
+            source_instance: row.try_get("source_instance")?,
+            received_at: dt(row, "received_at")?,
+        })
+    }
+}
+
+// ── VoiceQualityLog ───────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for VoiceQualityLog {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(VoiceQualityLog {
+            id: uuid(row, "id")?,
+            channel_id: uuid(row, "channel_id")?,
+            user_id: uuid(row, "user_id")?,
+            sfu_node_id: opt_uuid(row, "sfu_node_id")?,
+            bitrate: row.try_get("bitrate")?,
+            packet_loss: row.try_get::<f64, _>("packet_loss").map(|v| v as f32).unwrap_or(0.0),
+            jitter_ms: row.try_get::<f64, _>("jitter_ms").map(|v| v as f32).unwrap_or(0.0),
+            latency_ms: row.try_get("latency_ms")?,
+            fec_enabled: row.try_get("fec_enabled").unwrap_or(false),
+            quality_score: row.try_get::<f64, _>("quality_score").map(|v| v as f32).unwrap_or(1.0),
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── MemberPruneRule ───────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for MemberPruneRule {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(MemberPruneRule {
+            id: uuid(row, "id")?,
+            server_id: uuid(row, "server_id")?,
+            inactivity_days: row.try_get("inactivity_days")?,
+            grace_period_days: row.try_get("grace_period_days")?,
+            exclude_roles: json(row, "exclude_roles")?,
+            notify_before: row.try_get("notify_before").unwrap_or(true),
+            is_enabled: row.try_get("is_enabled").unwrap_or(false),
+            last_run_at: opt_dt(row, "last_run_at")?,
+            pruned_count: row.try_get("pruned_count")?,
+            created_at: dt(row, "created_at")?,
+            updated_at: dt(row, "updated_at")?,
+        })
+    }
+}
+
+// ── SlowModeOverride ──────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for SlowModeOverride {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(SlowModeOverride {
+            id: uuid(row, "id")?,
+            channel_id: uuid(row, "channel_id")?,
+            role_id: opt_uuid(row, "role_id")?,
+            cooldown_secs: row.try_get("cooldown_secs")?,
+            escalation_mult: row.try_get::<f64, _>("escalation_mult").map(|v| v as f32).unwrap_or(1.0),
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── ScalingMetric ─────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for ScalingMetric {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(ScalingMetric {
+            id: uuid(row, "id")?,
+            instance_id: row.try_get("instance_id")?,
+            metric_name: row.try_get("metric_name")?,
+            metric_value: row.try_get::<f64, _>("metric_value").map(|v| v as f32).unwrap_or(0.0),
+            unit: row.try_get("unit")?,
+            tags: json(row, "tags")?,
+            recorded_at: dt(row, "recorded_at")?,
+        })
+    }
+}
+
+// ── UpgradeRecord ─────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for UpgradeRecord {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(UpgradeRecord {
+            id: uuid(row, "id")?,
+            from_version: row.try_get("from_version")?,
+            to_version: row.try_get("to_version")?,
+            status: row.try_get("status")?,
+            started_at: dt(row, "started_at")?,
+            completed_at: opt_dt(row, "completed_at")?,
+            notes: row.try_get("notes").ok(),
+            metadata: json(row, "metadata")?,
+        })
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// v2.0 AI & Intelligence Layer
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── SearchEmbedding ───────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for SearchEmbedding {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(SearchEmbedding {
+            id: uuid(row, "id")?,
+            message_id: uuid(row, "message_id")?,
+            channel_id: uuid(row, "channel_id")?,
+            embedding: row.try_get("embedding").ok(),
+            model_name: row.try_get("model_name")?,
+            model_version: row.try_get("model_version")?,
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── SearchQuery ───────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for SearchQuery {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(SearchQuery {
+            id: uuid(row, "id")?,
+            user_id: uuid(row, "user_id")?,
+            raw_query: row.try_get("raw_query")?,
+            parsed_filters: json(row, "parsed_filters")?,
+            result_count: row.try_get("result_count")?,
+            latency_ms: row.try_get("latency_ms")?,
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── AiSuggestion ──────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for AiSuggestion {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(AiSuggestion {
+            id: uuid(row, "id")?,
+            user_id: uuid(row, "user_id")?,
+            channel_id: uuid(row, "channel_id")?,
+            suggestion_type: row.try_get("suggestion_type")?,
+            content: row.try_get("content")?,
+            context_ids: json(row, "context_ids")?,
+            model_name: row.try_get("model_name")?,
+            accepted: row.try_get("accepted").ok(),
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── ThreadSummary ─────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for ThreadSummary {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(ThreadSummary {
+            id: uuid(row, "id")?,
+            thread_id: uuid(row, "thread_id")?,
+            channel_id: uuid(row, "channel_id")?,
+            summary: row.try_get("summary")?,
+            message_count: row.try_get("message_count")?,
+            model_name: row.try_get("model_name")?,
+            model_version: row.try_get("model_version")?,
+            created_at: dt(row, "created_at")?,
+            updated_at: dt(row, "updated_at")?,
+        })
+    }
+}
+
+// ── ToxicityScore ─────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for ToxicityScore {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(ToxicityScore {
+            id: uuid(row, "id")?,
+            message_id: uuid(row, "message_id")?,
+            server_id: uuid(row, "server_id")?,
+            score: row.try_get::<f64, _>("score").map(|v| v as f32).unwrap_or(0.0),
+            categories: json(row, "categories")?,
+            model_name: row.try_get("model_name")?,
+            flagged: row.try_get("flagged").unwrap_or(false),
+            reviewed: row.try_get("reviewed").unwrap_or(false),
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── RaidDetection ─────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for RaidDetection {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(RaidDetection {
+            id: uuid(row, "id")?,
+            server_id: uuid(row, "server_id")?,
+            detection_type: row.try_get("detection_type")?,
+            severity: row.try_get("severity")?,
+            details: json(row, "details")?,
+            auto_actions: json(row, "auto_actions")?,
+            resolved: row.try_get("resolved").unwrap_or(false),
+            detected_at: dt(row, "detected_at")?,
+            resolved_at: opt_dt(row, "resolved_at")?,
+        })
+    }
+}
+
+// ── VoiceTranscript ───────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for VoiceTranscript {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(VoiceTranscript {
+            id: uuid(row, "id")?,
+            channel_id: uuid(row, "channel_id")?,
+            session_id: opt_uuid(row, "session_id")?,
+            speaker_id: opt_uuid(row, "speaker_id")?,
+            segment_start: row.try_get::<f64, _>("segment_start").map(|v| v as f32).unwrap_or(0.0),
+            segment_end: row.try_get::<f64, _>("segment_end").map(|v| v as f32).unwrap_or(0.0),
+            text: row.try_get("text")?,
+            language: row.try_get("language")?,
+            confidence: row.try_get::<f64, _>("confidence").map(|v| v as f32).unwrap_or(0.0),
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── VoiceCommand ──────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for VoiceCommand {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(VoiceCommand {
+            id: uuid(row, "id")?,
+            user_id: uuid(row, "user_id")?,
+            channel_id: uuid(row, "channel_id")?,
+            command_text: row.try_get("command_text")?,
+            action: row.try_get("action")?,
+            confidence: row.try_get::<f64, _>("confidence").map(|v| v as f32).unwrap_or(0.0),
+            executed: row.try_get("executed").unwrap_or(false),
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── AiConsent ─────────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for AiConsent {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(AiConsent {
+            user_id: uuid(row, "user_id")?,
+            server_id: uuid(row, "server_id")?,
+            feature: row.try_get("feature")?,
+            enabled: row.try_get("enabled").unwrap_or(false),
+            updated_at: dt(row, "updated_at")?,
+        })
+    }
+}
+
+// ── AiAuditEntry ──────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for AiAuditEntry {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(AiAuditEntry {
+            id: uuid(row, "id")?,
+            server_id: uuid(row, "server_id")?,
+            feature: row.try_get("feature")?,
+            action: row.try_get("action")?,
+            actor_id: opt_uuid(row, "actor_id")?,
+            details: json(row, "details")?,
+            model_name: row.try_get("model_name").ok(),
+            model_version: row.try_get("model_version").ok(),
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// v2.1 Voice & Real-Time Collaboration
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── VideoLayout ───────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for VideoLayout {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(VideoLayout {
+            id: uuid(row, "id")?,
+            channel_id: uuid(row, "channel_id")?,
+            user_id: uuid(row, "user_id")?,
+            layout_type: row.try_get("layout_type")?,
+            pinned_users: json(row, "pinned_users")?,
+            custom_positions: json(row, "custom_positions")?,
+            pip_enabled: row.try_get("pip_enabled").unwrap_or(false),
+            created_at: dt(row, "created_at")?,
+            updated_at: dt(row, "updated_at")?,
+        })
+    }
+}
+
+// ── VirtualBackground ─────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for VirtualBackground {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(VirtualBackground {
+            id: uuid(row, "id")?,
+            user_id: uuid(row, "user_id")?,
+            name: row.try_get("name")?,
+            bg_type: row.try_get("bg_type")?,
+            image_url: row.try_get("image_url").ok(),
+            is_default: row.try_get("is_default").unwrap_or(false),
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── LiveStream ────────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for LiveStream {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(LiveStream {
+            id: uuid(row, "id")?,
+            channel_id: uuid(row, "channel_id")?,
+            streamer_id: uuid(row, "streamer_id")?,
+            title: row.try_get("title")?,
+            status: row.try_get("status")?,
+            viewer_count: row.try_get("viewer_count")?,
+            max_viewers: row.try_get("max_viewers")?,
+            is_e2ee: row.try_get("is_e2ee").unwrap_or(false),
+            recording_url: row.try_get("recording_url").ok(),
+            hls_url: row.try_get("hls_url").ok(),
+            started_at: dt(row, "started_at")?,
+            ended_at: opt_dt(row, "ended_at")?,
+        })
+    }
+}
+
+// ── StreamViewer ──────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for StreamViewer {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(StreamViewer {
+            stream_id: uuid(row, "stream_id")?,
+            user_id: uuid(row, "user_id")?,
+            joined_at: dt(row, "joined_at")?,
+            left_at: opt_dt(row, "left_at")?,
+        })
+    }
+}
+
+// ── BreakoutRoom ──────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for BreakoutRoom {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(BreakoutRoom {
+            id: uuid(row, "id")?,
+            parent_channel: uuid(row, "parent_channel")?,
+            name: row.try_get("name")?,
+            capacity: row.try_get("capacity")?,
+            status: row.try_get("status")?,
+            created_by: uuid(row, "created_by")?,
+            created_at: dt(row, "created_at")?,
+            closed_at: opt_dt(row, "closed_at")?,
+        })
+    }
+}
+
+// ── CollabSession ─────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for CollabSession {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(CollabSession {
+            id: uuid(row, "id")?,
+            channel_id: uuid(row, "channel_id")?,
+            session_type: row.try_get("session_type")?,
+            document_id: opt_uuid(row, "document_id")?,
+            participants: json(row, "participants")?,
+            is_active: row.try_get("is_active").unwrap_or(true),
+            created_at: dt(row, "created_at")?,
+            ended_at: opt_dt(row, "ended_at")?,
+        })
+    }
+}
+
+// ── SpatialAudioConfig ────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for SpatialAudioConfig {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(SpatialAudioConfig {
+            id: uuid(row, "id")?,
+            channel_id: uuid(row, "channel_id")?,
+            preset: row.try_get("preset")?,
+            room_width: row.try_get::<f64, _>("room_width").map(|v| v as f32).unwrap_or(10.0),
+            room_depth: row.try_get::<f64, _>("room_depth").map(|v| v as f32).unwrap_or(10.0),
+            room_height: row.try_get::<f64, _>("room_height").map(|v| v as f32).unwrap_or(3.0),
+            positions: json(row, "positions")?,
+            hrtf_enabled: row.try_get("hrtf_enabled").unwrap_or(true),
+            ambisonics_order: row.try_get("ambisonics_order")?,
+            created_at: dt(row, "created_at")?,
+            updated_at: dt(row, "updated_at")?,
+        })
+    }
+}
+
+// ── VoicePreset ───────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for VoicePreset {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(VoicePreset {
+            id: uuid(row, "id")?,
+            name: row.try_get("name")?,
+            description: row.try_get("description").ok(),
+            target_latency_ms: row.try_get("target_latency_ms")?,
+            jitter_buffer_ms: row.try_get("jitter_buffer_ms")?,
+            fec_level: row.try_get("fec_level")?,
+            dtx_enabled: row.try_get("dtx_enabled").unwrap_or(true),
+            normalization: row.try_get("normalization").unwrap_or(true),
+            is_builtin: row.try_get("is_builtin").unwrap_or(true),
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// v2.2 User Growth & Retention
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── ServerRecommendation ──────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for ServerRecommendation {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(ServerRecommendation {
+            id: uuid(row, "id")?,
+            user_id: uuid(row, "user_id")?,
+            server_id: uuid(row, "server_id")?,
+            score: row.try_get::<f64, _>("score").map(|v| v as f32).unwrap_or(0.0),
+            reason: row.try_get("reason")?,
+            dismissed: row.try_get("dismissed").unwrap_or(false),
+            joined: row.try_get("joined").unwrap_or(false),
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── OnboardingFlow ────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for OnboardingFlow {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(OnboardingFlow {
+            id: uuid(row, "id")?,
+            server_id: uuid(row, "server_id")?,
+            steps: json(row, "steps")?,
+            adaptive: row.try_get("adaptive").unwrap_or(true),
+            skip_completed: row.try_get("skip_completed").unwrap_or(true),
+            is_active: row.try_get("is_active").unwrap_or(true),
+            created_at: dt(row, "created_at")?,
+            updated_at: dt(row, "updated_at")?,
+        })
+    }
+}
+
+// ── DeviceSession ─────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for DeviceSession {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(DeviceSession {
+            id: uuid(row, "id")?,
+            user_id: uuid(row, "user_id")?,
+            device_id: row.try_get("device_id")?,
+            device_type: row.try_get("device_type")?,
+            last_channel_id: opt_uuid(row, "last_channel_id")?,
+            scroll_position: {
+                let raw: Option<String> = row.try_get("scroll_position").ok();
+                raw.and_then(|s| serde_json::from_str(&s).ok())
+            },
+            is_active: row.try_get("is_active").unwrap_or(true),
+            last_seen_at: dt(row, "last_seen_at")?,
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── ClipboardSync ─────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for ClipboardSync {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(ClipboardSync {
+            id: uuid(row, "id")?,
+            user_id: uuid(row, "user_id")?,
+            source_device: row.try_get("source_device")?,
+            content_type: row.try_get("content_type")?,
+            encrypted_data: row.try_get("encrypted_data")?,
+            expires_at: dt(row, "expires_at")?,
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── UserXp ────────────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for UserXp {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(UserXp {
+            user_id: uuid(row, "user_id")?,
+            server_id: uuid(row, "server_id")?,
+            xp: row.try_get::<i64, _>("xp").unwrap_or(0),
+            level: row.try_get("level")?,
+            last_xp_at: dt(row, "last_xp_at")?,
+        })
+    }
+}
+
+// ── GamificationConfig ────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for GamificationConfig {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(GamificationConfig {
+            server_id: uuid(row, "server_id")?,
+            enabled: row.try_get("enabled").unwrap_or(false),
+            xp_per_message: row.try_get("xp_per_message")?,
+            xp_per_reaction: row.try_get("xp_per_reaction")?,
+            xp_per_voice_min: row.try_get("xp_per_voice_min")?,
+            level_formula: row.try_get("level_formula")?,
+            streak_enabled: row.try_get("streak_enabled").unwrap_or(true),
+            created_at: dt(row, "created_at")?,
+            updated_at: dt(row, "updated_at")?,
+        })
+    }
+}
+
+// ── Achievement ───────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for Achievement {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(Achievement {
+            id: uuid(row, "id")?,
+            server_id: uuid(row, "server_id")?,
+            name: row.try_get("name")?,
+            description: row.try_get("description").ok(),
+            icon_url: row.try_get("icon_url").ok(),
+            criteria: json(row, "criteria")?,
+            reward_xp: row.try_get("reward_xp")?,
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── UserAchievement ───────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for UserAchievement {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(UserAchievement {
+            user_id: uuid(row, "user_id")?,
+            achievement_id: uuid(row, "achievement_id")?,
+            earned_at: dt(row, "earned_at")?,
+        })
+    }
+}
+
+// ── ActivityStreak ────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for ActivityStreak {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(ActivityStreak {
+            user_id: uuid(row, "user_id")?,
+            server_id: uuid(row, "server_id")?,
+            current_streak: row.try_get("current_streak")?,
+            longest_streak: row.try_get("longest_streak")?,
+            last_active_date: row.try_get("last_active_date")?,
+        })
+    }
+}
+
+// ── SyncCursor ────────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for SyncCursor {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(SyncCursor {
+            user_id: uuid(row, "user_id")?,
+            device_id: row.try_get("device_id")?,
+            channel_id: uuid(row, "channel_id")?,
+            last_message_id: opt_uuid(row, "last_message_id")?,
+            last_synced_at: dt(row, "last_synced_at")?,
+        })
+    }
+}
+
+// ── OfflineQueueItem ──────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for OfflineQueueItem {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(OfflineQueueItem {
+            id: uuid(row, "id")?,
+            user_id: uuid(row, "user_id")?,
+            device_id: row.try_get("device_id")?,
+            action_type: row.try_get("action_type")?,
+            payload: json(row, "payload")?,
+            status: row.try_get("status")?,
+            conflict_data: {
+                let raw: Option<String> = row.try_get("conflict_data").ok();
+                raw.and_then(|s| serde_json::from_str(&s).ok())
+            },
+            created_at: dt(row, "created_at")?,
+            synced_at: opt_dt(row, "synced_at")?,
+        })
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// v2.x Sustainability & Extensibility
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── ProtocolVersion ───────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for ProtocolVersion {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(ProtocolVersion {
+            id: uuid(row, "id")?,
+            protocol: row.try_get("protocol")?,
+            version: row.try_get("version")?,
+            status: row.try_get("status")?,
+            capabilities: json(row, "capabilities")?,
+            deprecation_date: opt_dt(row, "deprecation_date")?,
+            sunset_date: opt_dt(row, "sunset_date")?,
+            migration_guide: row.try_get("migration_guide").ok(),
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── CapabilityNegotiation ─────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for CapabilityNegotiation {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(CapabilityNegotiation {
+            id: uuid(row, "id")?,
+            local_instance: row.try_get("local_instance")?,
+            remote_instance: row.try_get("remote_instance")?,
+            local_caps: json(row, "local_caps")?,
+            remote_caps: json(row, "remote_caps")?,
+            agreed_caps: json(row, "agreed_caps")?,
+            protocol_version: row.try_get("protocol_version")?,
+            negotiated_at: dt(row, "negotiated_at")?,
+        })
+    }
+}
+
+// ── GovernancePoll ────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for GovernancePoll {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(GovernancePoll {
+            id: uuid(row, "id")?,
+            server_id: uuid(row, "server_id")?,
+            title: row.try_get("title")?,
+            description: row.try_get("description").ok(),
+            poll_type: row.try_get("poll_type")?,
+            options: json(row, "options")?,
+            min_participation: row.try_get::<f64, _>("min_participation").map(|v| v as f32).unwrap_or(0.0),
+            allow_multiple: row.try_get("allow_multiple").unwrap_or(false),
+            anonymous: row.try_get("anonymous").unwrap_or(true),
+            status: row.try_get("status")?,
+            created_by: uuid(row, "created_by")?,
+            opens_at: dt(row, "opens_at")?,
+            closes_at: opt_dt(row, "closes_at")?,
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── PollVote ──────────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for PollVote {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(PollVote {
+            poll_id: uuid(row, "poll_id")?,
+            user_id: uuid(row, "user_id")?,
+            option_index: row.try_get("option_index")?,
+            voted_at: dt(row, "voted_at")?,
+        })
+    }
+}
+
+// ── GovernanceProposal ────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for GovernanceProposal {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(GovernanceProposal {
+            id: uuid(row, "id")?,
+            server_id: uuid(row, "server_id")?,
+            title: row.try_get("title")?,
+            body: row.try_get("body")?,
+            status: row.try_get("status")?,
+            author_id: uuid(row, "author_id")?,
+            discussion_channel: opt_uuid(row, "discussion_channel")?,
+            poll_id: opt_uuid(row, "poll_id")?,
+            created_at: dt(row, "created_at")?,
+            updated_at: dt(row, "updated_at")?,
+        })
+    }
+}
+
+// ── ContributorBadge ──────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for ContributorBadge {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(ContributorBadge {
+            id: uuid(row, "id")?,
+            user_id: uuid(row, "user_id")?,
+            badge_type: row.try_get("badge_type")?,
+            source: row.try_get("source").ok(),
+            verified: row.try_get("verified").unwrap_or(false),
+            metadata: json(row, "metadata")?,
+            awarded_at: dt(row, "awarded_at")?,
+        })
+    }
+}
+
+// ── SecurityAudit ─────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for SecurityAudit {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(SecurityAudit {
+            id: uuid(row, "id")?,
+            audit_type: row.try_get("audit_type")?,
+            status: row.try_get("status")?,
+            findings: json(row, "findings")?,
+            severity_summary: json(row, "severity_summary")?,
+            auditor: row.try_get("auditor").ok(),
+            started_at: opt_dt(row, "started_at")?,
+            completed_at: opt_dt(row, "completed_at")?,
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── VulnerabilityRecord ───────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for VulnerabilityRecord {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(VulnerabilityRecord {
+            id: uuid(row, "id")?,
+            audit_id: opt_uuid(row, "audit_id")?,
+            cve_id: row.try_get("cve_id").ok(),
+            package_name: row.try_get("package_name")?,
+            severity: row.try_get("severity")?,
+            description: row.try_get("description")?,
+            remediation: row.try_get("remediation").ok(),
+            status: row.try_get("status")?,
+            discovered_at: dt(row, "discovered_at")?,
+            resolved_at: opt_dt(row, "resolved_at")?,
+        })
+    }
+}
+
+// ── TutorialProgress ──────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for TutorialProgress {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(TutorialProgress {
+            user_id: uuid(row, "user_id")?,
+            tutorial_id: row.try_get("tutorial_id")?,
+            completed_steps: json(row, "completed_steps")?,
+            completed: row.try_get("completed").unwrap_or(false),
+            started_at: dt(row, "started_at")?,
+            completed_at: opt_dt(row, "completed_at")?,
+        })
+    }
+}
+
+// ── MigrationGuide ────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for MigrationGuide {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(MigrationGuide {
+            id: uuid(row, "id")?,
+            from_platform: row.try_get("from_platform")?,
+            title: row.try_get("title")?,
+            content: row.try_get("content")?,
+            version: row.try_get("version")?,
+            is_published: row.try_get("is_published").unwrap_or(false),
+            author_id: opt_uuid(row, "author_id")?,
+            created_at: dt(row, "created_at")?,
+            updated_at: dt(row, "updated_at")?,
         })
     }
 }

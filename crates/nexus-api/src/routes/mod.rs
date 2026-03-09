@@ -75,3 +75,18 @@ pub mod admin_analytics;
 pub mod importer;
 pub mod marketplace;
 pub mod onboarding;
+
+// v1.9 Scalability & Performance Hardening
+pub mod scalability;
+
+// v2.0 AI & Intelligence Layer
+pub mod ai_layer;
+
+// v2.1 Voice & Real-Time Collaboration
+pub mod voice_collab;
+
+// v2.2 User Growth & Retention
+pub mod growth;
+
+// v2.x Sustainability & Extensibility
+pub mod sustainability;

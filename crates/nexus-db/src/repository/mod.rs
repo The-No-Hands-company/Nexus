@@ -49,3 +49,23 @@ pub mod import_jobs;
 pub mod marketplace;
 pub mod onboarding;
 pub mod server_templates;
+
+// v1.9 Scalability & Performance Hardening
+pub mod scaling_configs;
+pub mod sfu_nodes;
+pub mod federation_batches;
+pub mod voice_quality;
+pub mod large_server;
+pub mod ops_metrics;
+
+// v2.0 AI & Intelligence Layer
+pub mod ai_intelligence;
+
+// v2.1 Voice & Real-Time Collaboration
+pub mod voice_collab;
+
+// v2.2 User Growth & Retention
+pub mod growth;
+
+// v2.x Sustainability & Extensibility
+pub mod sustainability;
