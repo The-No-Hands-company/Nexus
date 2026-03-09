@@ -1646,6 +1646,149 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
       return apiFetch<T>("GET", "/api/v1/users/@me/tts-queue");
     }
 
+    // ── v1.8 Ecosystem & Onboarding ──────────────────────────────────────
+
+    // Import & bulk invite
+    case "create_import_job": {
+      return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/imports`, {
+        source_platform: args.sourcePlatform,
+        metadata: args.metadata ?? null,
+      });
+    }
+    case "list_import_jobs": {
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/imports`);
+    }
+    case "get_import_job": {
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/imports/${args.importId}`);
+    }
+    case "create_bulk_invitation": {
+      return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/bulk-invite`, {
+        emails: args.emails,
+      });
+    }
+
+    // Onboarding
+    case "get_onboarding_progress": {
+      return apiFetch<T>("GET", "/api/v1/users/@me/onboarding");
+    }
+    case "update_onboarding_progress": {
+      return apiFetch<T>("PATCH", "/api/v1/users/@me/onboarding", {
+        completed_steps: args.completedSteps ?? undefined,
+        dismissed: args.dismissed ?? undefined,
+      });
+    }
+
+    // Server templates
+    case "list_server_templates": {
+      const qs = args.category ? `?category=${args.category}` : "";
+      return apiFetch<T>("GET", `/api/v1/server-templates${qs}`);
+    }
+    case "get_server_template": {
+      return apiFetch<T>("GET", `/api/v1/server-templates/${args.templateId}`);
+    }
+    case "create_server_template": {
+      return apiFetch<T>("POST", "/api/v1/server-templates", {
+        name: args.name,
+        description: args.description ?? null,
+        category: args.category,
+        icon_url: args.iconUrl ?? null,
+        channels: args.channels,
+        roles: args.roles,
+        settings: args.settings ?? {},
+        is_builtin: args.isBuiltin ?? false,
+      });
+    }
+    case "delete_server_template": {
+      return apiFetch<T>("DELETE", `/api/v1/server-templates/${args.templateId}`);
+    }
+
+    // Admin analytics
+    case "list_analytics_snapshots": {
+      const qs = args.days ? `?days=${args.days}` : "";
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/analytics-snapshots${qs}`);
+    }
+    case "upsert_analytics_snapshot": {
+      return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/analytics-snapshots`, {
+        period_date: args.periodDate,
+        messages_count: args.messagesCount ?? 0,
+        active_members: args.activeMembers ?? 0,
+        new_members: args.newMembers ?? 0,
+        left_members: args.leftMembers ?? 0,
+        voice_minutes: args.voiceMinutes ?? 0,
+        reports_resolved: args.reportsResolved ?? 0,
+        bans_issued: args.bansIssued ?? 0,
+        filters_triggered: args.filtersTriggered ?? 0,
+      });
+    }
+
+    // Marketplace
+    case "search_marketplace_plugins": {
+      const params = new URLSearchParams();
+      if (args.q) params.set("q", args.q as string);
+      if (args.category) params.set("category", args.category as string);
+      if (args.limit) params.set("limit", String(args.limit));
+      if (args.offset) params.set("offset", String(args.offset));
+      const qs = params.toString() ? `?${params.toString()}` : "";
+      return apiFetch<T>("GET", `/api/v1/marketplace/plugins${qs}`);
+    }
+    case "get_marketplace_plugin": {
+      return apiFetch<T>("GET", `/api/v1/marketplace/plugins/${args.slug}`);
+    }
+    case "publish_marketplace_plugin": {
+      return apiFetch<T>("POST", "/api/v1/marketplace/plugins", {
+        name: args.name,
+        slug: args.slug,
+        description: args.description ?? null,
+        version: args.version,
+        manifest_url: args.manifestUrl,
+        icon_url: args.iconUrl ?? null,
+        source_url: args.sourceUrl ?? null,
+        signature: args.signature ?? null,
+        signing_key_id: args.signingKeyId ?? null,
+        category: args.category,
+        tags: args.tags ?? [],
+      });
+    }
+
+    // Plugin reviews
+    case "submit_plugin_review": {
+      return apiFetch<T>("POST", `/api/v1/marketplace/plugins/${args.pluginId}/reviews`, {
+        rating: args.rating,
+        title: args.title ?? null,
+        body: args.body ?? null,
+      });
+    }
+    case "list_plugin_reviews": {
+      return apiFetch<T>("GET", `/api/v1/marketplace/plugins/${args.pluginId}/reviews`);
+    }
+    case "delete_plugin_review": {
+      return apiFetch<T>("DELETE", `/api/v1/marketplace/plugins/${args.pluginId}/reviews`);
+    }
+
+    // Plugin installs
+    case "install_server_plugin": {
+      return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/plugin-installs`, {
+        plugin_id: args.pluginId,
+        version: args.version,
+      });
+    }
+    case "list_server_plugin_installs": {
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/plugin-installs`);
+    }
+    case "toggle_server_plugin": {
+      return apiFetch<T>(
+        "PATCH",
+        `/api/v1/servers/${args.serverId}/plugin-installs/${args.pluginId}`,
+        { enabled: args.enabled },
+      );
+    }
+    case "uninstall_server_plugin": {
+      return apiFetch<T>(
+        "DELETE",
+        `/api/v1/servers/${args.serverId}/plugin-installs/${args.pluginId}`,
+      );
+    }
+
     default:
       throw new Error(`[browser] Unhandled invoke command: "${cmd}"`);
   }

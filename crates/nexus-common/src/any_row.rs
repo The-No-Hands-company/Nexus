@@ -33,6 +33,10 @@ use crate::models::{
     accessibility::{
         MessageTranslation, MessageTtsRequest, UserAccessibilitySettings, VoiceCaption,
     },
+    ecosystem::{
+        BulkInvitation, ImportJob, MarketplacePlugin, OnboardingProgress,
+        PluginInstall, PluginReview, ServerAnalyticsSnapshot, ServerTemplate,
+    },
     relationship::{Relationship, RelationshipStatus},
     rich::{AttachmentRow, ServerEmojiRow, ThreadRow},
     role::Role,
@@ -906,6 +910,166 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for MessageTranslation {
             source_language: row.try_get("source_language")?,
             target_language: row.try_get("target_language")?,
             translated_text: row.try_get("translated_text")?,
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// v1.8  Ecosystem & Onboarding
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── ImportJob ─────────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for ImportJob {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(ImportJob {
+            id: uuid(row, "id")?,
+            server_id: uuid(row, "server_id")?,
+            user_id: uuid(row, "user_id")?,
+            source_platform: row.try_get("source_platform")?,
+            status: row.try_get("status")?,
+            total_items: row.try_get("total_items")?,
+            imported_items: row.try_get("imported_items")?,
+            error_log: row.try_get("error_log").unwrap_or(None),
+            metadata: json(row, "metadata")?,
+            created_at: dt(row, "created_at")?,
+            updated_at: dt(row, "updated_at")?,
+        })
+    }
+}
+
+// ── BulkInvitation ────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for BulkInvitation {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(BulkInvitation {
+            id: uuid(row, "id")?,
+            server_id: uuid(row, "server_id")?,
+            inviter_id: uuid(row, "inviter_id")?,
+            emails: json(row, "emails")?,
+            status: row.try_get("status")?,
+            sent_count: row.try_get("sent_count")?,
+            total_count: row.try_get("total_count")?,
+            invite_code: row.try_get("invite_code").unwrap_or(None),
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── ServerTemplate ────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for ServerTemplate {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(ServerTemplate {
+            id: uuid(row, "id")?,
+            name: row.try_get("name")?,
+            description: row.try_get("description").unwrap_or(None),
+            category: row.try_get("category")?,
+            icon_url: row.try_get("icon_url").unwrap_or(None),
+            channels: json(row, "channels")?,
+            roles: json(row, "roles")?,
+            settings: json(row, "settings")?,
+            is_builtin: row.try_get("is_builtin").unwrap_or(false),
+            creator_id: opt_uuid(row, "creator_id")?,
+            usage_count: row.try_get("usage_count").unwrap_or(0),
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── OnboardingProgress ────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for OnboardingProgress {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(OnboardingProgress {
+            user_id: uuid(row, "user_id")?,
+            completed_steps: json(row, "completed_steps")?,
+            dismissed: row.try_get("dismissed").unwrap_or(false),
+            created_at: dt(row, "created_at")?,
+            updated_at: dt(row, "updated_at")?,
+        })
+    }
+}
+
+// ── ServerAnalyticsSnapshot ───────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for ServerAnalyticsSnapshot {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(ServerAnalyticsSnapshot {
+            id: uuid(row, "id")?,
+            server_id: uuid(row, "server_id")?,
+            period_date: row.try_get("period_date")?,
+            messages_count: row.try_get("messages_count")?,
+            active_members: row.try_get("active_members")?,
+            new_members: row.try_get("new_members")?,
+            left_members: row.try_get("left_members")?,
+            voice_minutes: row.try_get("voice_minutes")?,
+            reports_resolved: row.try_get("reports_resolved")?,
+            bans_issued: row.try_get("bans_issued")?,
+            filters_triggered: row.try_get("filters_triggered")?,
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── MarketplacePlugin ─────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for MarketplacePlugin {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(MarketplacePlugin {
+            id: uuid(row, "id")?,
+            name: row.try_get("name")?,
+            slug: row.try_get("slug")?,
+            description: row.try_get("description").unwrap_or(None),
+            author_id: opt_uuid(row, "author_id")?,
+            version: row.try_get("version")?,
+            manifest_url: row.try_get("manifest_url")?,
+            icon_url: row.try_get("icon_url").unwrap_or(None),
+            source_url: row.try_get("source_url").unwrap_or(None),
+            signature: row.try_get("signature").unwrap_or(None),
+            signing_key_id: row.try_get("signing_key_id").unwrap_or(None),
+            category: row.try_get("category")?,
+            tags: json(row, "tags")?,
+            downloads: row.try_get::<i64, _>("downloads").or_else(|_| row.try_get::<i32, _>("downloads").map(|v| v as i64))?,
+            avg_rating: row.try_get::<f32, _>("avg_rating").or_else(|_| row.try_get::<f64, _>("avg_rating").map(|v| v as f32))?,
+            rating_count: row.try_get("rating_count")?,
+            is_verified: row.try_get("is_verified").unwrap_or(false),
+            is_published: row.try_get("is_published").unwrap_or(true),
+            created_at: dt(row, "created_at")?,
+            updated_at: dt(row, "updated_at")?,
+        })
+    }
+}
+
+// ── PluginReview ──────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for PluginReview {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(PluginReview {
+            id: uuid(row, "id")?,
+            plugin_id: uuid(row, "plugin_id")?,
+            user_id: uuid(row, "user_id")?,
+            rating: row.try_get("rating")?,
+            title: row.try_get("title").unwrap_or(None),
+            body: row.try_get("body").unwrap_or(None),
+            created_at: dt(row, "created_at")?,
+            updated_at: dt(row, "updated_at")?,
+        })
+    }
+}
+
+// ── PluginInstall ─────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for PluginInstall {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(PluginInstall {
+            id: uuid(row, "id")?,
+            plugin_id: uuid(row, "plugin_id")?,
+            server_id: uuid(row, "server_id")?,
+            installed_by: uuid(row, "installed_by")?,
+            version: row.try_get("version")?,
+            is_enabled: row.try_get("is_enabled").unwrap_or(true),
             created_at: dt(row, "created_at")?,
         })
     }

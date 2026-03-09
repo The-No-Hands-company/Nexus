@@ -41,3 +41,11 @@ pub mod accessibility_settings;
 pub mod voice_captions;
 pub mod translations;
 pub mod tts_requests;
+
+// v1.8 Ecosystem & Onboarding
+pub mod analytics_snapshots;
+pub mod bulk_invitations;
+pub mod import_jobs;
+pub mod marketplace;
+pub mod onboarding;
+pub mod server_templates;

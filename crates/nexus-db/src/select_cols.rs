@@ -253,3 +253,50 @@ pub const MESSAGE_TRANSLATION_COLS: &str =
     "id::text AS id, message_id::text AS message_id, \
      source_language, target_language, translated_text, \
      created_at::text AS created_at";
+
+// ── Phase 19: Ecosystem & Onboarding ──────────────────────────────────────────
+
+pub const IMPORT_JOB_COLS: &str =
+    "id::text AS id, server_id::text AS server_id, user_id::text AS user_id, \
+     source_platform, status, total_items, imported_items, error_log, metadata, \
+     created_at::text AS created_at, updated_at::text AS updated_at";
+
+pub const BULK_INVITATION_COLS: &str =
+    "id::text AS id, server_id::text AS server_id, inviter_id::text AS inviter_id, \
+     emails, status, sent_count, total_count, invite_code, \
+     created_at::text AS created_at";
+
+pub const SERVER_TEMPLATE_COLS: &str =
+    "id::text AS id, name, description, category, icon_url, \
+     channels, roles, settings, is_builtin, \
+     creator_id::text AS creator_id, usage_count, \
+     created_at::text AS created_at";
+
+pub const ONBOARDING_PROGRESS_COLS: &str =
+    "user_id::text AS user_id, completed_steps, dismissed, \
+     created_at::text AS created_at, updated_at::text AS updated_at";
+
+pub const SERVER_ANALYTICS_SNAPSHOT_COLS: &str =
+    "id::text AS id, server_id::text AS server_id, \
+     period_date::text AS period_date, messages_count, active_members, \
+     new_members, left_members, voice_minutes, \
+     reports_resolved, bans_issued, filters_triggered, \
+     created_at::text AS created_at";
+
+pub const MARKETPLACE_PLUGIN_COLS: &str =
+    "id::text AS id, name, slug, description, author_id::text AS author_id, \
+     version, manifest_url, icon_url, source_url, \
+     signature, signing_key_id, category, tags, \
+     downloads, avg_rating, rating_count, \
+     is_verified, is_published, \
+     created_at::text AS created_at, updated_at::text AS updated_at";
+
+pub const PLUGIN_REVIEW_COLS: &str =
+    "id::text AS id, plugin_id::text AS plugin_id, user_id::text AS user_id, \
+     rating, title, body, \
+     created_at::text AS created_at, updated_at::text AS updated_at";
+
+pub const PLUGIN_INSTALL_COLS: &str =
+    "id::text AS id, plugin_id::text AS plugin_id, server_id::text AS server_id, \
+     installed_by::text AS installed_by, version, is_enabled, \
+     created_at::text AS created_at";

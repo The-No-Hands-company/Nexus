@@ -26,6 +26,9 @@ pub mod multimedia;
 // v1.7 Accessibility & Inclusivity
 pub mod accessibility;
 
+// v1.8 Ecosystem & Onboarding
+pub mod ecosystem;
+
 /// Re-export all model types for convenience.
 pub use bot::*;
 pub use channel::*;
@@ -49,3 +52,6 @@ pub use multimedia::*;
 
 // v1.7 Accessibility & Inclusivity
 pub use accessibility::*;
+
+// v1.8 Ecosystem & Onboarding
+pub use ecosystem::*;

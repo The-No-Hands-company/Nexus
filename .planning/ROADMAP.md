@@ -853,38 +853,38 @@ Phantom is an infant today. This phase will happen when it is ready, not before.
 
 ---
 
-## Phase 19: Ecosystem & Onboarding (v1.8+) 🔲 Planned
+## Phase 19: Ecosystem & Onboarding (v1.8+) ✅ Complete
 
 > **Lower priority — post-mobile.** Reduces friction for new users and server admins. Makes Nexus easy to adopt at scale.
 
 ### 19-01: Import & Migration Tools
 
-- [ ] Discord export importer (parse Discord data package → Nexus messages, channels, roles)
-- [ ] Matrix room importer (bridge existing Matrix rooms into Nexus channels)
-- [ ] Slack export importer (channels, threads, users, files)
-- [ ] Bulk user invitation tool (CSV upload, email invites)
+- [x] Discord export importer (parse Discord data package → Nexus messages, channels, roles)
+- [x] Matrix room importer (bridge existing Matrix rooms into Nexus channels)
+- [x] Slack export importer (channels, threads, users, files)
+- [x] Bulk user invitation tool (CSV upload, email invites)
 
 ### 19-02: Onboarding Wizard
 
-- [ ] Lite mode quick-start wizard (first-run setup: create server, invite friends, pick theme)
-- [ ] Server templates (pre-configured channel layouts for gaming, education, teams, open-source)
-- [ ] Interactive tour for new users (highlight key features on first login)
-- [ ] Admin setup checklist (roles, permissions, moderation, federation — guided steps)
+- [x] Lite mode quick-start wizard (first-run setup: create server, invite friends, pick theme)
+- [x] Server templates (pre-configured channel layouts for gaming, education, teams, open-source)
+- [x] Interactive tour for new users (highlight key features on first login)
+- [x] Admin setup checklist (roles, permissions, moderation, federation — guided steps)
 
 ### 19-03: Admin Analytics Dashboard
 
-- [ ] Anonymous server usage statistics (messages/day, active users, voice minutes — computed locally)
-- [ ] Growth trends and member retention graphs
-- [ ] Moderation activity summary (reports resolved, bans issued, filters triggered)
-- [ ] Zero telemetry to any central server — all data stays on the instance
+- [x] Anonymous server usage statistics (messages/day, active users, voice minutes — computed locally)
+- [x] Growth trends and member retention graphs
+- [x] Moderation activity summary (reports resolved, bans issued, filters triggered)
+- [x] Zero telemetry to any central server — all data stays on the instance
 
 ### 19-04: Plugin Marketplace
 
-- [ ] Federated plugin discovery (discoverable via the server directory protocol)
-- [ ] Signed plugin packages (Ed25519 signatures for integrity verification)
-- [ ] Plugin ratings and reviews (distributed, no central authority)
-- [ ] One-click install from within the client
-- [ ] Plugin sandboxing audit and hardening (capability-based permissions)
+- [x] Federated plugin discovery (discoverable via the server directory protocol)
+- [x] Signed plugin packages (Ed25519 signatures for integrity verification)
+- [x] Plugin ratings and reviews (distributed, no central authority)
+- [x] One-click install from within the client
+- [x] Plugin sandboxing audit and hardening (capability-based permissions)
 
 ---
 

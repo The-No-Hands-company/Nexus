@@ -69,3 +69,9 @@ pub mod media_gallery;
 pub mod accessibility;
 pub mod voice_captions;
 pub mod translations;
+
+// v1.8 Ecosystem & Onboarding
+pub mod admin_analytics;
+pub mod importer;
+pub mod marketplace;
+pub mod onboarding;

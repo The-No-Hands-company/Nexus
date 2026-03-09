@@ -627,6 +627,114 @@ export interface MessageTtsRequest {
   createdAt: string;
 }
 
+// ─── v1.8 Ecosystem & Onboarding ──────────────────────────────────────────────
+
+export interface ImportJob {
+  id: string;
+  serverId: string;
+  userId: string;
+  sourcePlatform: string;
+  status: string;
+  totalItems: number;
+  importedItems: number;
+  errorLog: string | null;
+  metadata: unknown;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BulkInvitation {
+  id: string;
+  serverId: string;
+  inviterId: string;
+  emails: unknown;
+  status: string;
+  sentCount: number;
+  totalCount: number;
+  inviteCode: string;
+  createdAt: string;
+}
+
+export interface ServerTemplate {
+  id: string;
+  name: string;
+  description: string | null;
+  category: string;
+  iconUrl: string | null;
+  channels: unknown;
+  roles: unknown;
+  settings: unknown;
+  isBuiltin: boolean;
+  creatorId: string | null;
+  usageCount: number;
+  createdAt: string;
+}
+
+export interface OnboardingProgress {
+  userId: string;
+  completedSteps: unknown;
+  dismissed: boolean;
+}
+
+export interface AnalyticsSnapshot {
+  id: string;
+  serverId: string;
+  periodDate: string;
+  messagesCount: number;
+  activeMembers: number;
+  newMembers: number;
+  leftMembers: number;
+  voiceMinutes: number;
+  reportsResolved: number;
+  bansIssued: number;
+  filtersTriggered: number;
+  createdAt: string;
+}
+
+export interface MarketplacePlugin {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  authorId: string | null;
+  version: string;
+  manifestUrl: string;
+  iconUrl: string | null;
+  sourceUrl: string | null;
+  signature: string | null;
+  signingKeyId: string | null;
+  category: string;
+  tags: string[];
+  downloads: number;
+  avgRating: number;
+  ratingCount: number;
+  isVerified: boolean;
+  isPublished: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PluginReview {
+  id: string;
+  pluginId: string;
+  userId: string;
+  rating: number;
+  title: string | null;
+  body: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PluginInstall {
+  id: string;
+  pluginId: string;
+  serverId: string;
+  installedBy: string;
+  version: string;
+  isEnabled: boolean;
+  createdAt: string;
+}
+
 interface StoreState {
   // Auth
   session: Session | null;
@@ -865,6 +973,37 @@ interface StoreState {
   voiceCaptions: Record<string, VoiceCaption[]>;
   loadVoiceCaptions: (channelId: string) => Promise<void>;
   addVoiceCaption: (caption: VoiceCaption) => void;
+
+  // ─── v1.8 Ecosystem & Onboarding ───────────────────────────────────────
+
+  // Import jobs — keyed by serverId
+  importJobs: Record<string, ImportJob[]>;
+  loadImportJobs: (serverId: string) => Promise<void>;
+
+  // Onboarding progress (current user)
+  onboardingProgress: OnboardingProgress | null;
+  loadOnboardingProgress: () => Promise<void>;
+  dismissOnboarding: () => Promise<void>;
+
+  // Server templates
+  serverTemplates: ServerTemplate[];
+  loadServerTemplates: (category?: string) => Promise<void>;
+
+  // Analytics snapshots — keyed by serverId
+  analyticsSnapshots: Record<string, AnalyticsSnapshot[]>;
+  loadAnalyticsSnapshots: (serverId: string, days?: number) => Promise<void>;
+
+  // Marketplace plugins (browse results)
+  marketplacePlugins: MarketplacePlugin[];
+  loadMarketplacePlugins: (query?: string, category?: string) => Promise<void>;
+
+  // Plugin reviews — keyed by pluginId
+  pluginReviews: Record<string, PluginReview[]>;
+  loadPluginReviews: (pluginId: string) => Promise<void>;
+
+  // Server plugin installs — keyed by serverId
+  serverPluginInstalls: Record<string, PluginInstall[]>;
+  loadServerPluginInstalls: (serverId: string) => Promise<void>;
 }
 
 // Module-level map so typing-clear timeouts survive re-renders
@@ -1639,4 +1778,94 @@ export const useStore = create<StoreState>((set, get) => ({
         },
       };
     }),
+
+  // ─── v1.8 Ecosystem & Onboarding ─────────────────────────────────────
+
+  importJobs: {},
+  loadImportJobs: async (serverId) => {
+    try {
+      const jobs = await invoke<ImportJob[]>("list_import_jobs", { serverId });
+      set((s) => ({ importJobs: { ...s.importJobs, [serverId]: jobs } }));
+    } catch (e) {
+      console.error("loadImportJobs error", e);
+    }
+  },
+
+  onboardingProgress: null,
+  loadOnboardingProgress: async () => {
+    try {
+      const progress = await invoke<OnboardingProgress>("get_onboarding_progress", {});
+      set({ onboardingProgress: progress });
+    } catch (e) {
+      console.error("loadOnboardingProgress error", e);
+    }
+  },
+  dismissOnboarding: async () => {
+    try {
+      const progress = await invoke<OnboardingProgress>("update_onboarding_progress", {
+        dismissed: true,
+      });
+      set({ onboardingProgress: progress });
+    } catch (e) {
+      console.error("dismissOnboarding error", e);
+    }
+  },
+
+  serverTemplates: [],
+  loadServerTemplates: async (category) => {
+    try {
+      const templates = await invoke<ServerTemplate[]>("list_server_templates", {
+        category: category ?? null,
+      });
+      set({ serverTemplates: templates });
+    } catch (e) {
+      console.error("loadServerTemplates error", e);
+    }
+  },
+
+  analyticsSnapshots: {},
+  loadAnalyticsSnapshots: async (serverId, days) => {
+    try {
+      const snaps = await invoke<AnalyticsSnapshot[]>("list_analytics_snapshots", {
+        serverId,
+        days: days ?? 30,
+      });
+      set((s) => ({ analyticsSnapshots: { ...s.analyticsSnapshots, [serverId]: snaps } }));
+    } catch (e) {
+      console.error("loadAnalyticsSnapshots error", e);
+    }
+  },
+
+  marketplacePlugins: [],
+  loadMarketplacePlugins: async (query, category) => {
+    try {
+      const plugins = await invoke<MarketplacePlugin[]>("search_marketplace_plugins", {
+        q: query ?? null,
+        category: category ?? null,
+      });
+      set({ marketplacePlugins: plugins });
+    } catch (e) {
+      console.error("loadMarketplacePlugins error", e);
+    }
+  },
+
+  pluginReviews: {},
+  loadPluginReviews: async (pluginId) => {
+    try {
+      const reviews = await invoke<PluginReview[]>("list_plugin_reviews", { pluginId });
+      set((s) => ({ pluginReviews: { ...s.pluginReviews, [pluginId]: reviews } }));
+    } catch (e) {
+      console.error("loadPluginReviews error", e);
+    }
+  },
+
+  serverPluginInstalls: {},
+  loadServerPluginInstalls: async (serverId) => {
+    try {
+      const installs = await invoke<PluginInstall[]>("list_server_plugin_installs", { serverId });
+      set((s) => ({ serverPluginInstalls: { ...s.serverPluginInstalls, [serverId]: installs } }));
+    } catch (e) {
+      console.error("loadServerPluginInstalls error", e);
+    }
+  },
 }));

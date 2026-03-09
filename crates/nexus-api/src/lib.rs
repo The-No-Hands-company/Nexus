@@ -124,6 +124,11 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::accessibility::router())                   // accessibility settings
         .merge(routes::voice_captions::router())                  // voice channel live captions
         .merge(routes::translations::router())                    // message translations + TTS
+        // v1.8 Ecosystem & Onboarding
+        .merge(routes::importer::router())                        // data import & bulk invite
+        .merge(routes::onboarding::router())                      // onboarding wizard & templates
+        .merge(routes::admin_analytics::router())                 // admin analytics snapshots
+        .merge(routes::marketplace::router())                     // plugin marketplace
         // v0.8.5 Federation UX — admin management + cross-instance search
         .merge(routes::federation_admin::router())                // federation admin panel API
         // Make Arc<AppState> available as an Axum Extension so that
