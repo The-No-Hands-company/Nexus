@@ -1000,8 +1000,8 @@ Phantom is an infant today. This phase will happen when it is ready, not before.
 | Stories / ephemeral status | ✅ Complete | Phase 17 |
 | Media gallery view | ✅ Complete | Phase 17 |
 | Voice channel live captioning | ✅ Complete | Phase 18 |
-| Discord / Slack import tools | Not yet built | Phase 19 |
-| Plugin marketplace (federated) | Not yet built | Phase 19 |
+| Discord / Slack import tools | ✅ Complete | Phase 19 |
+| Plugin marketplace (federated) | ✅ Complete | Phase 19 |
 
 ### Community Most-Wanted Top 10 (2026 Update)
 
@@ -1013,7 +1013,7 @@ Phantom is an infant today. This phase will happen when it is ready, not before.
 4. **Better voice** — spatial audio, mobile parity, voice notes with transcripts
 5. **Collaborative docs & tasks** — Canvas + task management for teams and knowledge communities
 6. **Stories & ephemeral content** — 24h status updates, casual engagement for younger users
-7. **Import / migration ease** — Discord, Slack, Matrix import tools to lower switching cost
-8. **On-device AI helpers** — message summaries, auto-moderation, smart replies (privacy-first)
+7. **Import / migration ease** — ✅ Discord, Slack, Matrix import tools + bulk invite (Phase 19)
+8. **On-device AI helpers** — ✅ message summaries, auto-moderation, smart replies (Phase 16)
 9. **Advanced search** — cross-federated full-text search, semantic search, media filters
-10. **Voice channel captions & transcripts** — accessibility and productivity win
+10. **Voice channel captions & transcripts** — ✅ live captioning + TTS (Phase 18)
