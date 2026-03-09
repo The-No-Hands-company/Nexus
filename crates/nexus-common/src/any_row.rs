@@ -30,6 +30,9 @@ use crate::models::{
         Drawing, MediaGalleryFilter, Story, StoryView, VideoNote, VoiceMusicQueueItem,
         VoiceNote, VoiceSettings,
     },
+    accessibility::{
+        MessageTranslation, MessageTtsRequest, UserAccessibilitySettings, VoiceCaption,
+    },
     relationship::{Relationship, RelationshipStatus},
     rich::{AttachmentRow, ServerEmojiRow, ThreadRow},
     role::Role,
@@ -820,6 +823,89 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for MediaGalleryFilter {
             media_types: str_vec(row, "media_types")?,
             date_from: opt_dt(row, "date_from")?,
             date_to: opt_dt(row, "date_to")?,
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+//  Phase 18 — Accessibility & Inclusivity
+
+// ── UserAccessibilitySettings ─────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for UserAccessibilitySettings {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(UserAccessibilitySettings {
+            user_id: uuid(row, "user_id")?,
+            screen_reader_mode: row.try_get("screen_reader_mode").unwrap_or(false),
+            announce_messages: row.try_get("announce_messages").unwrap_or(true),
+            announce_reactions: row.try_get("announce_reactions").unwrap_or(false),
+            announce_typing: row.try_get("announce_typing").unwrap_or(false),
+            keyboard_shortcuts: row.try_get("keyboard_shortcuts").unwrap_or(true),
+            high_contrast_mode: row.try_get("high_contrast_mode").unwrap_or(false),
+            reduced_motion: row.try_get("reduced_motion").unwrap_or(false),
+            font_family: row.try_get("font_family").unwrap_or_else(|_| "system".to_string()),
+            custom_font_name: row.try_get::<Option<String>, _>("custom_font_name").unwrap_or(None),
+            color_blind_mode: row.try_get("color_blind_mode").unwrap_or_else(|_| "none".to_string()),
+            preferred_language: row.try_get("preferred_language").unwrap_or_else(|_| "en".to_string()),
+            auto_translate: row.try_get("auto_translate").unwrap_or(false),
+            rtl_override: row.try_get("rtl_override").unwrap_or(false),
+            captions_enabled: row.try_get("captions_enabled").unwrap_or(false),
+            caption_font_size: row.try_get("caption_font_size").unwrap_or_else(|_| "md".to_string()),
+            caption_position: row.try_get("caption_position").unwrap_or_else(|_| "bottom".to_string()),
+            tts_enabled: row.try_get("tts_enabled").unwrap_or(false),
+            tts_rate: row.try_get::<f32, _>("tts_rate")
+                .or_else(|_| row.try_get::<f64, _>("tts_rate").map(|v| v as f32))
+                .unwrap_or(1.0),
+            tts_voice: row.try_get("tts_voice").unwrap_or_else(|_| "default".to_string()),
+            created_at: dt(row, "created_at")?,
+            updated_at: dt(row, "updated_at")?,
+        })
+    }
+}
+
+// ── VoiceCaption ──────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for VoiceCaption {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(VoiceCaption {
+            id: uuid(row, "id")?,
+            channel_id: uuid(row, "channel_id")?,
+            speaker_id: uuid(row, "speaker_id")?,
+            text: row.try_get("text")?,
+            language: row.try_get("language").unwrap_or_else(|_| "en".to_string()),
+            is_final: row.try_get("is_final").unwrap_or(false),
+            started_at: dt(row, "started_at")?,
+            ended_at: opt_dt(row, "ended_at")?,
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── MessageTtsRequest ─────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for MessageTtsRequest {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(MessageTtsRequest {
+            id: uuid(row, "id")?,
+            user_id: uuid(row, "user_id")?,
+            message_id: uuid(row, "message_id")?,
+            channel_id: uuid(row, "channel_id")?,
+            status: row.try_get("status")?,
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── MessageTranslation ────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for MessageTranslation {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(MessageTranslation {
+            id: uuid(row, "id")?,
+            message_id: uuid(row, "message_id")?,
+            source_language: row.try_get("source_language")?,
+            target_language: row.try_get("target_language")?,
+            translated_text: row.try_get("translated_text")?,
             created_at: dt(row, "created_at")?,
         })
     }

@@ -227,3 +227,29 @@ pub const MEDIA_GALLERY_FILTER_COLS: &str =
      array_to_json(media_types)::text AS media_types, \
      date_from::text AS date_from, date_to::text AS date_to, \
      created_at::text AS created_at";
+
+// ── Phase 18: Accessibility ───────────────────────────────────────────────────
+
+pub const USER_ACCESSIBILITY_COLS: &str =
+    "user_id::text AS user_id, \
+     screen_reader_mode, announce_messages, announce_reactions, announce_typing, keyboard_shortcuts, \
+     high_contrast_mode, reduced_motion, font_family, custom_font_name, color_blind_mode, \
+     preferred_language, auto_translate, rtl_override, \
+     captions_enabled, caption_font_size, caption_position, tts_enabled, tts_rate, tts_voice, \
+     created_at::text AS created_at, updated_at::text AS updated_at";
+
+pub const VOICE_CAPTION_COLS: &str =
+    "id::text AS id, channel_id::text AS channel_id, speaker_id::text AS speaker_id, \
+     text, language, is_final, \
+     started_at::text AS started_at, ended_at::text AS ended_at, \
+     created_at::text AS created_at";
+
+pub const MESSAGE_TTS_REQUEST_COLS: &str =
+    "id::text AS id, user_id::text AS user_id, message_id::text AS message_id, \
+     channel_id::text AS channel_id, status, \
+     created_at::text AS created_at";
+
+pub const MESSAGE_TRANSLATION_COLS: &str =
+    "id::text AS id, message_id::text AS message_id, \
+     source_language, target_language, translated_text, \
+     created_at::text AS created_at";

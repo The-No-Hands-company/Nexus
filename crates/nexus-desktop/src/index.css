@@ -20,6 +20,36 @@ html.nexus-density-cozy .nexus-msg-list { gap: 0.125rem; }
 html.nexus-density-roomy .nexus-msg { padding-top: 0.5rem; padding-bottom: 0.5rem; }
 html.nexus-density-roomy .nexus-msg-list { gap: 0.25rem; }
 
+/* ── Accessibility: Reduced Motion ──────────────────────────────────────────── */
+html.nexus-reduced-motion *,
+html.nexus-reduced-motion *::before,
+html.nexus-reduced-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* ── Accessibility: Font Family Overrides ───────────────────────────────────── */
+html.nexus-font-monospace, html.nexus-font-monospace body {
+  font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace !important;
+}
+html.nexus-font-dyslexic, html.nexus-font-dyslexic body {
+  font-family: "OpenDyslexic", "Comic Sans MS", cursive !important;
+}
+html.nexus-font-serif, html.nexus-font-serif body {
+  font-family: "Georgia", "Times New Roman", serif !important;
+}
+
+/* ── Accessibility: RTL Layout ──────────────────────────────────────────────── */
+html.nexus-rtl { direction: rtl; }
+html.nexus-rtl .nexus-sidebar { border-right: none; border-left: 1px solid var(--color-bg-500); }
+
+/* ── Accessibility: Color-blind Simulation Filters ──────────────────────────── */
+html.nexus-cb-protanopia { filter: url(#nexus-protanopia); }
+html.nexus-cb-deuteranopia { filter: url(#nexus-deuteranopia); }
+html.nexus-cb-tritanopia { filter: url(#nexus-tritanopia); }
+
 /* ── Default theme (Nexus Dark) ─────────────────────────────────────────────── */
 :root {
   --color-bg-900: #0d0f13;

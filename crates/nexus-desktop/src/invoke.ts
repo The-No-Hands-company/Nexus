@@ -1571,6 +1571,81 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
       return apiFetch<T>("DELETE", `/api/v1/media/filters/${args.id}`);
     }
 
+    // ── v1.7 Accessibility & Inclusivity ────────────────────────────────────
+    case "get_accessibility_settings": {
+      return apiFetch<T>("GET", "/api/v1/users/@me/accessibility");
+    }
+    case "update_accessibility_settings": {
+      return apiFetch<T>("PATCH", "/api/v1/users/@me/accessibility", {
+        screen_reader_mode: args.screenReaderMode,
+        announce_messages: args.announceMessages,
+        announce_reactions: args.announceReactions,
+        announce_typing: args.announceTyping,
+        keyboard_shortcuts: args.keyboardShortcuts,
+        high_contrast_mode: args.highContrastMode,
+        reduced_motion: args.reducedMotion,
+        font_family: args.fontFamily,
+        custom_font_name: args.customFontName,
+        color_blind_mode: args.colorBlindMode,
+        preferred_language: args.preferredLanguage,
+        auto_translate: args.autoTranslate,
+        rtl_override: args.rtlOverride,
+        captions_enabled: args.captionsEnabled,
+        caption_font_size: args.captionFontSize,
+        caption_position: args.captionPosition,
+        tts_enabled: args.ttsEnabled,
+        tts_rate: args.ttsRate,
+        tts_voice: args.ttsVoice,
+      });
+    }
+
+    // Voice captions
+    case "submit_voice_caption": {
+      return apiFetch<T>("POST", `/api/v1/channels/${args.channelId}/captions`, {
+        text: args.text,
+        language: args.language,
+        is_final: args.isFinal,
+      });
+    }
+    case "finalise_voice_caption": {
+      return apiFetch<T>("POST", `/api/v1/captions/${args.id}/finalise`, {
+        text: args.text,
+      });
+    }
+    case "list_voice_captions": {
+      return apiFetch<T>("GET", `/api/v1/channels/${args.channelId}/captions`);
+    }
+
+    // Translations
+    case "get_message_translation": {
+      return apiFetch<T>("GET", `/api/v1/messages/${args.messageId}/translate?lang=${args.lang}`);
+    }
+    case "store_message_translation": {
+      return apiFetch<T>("POST", `/api/v1/messages/${args.messageId}/translate`, {
+        source_language: args.sourceLanguage,
+        target_language: args.targetLanguage,
+        translated_text: args.translatedText,
+      });
+    }
+    case "list_message_translations": {
+      return apiFetch<T>("GET", `/api/v1/messages/${args.messageId}/translations`);
+    }
+
+    // TTS
+    case "request_message_tts": {
+      return apiFetch<T>("POST", `/api/v1/messages/${args.messageId}/tts`, {
+        channel_id: args.channelId,
+      });
+    }
+    case "update_tts_status": {
+      return apiFetch<T>("PATCH", `/api/v1/tts-requests/${args.id}`, {
+        status: args.status,
+      });
+    }
+    case "list_tts_queue": {
+      return apiFetch<T>("GET", "/api/v1/users/@me/tts-queue");
+    }
+
     default:
       throw new Error(`[browser] Unhandled invoke command: "${cmd}"`);
   }

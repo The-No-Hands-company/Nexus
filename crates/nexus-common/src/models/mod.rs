@@ -23,6 +23,9 @@ pub mod collaboration;
 // v1.6 Multimedia & Expression
 pub mod multimedia;
 
+// v1.7 Accessibility & Inclusivity
+pub mod accessibility;
+
 /// Re-export all model types for convenience.
 pub use bot::*;
 pub use channel::*;
@@ -43,3 +46,6 @@ pub use collaboration::*;
 
 // v1.6 Multimedia & Expression
 pub use multimedia::*;
+
+// v1.7 Accessibility & Inclusivity
+pub use accessibility::*;

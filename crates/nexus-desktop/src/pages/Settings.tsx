@@ -3,6 +3,7 @@ import { useStore } from "../store";
 import { invoke } from "../invoke";
 import ThemeSwitcher from "../themes/ThemeSwitcher";
 import FederationPanel from "../components/FederationPanel";
+import AccessibilitySettingsPanel from "../components/AccessibilitySettingsPanel";
 import type { PluginManifest } from "../plugins/types";
 import { formatDistanceToNow } from "date-fns";
 import clsx from "clsx";
@@ -532,6 +533,12 @@ export default function SettingsPage() {
             ))}
           </div>
         </div>
+      </section>
+
+      {/* ── Accessibility ────────────────────────────── */}
+      <section className="mb-10">
+        <h2 className="text-base font-semibold mb-5 border-b border-bg-600 pb-2">Accessibility</h2>
+        <AccessibilitySettingsPanel />
       </section>
 
       {/* ── Plugins ──────────────────────────────────── */}

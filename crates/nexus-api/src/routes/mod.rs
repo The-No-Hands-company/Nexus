@@ -64,3 +64,8 @@ pub mod stories;
 pub mod drawings;
 pub mod voice_settings;
 pub mod media_gallery;
+
+// v1.7 Accessibility & Inclusivity
+pub mod accessibility;
+pub mod voice_captions;
+pub mod translations;

@@ -108,11 +108,65 @@ const nexusLight: ThemeDefinition = {
   },
 };
 
+const highContrastDark: ThemeDefinition = {
+  id: "high-contrast-dark",
+  name: "High Contrast Dark",
+  vars: {
+    "--color-bg-900": "#000000",
+    "--color-bg-800": "#0a0a0a",
+    "--color-bg-700": "#141414",
+    "--color-bg-600": "#1e1e1e",
+    "--color-bg-500": "#282828",
+    "--color-accent-500": "#ffcc00",
+    "--color-accent-600": "#e6b800",
+    "--color-accent-400": "#ffd633",
+    "--color-surface-900": "#050505",
+    "--color-surface-800": "#0f0f0f",
+    "--color-surface-700": "#1a1a1a",
+    "--color-muted": "#b0b0b0",
+    "--color-online": "#00ff41",
+    "--color-idle": "#ffdd00",
+    "--color-dnd": "#ff3333",
+    "--color-offline": "#999999",
+    "--color-fg": "#ffffff",
+    "--scrollbar-thumb": "#444444",
+    "--scrollbar-thumb-hover": "#666666",
+  },
+};
+
+const highContrastLight: ThemeDefinition = {
+  id: "high-contrast-light",
+  name: "High Contrast Light",
+  vars: {
+    "--color-bg-900": "#ffffff",
+    "--color-bg-800": "#f5f5f5",
+    "--color-bg-700": "#ebebeb",
+    "--color-bg-600": "#e0e0e0",
+    "--color-bg-500": "#d6d6d6",
+    "--color-accent-500": "#0052cc",
+    "--color-accent-600": "#003d99",
+    "--color-accent-400": "#2672de",
+    "--color-surface-900": "#fafafa",
+    "--color-surface-800": "#f0f0f0",
+    "--color-surface-700": "#e5e5e5",
+    "--color-muted": "#404040",
+    "--color-online": "#006b1f",
+    "--color-idle": "#8a6d00",
+    "--color-dnd": "#b30000",
+    "--color-offline": "#595959",
+    "--color-fg": "#000000",
+    "--scrollbar-thumb": "#aaaaaa",
+    "--scrollbar-thumb-hover": "#888888",
+  },
+};
+
 export const BUILTIN_THEMES: ThemeDefinition[] = [
   nexusDark,
   midnight,
   ocean,
   nexusLight,
+  highContrastDark,
+  highContrastLight,
 ];
 
 export const DEFAULT_THEME_ID = nexusDark.id;

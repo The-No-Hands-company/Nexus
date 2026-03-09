@@ -570,6 +570,63 @@ export interface MediaGalleryFilter {
   createdAt: string;
 }
 
+// ── v1.7 Accessibility & Inclusivity ──────────────────────────────────────────
+
+export interface UserAccessibilitySettings {
+  userId: string;
+  screenReaderMode: boolean;
+  announceMessages: boolean;
+  announceReactions: boolean;
+  announceTyping: boolean;
+  keyboardShortcuts: boolean;
+  highContrastMode: boolean;
+  reducedMotion: boolean;
+  fontFamily: string;
+  customFontName: string | null;
+  colorBlindMode: string;
+  preferredLanguage: string;
+  autoTranslate: boolean;
+  rtlOverride: boolean;
+  captionsEnabled: boolean;
+  captionFontSize: string;
+  captionPosition: string;
+  ttsEnabled: boolean;
+  ttsRate: number;
+  ttsVoice: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface VoiceCaption {
+  id: string;
+  channelId: string;
+  speakerId: string;
+  text: string;
+  language: string;
+  isFinal: boolean;
+  startedAt: string;
+  endedAt: string | null;
+  createdAt: string;
+}
+
+export interface MessageTranslation {
+  id: string;
+  messageId: string;
+  sourceLanguage: string;
+  targetLanguage: string;
+  translatedText: string;
+  createdAt: string;
+}
+
+export interface MessageTtsRequest {
+  id: string;
+  userId: string;
+  messageId: string;
+  channelId: string;
+  status: string;
+  createdAt: string;
+}
+
 interface StoreState {
   // Auth
   session: Session | null;
@@ -798,6 +855,16 @@ interface StoreState {
   // Media gallery filters
   mediaGalleryFilters: MediaGalleryFilter[];
   loadMediaGalleryFilters: () => Promise<void>;
+
+  // Accessibility settings
+  accessibilitySettings: UserAccessibilitySettings | null;
+  loadAccessibilitySettings: () => Promise<void>;
+  setAccessibilitySettings: (settings: UserAccessibilitySettings) => void;
+
+  // Voice captions — keyed by channelId
+  voiceCaptions: Record<string, VoiceCaption[]>;
+  loadVoiceCaptions: (channelId: string) => Promise<void>;
+  addVoiceCaption: (caption: VoiceCaption) => void;
 }
 
 // Module-level map so typing-clear timeouts survive re-renders
@@ -1538,4 +1605,38 @@ export const useStore = create<StoreState>((set, get) => ({
       console.error("loadMediaGalleryFilters error", e);
     }
   },
+
+  // ── Accessibility ─────────────────────────────────────────────────────────
+  accessibilitySettings: null,
+  loadAccessibilitySettings: async () => {
+    try {
+      const settings = await invoke<UserAccessibilitySettings>("get_accessibility_settings", {});
+      set({ accessibilitySettings: settings });
+    } catch (e) {
+      console.error("loadAccessibilitySettings error", e);
+    }
+  },
+  setAccessibilitySettings: (settings) => set({ accessibilitySettings: settings }),
+
+  voiceCaptions: {},
+  loadVoiceCaptions: async (channelId) => {
+    try {
+      const captions = await invoke<VoiceCaption[]>("list_voice_captions", { channelId });
+      set((s) => ({
+        voiceCaptions: { ...s.voiceCaptions, [channelId]: captions },
+      }));
+    } catch (e) {
+      console.error("loadVoiceCaptions error", e);
+    }
+  },
+  addVoiceCaption: (caption) =>
+    set((s) => {
+      const existing = s.voiceCaptions[caption.channelId] ?? [];
+      return {
+        voiceCaptions: {
+          ...s.voiceCaptions,
+          [caption.channelId]: [caption, ...existing].slice(0, 100),
+        },
+      };
+    }),
 }));

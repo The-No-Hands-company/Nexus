@@ -120,6 +120,10 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::drawings::router())                        // in-chat drawing & annotation
         .merge(routes::voice_settings::router())                  // voice settings & music queue
         .merge(routes::media_gallery::router())                   // media gallery browsing + filters
+        // v1.7 Accessibility & Inclusivity
+        .merge(routes::accessibility::router())                   // accessibility settings
+        .merge(routes::voice_captions::router())                  // voice channel live captions
+        .merge(routes::translations::router())                    // message translations + TTS
         // v0.8.5 Federation UX — admin management + cross-instance search
         .merge(routes::federation_admin::router())                // federation admin panel API
         // Make Arc<AppState> available as an Axum Extension so that

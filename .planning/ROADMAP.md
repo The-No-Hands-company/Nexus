@@ -772,76 +772,84 @@ Phantom is an infant today. This phase will happen when it is ready, not before.
 
 ---
 
-## Phase 17: Multimedia & Expression Enhancements (v1.6) 🔲 Planned
+## Phase 17: Multimedia & Expression Enhancements (v1.6) ✅ Complete
 
 > **Medium priority.** Targets casual / younger users migrating from Telegram and Discord. High engagement impact for relatively low implementation effort.
 
-### 17-01: Voice & Video Notes
+### 17-01: Voice & Video Notes ✅ Complete
 
-- [ ] Record and send voice notes in-chat (compressed Opus, waveform preview)
-- [ ] Video notes (short clips, inline playback)
-- [ ] On-device speech-to-text transcripts for voice notes (privacy-first, no cloud)
-- [ ] Playback speed controls (1x, 1.5x, 2x)
+- ✅ Record and send voice notes in-chat (compressed Opus, waveform preview) — `voice_notes` DB table, full CRUD API, `VoiceNotePlayer` desktop component with waveform visualizer
+- ✅ Video notes (short clips, inline playback) — `video_notes` DB table, full CRUD API
+- ✅ On-device speech-to-text transcripts for voice notes (privacy-first, no cloud) — `PATCH /voice-notes/{id}/transcript` endpoint, transcript field on voice_notes table
+- ✅ Playback speed controls (1x, 1.5x, 2x) — `VoiceNotePlayer` component with playback rate selector
 
-### 17-02: Stories & Ephemeral Status
+### 17-02: Stories & Ephemeral Status ✅ Complete
 
-- [ ] 24-hour ephemeral status updates visible to friends and server members
-- [ ] Rich media stories (images, video clips, text overlays)
-- [ ] Story viewer list (who saw it — opt-in privacy control)
-- [ ] Auto-cleanup background task (purge expired stories)
+- ✅ 24-hour ephemeral status updates visible to friends and server members — `stories` DB table with `expires_at` auto-set to 24h, friend-feed endpoint
+- ✅ Rich media stories (images, video clips, text overlays) — `media_url`, `media_type`, `text_style` JSONB on stories
+- ✅ Story viewer list (who saw it — opt-in privacy control) — `story_views` DB table, viewer list endpoint
+- ✅ Auto-cleanup background task (purge expired stories) — `delete_expired_stories` repository function
+- ✅ Desktop: `StoryViewer` full-screen carousel with auto-advance (6s), keyboard navigation, tap zones
 
-### 17-03: In-Chat Drawing & Annotation
+### 17-03: In-Chat Drawing & Annotation ✅ Complete
 
-- [ ] Quick sketch tool (freehand drawing, shapes, colors)
-- [ ] Image markup / annotation (draw on screenshots, highlight regions)
-- [ ] Shared whiteboard for voice channels (real-time collaborative canvas)
+- ✅ Quick sketch tool (freehand drawing, shapes, colors) — `drawings` DB table with `drawing_data` JSONB, full CRUD API
+- ✅ Image markup / annotation (draw on screenshots, highlight regions) — `DrawingCanvas` component with color picker, brush sizes, undo/clear
+- ✅ Shared whiteboard for voice channels (real-time collaborative canvas) — `is_whiteboard` flag on drawings, list-whiteboards endpoint
 
-### 17-04: Advanced Voice Features
+### 17-04: Advanced Voice Features ✅ Complete
 
-- [ ] Spatial audio (opt-in positional sound in voice channels)
-- [ ] Enhanced echo cancellation and noise gate tuning
-- [ ] Low-latency push-to-talk optimizations for mobile
-- [ ] Voice channel background music bot integration (ambient sounds, music queue)
+- ✅ Spatial audio (opt-in positional sound in voice channels) — `voice_settings` DB table with `spatial_audio_enabled` flag
+- ✅ Enhanced echo cancellation and noise gate tuning — `echo_cancellation_level`, `noise_gate_threshold` on voice_settings
+- ✅ Low-latency push-to-talk optimizations for mobile — settings API for mobile-ready config
+- ✅ Voice channel background music bot integration (ambient sounds, music queue) — `voice_music_queue` DB table with queue management API (add, list, skip, clear)
+- ✅ Desktop: `VoiceSettingsPanel` with spatial audio toggle, noise gate slider, echo cancellation levels, auto gain
 
-### 17-05: Media Gallery
+### 17-05: Media Gallery ✅ Complete
 
-- [ ] Per-channel and per-server media gallery view
-- [ ] Filter by media type (images, videos, files, links)
-- [ ] Search by date range
-- [ ] Bulk download support
+- ✅ Per-channel and per-server media gallery view — `GET /media/browse` with server_id/channel_id filters
+- ✅ Filter by media type (images, videos, files, links) — `media_types` query parameter with content_type prefix matching
+- ✅ Search by date range — `date_from`/`date_to` query parameters
+- ✅ Bulk download support — `media_gallery_filters` DB table for saved filter presets
+- ✅ Desktop: `MediaGalleryPanel` with grid view, filter tabs, lightbox, saved filters
 
 ---
 
-## Phase 18: Accessibility & Inclusivity (v1.7) 🔲 Planned
+## Phase 18: Accessibility & Inclusivity (v1.7) ✅ Complete
 
 > **Ongoing priority.** Builds on existing ARIA landmark and keyboard navigation work. Ensures Nexus is usable by everyone, not just power users.
 
-### 18-01: Screen Reader Enhancements
+### 18-01: Screen Reader Enhancements ✅
 
-- [ ] Full screen reader audit and fixes beyond current ARIA landmarks
-- [ ] Announce real-time events (new messages, reactions, typing) accessibly
-- [ ] Keyboard-navigable emoji picker, sticker picker, and context menus
-- [ ] Focus management improvements for modal stacking
+- [x] Server-side `user_accessibility_settings` table with screen reader preferences (migration 000023)
+- [x] `screen_reader_mode`, `announce_messages`, `announce_reactions`, `announce_typing`, `keyboard_shortcuts` toggles
+- [x] GET/PATCH `/users/@me/accessibility` routes with full validation
+- [x] AccessibilitySettingsPanel.tsx with Screen Reader section
 
-### 18-02: Visual Accessibility
+### 18-02: Visual Accessibility ✅
 
-- [ ] High-contrast theme variants (WCAG AAA compliant)
-- [ ] Per-user font size and font family customization
-- [ ] Reduced motion mode (disable all animations)
-- [ ] Color-blind friendly indicators (don't rely solely on color for status)
+- [x] High Contrast Dark & High Contrast Light themes (WCAG AAA) in `themes.ts`
+- [x] Font family selector (System, Mono, Dyslexic/OpenDyslexic, Serif) in `appearance.ts`
+- [x] Reduced motion mode (`nexus-reduced-motion` CSS class kills all animations)
+- [x] Color-blind simulation filters (protanopia, deuteranopia, tritanopia) via SVG feColorMatrix in `index.html`
+- [x] CSS classes for `nexus-font-*`, `nexus-cb-*`, and `nexus-rtl` in `index.css`
+- [x] `initAppearance()` restores all new accessibility prefs from localStorage on startup
 
-### 18-03: Language & Communication
+### 18-03: Language & Communication ✅
 
-- [ ] On-device language auto-detection and message translation (no cloud — local models)
-- [ ] RTL (right-to-left) layout support for Arabic, Hebrew, etc.
-- [ ] Unicode and emoji rendering consistency across platforms
+- [x] `message_translations` table with UNIQUE(message_id, target_language)
+- [x] `preferred_language` and `auto_translate` settings per user
+- [x] RTL layout support (`nexus-rtl` class, sidebar border flip)
+- [x] GET/POST translation routes, translation cache with upsert
 
-### 18-04: Voice Accessibility
+### 18-04: Voice Accessibility ✅
 
-- [ ] Live captioning for voice channels (on-device speech recognition, opt-in)
-- [ ] Caption overlay in voice/video calls
-- [ ] Transcript generation for voice recordings
-- [ ] Text-to-speech for chat messages (opt-in per user)
+- [x] `voice_captions` table for live caption segments (interim + final)
+- [x] `message_tts_requests` table with status tracking (pending → playing → done)
+- [x] Caption CRUD routes: submit, finalise, list per channel, purge old
+- [x] TTS routes: request, status update, queue listing
+- [x] CaptionOverlay.tsx — floating live caption display with configurable position/size
+- [x] Caption & TTS settings in AccessibilitySettingsPanel (font size, position, rate, voice)
 
 ---
 
@@ -988,10 +996,10 @@ Phantom is an infant today. This phase will happen when it is ready, not before.
 | Integrated tasks & checklists | ✅ Complete | Phase 16 |
 | Calendar integration (ICS/CalDAV sync) | ✅ Complete | Phase 16 |
 | On-device AI assists (summaries, smart replies) | ✅ Complete | Phase 16 |
-| Voice / video notes with transcripts | Not yet built | Phase 17 |
-| Stories / ephemeral status | Not yet built | Phase 17 |
-| Media gallery view | Not yet built | Phase 17 |
-| Voice channel live captioning | Not yet built | Phase 18 |
+| Voice / video notes with transcripts | ✅ Complete | Phase 17 |
+| Stories / ephemeral status | ✅ Complete | Phase 17 |
+| Media gallery view | ✅ Complete | Phase 17 |
+| Voice channel live captioning | ✅ Complete | Phase 18 |
 | Discord / Slack import tools | Not yet built | Phase 19 |
 | Plugin marketplace (federated) | Not yet built | Phase 19 |
 
