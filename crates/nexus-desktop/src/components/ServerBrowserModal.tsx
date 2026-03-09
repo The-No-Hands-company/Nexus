@@ -11,6 +11,7 @@
  */
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "../invoke";
+import type { Server } from "../store";
 import clsx from "clsx";
 
 interface DirectoryServer {
@@ -45,10 +46,10 @@ interface Props {
   onClose: () => void;
 }
 
-type Tab = "servers" | "rooms";
+type Tab = "discover" | "servers" | "rooms";
 
 export default function ServerBrowserModal({ onClose }: Props) {
-  const [tab, setTab] = useState<Tab>("servers");
+  const [tab, setTab] = useState<Tab>("discover");
 
   // Server list state
   const [servers, setServers] = useState<DirectoryServer[]>([]);
@@ -69,6 +70,51 @@ export default function ServerBrowserModal({ onClose }: Props) {
   const [joiningRoomId, setJoiningRoomId] = useState<string | null>(null);
   const [joinedRooms, setJoinedRooms] = useState<Set<string>>(new Set());
   const [joinError, setJoinError] = useState<string | null>(null);
+
+  // ── Discover tab state (v0.16) ────────────────────────────────────────
+  const [discoverServers, setDiscoverServers] = useState<Server[]>([]);
+  const [featuredServers, setFeaturedServers] = useState<Server[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [discoverSearch, setDiscoverSearch] = useState("");
+  const [discoverPending, setDiscoverPending] = useState("");
+  const [discoverLoading, setDiscoverLoading] = useState(true);
+  const [discoverError, setDiscoverError] = useState<string | null>(null);
+
+  // ── Load discover data ─────────────────────────────────────────────────
+
+  useEffect(() => {
+    // Load categories
+    invoke<string[]>("discover_categories")
+      .then(setCategories)
+      .catch(() => {});
+    // Load featured
+    invoke<{ servers: Server[] }>("discover_featured_servers")
+      .then((d) => setFeaturedServers(d.servers ?? []))
+      .catch(() => {});
+  }, []);
+
+  const loadDiscover = useCallback(() => {
+    setDiscoverLoading(true);
+    setDiscoverError(null);
+    if (discoverSearch.trim()) {
+      invoke<{ servers: Server[] }>("discover_search_servers", { query: discoverSearch, limit: 50 })
+        .then((d) => setDiscoverServers(d.servers ?? []))
+        .catch((e) => setDiscoverError(String(e)))
+        .finally(() => setDiscoverLoading(false));
+    } else {
+      const args: Record<string, unknown> = { limit: 50 };
+      if (activeCategory) args.category = activeCategory;
+      invoke<{ servers: Server[] }>("discover_browse_servers", args)
+        .then((d) => setDiscoverServers(d.servers ?? []))
+        .catch((e) => setDiscoverError(String(e)))
+        .finally(() => setDiscoverLoading(false));
+    }
+  }, [discoverSearch, activeCategory]);
+
+  useEffect(() => {
+    if (tab === "discover") loadDiscover();
+  }, [tab, loadDiscover]);
 
   // ── Load servers ──────────────────────────────────────────────────────────
 
@@ -172,7 +218,7 @@ export default function ServerBrowserModal({ onClose }: Props) {
 
         {/* ── Tabs ───────────────────────────────────────────────────────── */}
         <div className="flex gap-1 px-5 pt-3 shrink-0">
-          {(["servers", "rooms"] as Tab[]).map((t) => (
+          {(["discover", "servers", "rooms"] as Tab[]).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -183,13 +229,95 @@ export default function ServerBrowserModal({ onClose }: Props) {
                   : "text-muted hover:bg-bg-700 hover:text-fg"
               )}
             >
-              {t}
+              {t === "discover" ? "Discover" : t}
             </button>
           ))}
         </div>
 
         {/* ── Body ───────────────────────────────────────────────────────── */}
         <div className="flex-1 overflow-y-auto min-h-0">
+
+          {/* ── Discover tab (v0.16) ─────────────────────────────────────── */}
+          {tab === "discover" && (
+            <div className="p-5 flex flex-col gap-4">
+              {/* Search */}
+              <div className="relative">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted pointer-events-none">
+                  <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+                </svg>
+                <input
+                  type="text"
+                  value={discoverPending}
+                  onChange={(e) => setDiscoverPending(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") setDiscoverSearch(discoverPending); }}
+                  placeholder="Search public servers… (Enter)"
+                  className="w-full pl-8 pr-3 py-1.5 bg-bg-900 border border-bg-600 rounded-lg text-sm text-fg placeholder:text-muted focus:outline-none focus:border-accent-500 transition-colors"
+                />
+              </div>
+
+              {/* Category pills */}
+              {categories.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    onClick={() => { setActiveCategory(null); setDiscoverSearch(""); setDiscoverPending(""); }}
+                    className={clsx(
+                      "px-2.5 py-1 rounded-full text-[11px] font-medium capitalize transition-colors",
+                      !activeCategory ? "bg-accent-500 text-white" : "bg-bg-700 text-muted hover:text-fg"
+                    )}
+                  >
+                    All
+                  </button>
+                  {categories.map((cat) => (
+                    <button
+                      key={cat}
+                      onClick={() => { setActiveCategory(cat); setDiscoverSearch(""); setDiscoverPending(""); }}
+                      className={clsx(
+                        "px-2.5 py-1 rounded-full text-[11px] font-medium capitalize transition-colors",
+                        activeCategory === cat ? "bg-accent-500 text-white" : "bg-bg-700 text-muted hover:text-fg"
+                      )}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Featured section */}
+              {!discoverSearch && !activeCategory && featuredServers.length > 0 && (
+                <div>
+                  <h3 className="text-xs font-bold text-muted uppercase tracking-wider mb-2">Featured</h3>
+                  <div className="grid gap-2">
+                    {featuredServers.map((srv) => (
+                      <DiscoverCard key={srv.id} server={srv} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Main list */}
+              {discoverLoading ? (
+                <LoadingSpinner label="Loading servers…" />
+              ) : discoverError ? (
+                <ErrorBanner message={discoverError} />
+              ) : discoverServers.length === 0 ? (
+                <EmptyState message={discoverSearch ? `No servers matching "${discoverSearch}"` : "No public servers found."} />
+              ) : (
+                <div>
+                  {(discoverSearch || activeCategory) && (
+                    <h3 className="text-xs font-bold text-muted uppercase tracking-wider mb-2">
+                      {discoverSearch ? "Search Results" : activeCategory}
+                    </h3>
+                  )}
+                  <div className="grid gap-2">
+                    {discoverServers.map((srv) => (
+                      <DiscoverCard key={srv.id} server={srv} />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* ── Servers tab ──────────────────────────────────────────────── */}
           {tab === "servers" && (
@@ -462,6 +590,58 @@ function EmptyState({ message }: { message: string }) {
         <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
       </svg>
       <p className="text-sm max-w-xs">{message}</p>
+    </div>
+  );
+}
+
+// ── Discover card (v0.16) ──────────────────────────────────────────────────
+
+function DiscoverCard({ server }: { server: Server }) {
+  const initials = (server.name ?? "?").slice(0, 2).toUpperCase();
+  return (
+    <div className="flex items-center gap-4 bg-bg-700/60 rounded-xl px-4 py-3 border border-bg-600/30 hover:border-bg-500/50 transition-colors">
+      <div className="w-10 h-10 rounded-xl bg-bg-600 flex items-center justify-center shrink-0 overflow-hidden">
+        {server.icon ? (
+          <img src={server.icon} alt={server.name} className="w-full h-full object-cover" />
+        ) : (
+          <span className="text-xs font-bold text-fg/60">{initials}</span>
+        )}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-baseline gap-2">
+          <span className="text-sm font-semibold text-fg truncate">{server.name}</span>
+          {server.category && (
+            <span className="text-[10px] bg-bg-600 text-muted px-1.5 py-0.5 rounded-full capitalize">{server.category}</span>
+          )}
+          {server.featuredAt && (
+            <span className="text-[10px] bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded-full">★ Featured</span>
+          )}
+        </div>
+        {server.description && (
+          <div className="text-xs text-muted truncate mt-0.5">{server.description}</div>
+        )}
+        <div className="flex items-center gap-3 mt-1">
+          {server.memberCount != null && (
+            <Stat icon="person" value={server.memberCount} label="members" />
+          )}
+          {server.tags && server.tags.length > 0 && (
+            <span className="text-[10px] text-muted/60 truncate">
+              {server.tags.map((t) => `#${t}`).join(" ")}
+            </span>
+          )}
+        </div>
+      </div>
+      {server.tipJarUrl && (
+        <a
+          href={server.tipJarUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="px-2 py-1 rounded-lg text-[10px] font-medium bg-green-500/20 text-green-400 border border-green-500/30 hover:bg-green-500/30 transition-colors shrink-0"
+          title="Support this server"
+        >
+          Tip
+        </a>
+      )}
     </div>
   );
 }

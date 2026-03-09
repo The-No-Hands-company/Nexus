@@ -125,9 +125,9 @@ The UX should feel immediately familiar. Servers, channels, voice, bots, rich em
 - ✅ `LOW_PREKEYS` gateway event — fired to device owner when remaining OTPKs drop below 5 after a key bundle fetch
 - ✅ Key management UI — Settings Devices section: lists registered devices, per-device revoke button (`delete_device` Tauri command)
 
-## Phase 6: Desktop Client (v0.6) 🟡 Partially Complete
+## Phase 6: Desktop Client (v0.6) ✅ Complete
 
-> **Remaining gaps:** Core chat UX is complete. All management UIs (roles, emoji, webhooks, bots) and the Appearance settings sub-page are now implemented. Keyboard/accessibility complete.
+> Core chat UX, all management UIs (roles, emoji, webhooks, bots), Appearance settings, and keyboard/accessibility are all implemented.
 
 - ✅ Tauri 2 application shell
 - ✅ ChatView, ChannelList, ServerList, MemberList core UI
@@ -149,9 +149,9 @@ The UX should feel immediately familiar. Servers, channels, voice, bots, rich em
 - ✅ Global search: `SearchModal` with Cmd+K/Ctrl+K shortcut, debounced query, keyboard navigation, channel navigation on select
 - ✅ Keyboard navigation and accessibility — `<nav aria-label>` landmarks on ServerList / ChannelList; `role="log" aria-live="polite"` on message list; `role="dialog" aria-modal` + `useFocusTrap` hook on SearchModal and thread overlay; `aria-current` on active server/channel; `aria-pressed` on toggle buttons; `aria-label` on all icon-only buttons; skip-to-content link + `<main id="main-content">` in App
 
-## Phase 7: Extensibility (v0.7) 🟡 Mostly Complete
+## Phase 7: Extensibility (v0.7) ✅ Complete
 
-> **Phase 7 complete.** Bot token scheme, combined auth middleware, and dedicated bot gateway auth (`BotIdentify` opcode) all implemented.
+> Bot token scheme, combined auth middleware, and dedicated bot gateway auth (`BotIdentify` opcode) all implemented.
 
 - ✅ Nexus Bot API (REST endpoints)
 - ✅ Bot WebSocket gateway events
@@ -163,9 +163,9 @@ The UX should feel immediately familiar. Servers, channels, voice, bots, rich em
 - ✅ Bot token scheme — `Bot <token>` scheme with SHA-256 hashed tokens stored in DB
 - ✅ Bot gateway auth — dedicated `BotIdentify` opcode, separate from user `Identify`
 
-## Phase 8: Federation (v0.8) 🟡 Mostly Complete
+## Phase 8: Federation (v0.8) ✅ Complete
 
-> **Phase 8 complete.** Matrix bridge fully implemented with DB persistence.
+> Matrix bridge fully implemented with DB persistence.
 
 ### 08-01: Core Infrastructure
 
@@ -722,19 +722,19 @@ Phantom is an infant today. This phase will happen when it is ready, not before.
 
 - ✅ Collaborative Markdown/editable embeds (Notion-lite, real-time via gateway)
 
-### 15-04: Creator Monetization
+### 15-04: Creator Monetization ✅ Complete
 
-- [ ] Tip jar integration (external payment links — Stripe, crypto, or custom)
-- [ ] Subscription channel previews (teaser content visible to non-subscribers)
-- [ ] Self-hosted payment processing (no central cut — server owner controls payments)
-- [ ] Creator analytics dashboard (subscriber count, engagement metrics — no user tracking)
+- ✅ Tip jar integration (external payment links — Stripe, crypto, or custom)
+- ✅ Subscription channel previews (teaser content visible to non-subscribers)
+- ✅ Self-hosted payment processing (no central cut — server owner controls payments)
+- ✅ Creator analytics dashboard (subscriber count, engagement metrics — no user tracking)
 
-### 15-05: Server Discovery Improvements
+### 15-05: Server Discovery Improvements ✅ Complete
 
-- [ ] Server tags and categories (gaming, education, tech, art, etc.)
-- [ ] Popularity metrics without user tracking (member count, activity score — computed locally)
-- [ ] Featured servers rotation in the public directory
-- [ ] Server preview (read-only channel peek before joining)
+- ✅ Server tags and categories (gaming, education, tech, art, etc.)
+- ✅ Popularity metrics without user tracking (member count, activity score — computed locally)
+- ✅ Featured servers rotation in the public directory
+- ✅ Server preview (read-only channel peek before joining)
 
 ---
 

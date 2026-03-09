@@ -47,3 +47,7 @@ pub mod stickers;
 pub mod badges;
 pub mod boosters;
 pub mod canvas;
+
+// v0.16 Discovery & Monetization
+pub mod discovery;
+pub mod monetization;

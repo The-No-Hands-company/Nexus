@@ -64,6 +64,21 @@ pub struct Server {
     /// Live active-booster count — v0.15
     pub booster_count: i32,
 
+    /// Discovery tags (up to 5 freeform labels) — v0.16
+    pub tags: Vec<String>,
+
+    /// Predefined category for discovery browsing — v0.16
+    pub category: Option<String>,
+
+    /// Computed popularity score (updated periodically) — v0.16
+    pub activity_score: i32,
+
+    /// When this server was featured (None = not featured) — v0.16
+    pub featured_at: Option<DateTime<Utc>>,
+
+    /// External tip-jar / donation URL — v0.16
+    pub tip_jar_url: Option<String>,
+
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -80,6 +95,12 @@ pub struct CreateServerRequest {
 
     /// Template to clone from (pre-built channel structures)
     pub template: Option<String>,
+
+    /// Discovery tags (up to 5) — v0.16
+    pub tags: Option<Vec<String>>,
+
+    /// Predefined category — v0.16
+    pub category: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Validate)]
@@ -104,6 +125,15 @@ pub struct UpdateServerRequest {
     /// Maximum identical messages per user per window (1-20).
     #[validate(range(min = 1, max = 20))]
     pub spam_max_messages: Option<i32>,
+
+    /// Discovery tags (up to 5) — v0.16
+    pub tags: Option<Vec<String>>,
+
+    /// Predefined category — v0.16
+    pub category: Option<String>,
+
+    /// External tip-jar / donation URL — v0.16
+    pub tip_jar_url: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -121,6 +151,13 @@ pub struct ServerResponse {
     pub require_2fa: bool,
     pub spam_window_secs: i32,
     pub spam_max_messages: i32,
+    pub tags: Vec<String>,
+    pub category: Option<String>,
+    pub activity_score: i32,
+    pub featured_at: Option<DateTime<Utc>>,
+    pub tip_jar_url: Option<String>,
+    pub boost_tier: i16,
+    pub booster_count: i32,
     pub created_at: DateTime<Utc>,
 }
 
@@ -140,6 +177,13 @@ impl From<Server> for ServerResponse {
             require_2fa: s.require_2fa,
             spam_window_secs: s.spam_window_secs,
             spam_max_messages: s.spam_max_messages,
+            tags: s.tags,
+            category: s.category,
+            activity_score: s.activity_score,
+            featured_at: s.featured_at,
+            tip_jar_url: s.tip_jar_url,
+            boost_tier: s.boost_tier,
+            booster_count: s.booster_count,
             created_at: s.created_at,
         }
     }

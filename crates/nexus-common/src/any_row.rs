@@ -195,6 +195,11 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for Server {
             spam_max_messages: row.try_get("spam_max_messages").unwrap_or(3),
             boost_tier: row.try_get("boost_tier").unwrap_or(0),
             booster_count: row.try_get("booster_count").unwrap_or(0),
+            tags: str_vec(row, "tags").unwrap_or_default(),
+            category: row.try_get("category").unwrap_or(None),
+            activity_score: row.try_get("activity_score").unwrap_or(0),
+            featured_at: opt_dt(row, "featured_at").unwrap_or(None),
+            tip_jar_url: row.try_get("tip_jar_url").unwrap_or(None),
             created_at: dt(row, "created_at")?,
             updated_at: dt(row, "updated_at")?,
         })

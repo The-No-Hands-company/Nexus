@@ -23,6 +23,8 @@ pub const SERVER_COLS: &str =
     "id::text AS id, name, description, icon, banner, owner_id::text AS owner_id, \
      region, is_public, features::text AS features, settings::text AS settings, \
      vanity_code, member_count, max_file_size, require_2fa, spam_window_secs, spam_max_messages, \
+     boost_tier, booster_count, \
+     array_to_json(tags)::text AS tags, category, activity_score, featured_at::text AS featured_at, tip_jar_url, \
      created_at::text AS created_at, updated_at::text AS updated_at";
 
 /// Same as `SERVER_COLS` but with `s.` table-alias prefix for JOIN queries.
@@ -31,6 +33,8 @@ pub const SERVER_COLS_S: &str =
      s.owner_id::text AS owner_id, s.region, s.is_public, \
      s.features::text AS features, s.settings::text AS settings, \
      s.vanity_code, s.member_count, s.max_file_size, s.require_2fa, s.spam_window_secs, s.spam_max_messages, \
+     s.boost_tier, s.booster_count, \
+     array_to_json(s.tags)::text AS tags, s.category, s.activity_score, s.featured_at::text AS featured_at, s.tip_jar_url, \
      s.created_at::text AS created_at, s.updated_at::text AS updated_at";
 
 // ── channels ──────────────────────────────────────────────────────────────────

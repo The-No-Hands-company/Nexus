@@ -86,10 +86,28 @@ async fn create_server(
 
     let server_id = snowflake::generate_id();
     let is_public = body.is_public.unwrap_or(false);
+    let tags = body.tags.as_deref().unwrap_or(&[]);
+
+    // Enforce max 5 tags, each max 32 chars
+    if tags.len() > 5 {
+        return Err(NexusError::Validation {
+            message: "Maximum 5 tags allowed".into(),
+        });
+    }
+    for tag in tags {
+        if tag.len() > 32 || tag.is_empty() {
+            return Err(NexusError::Validation {
+                message: "Tags must be 1-32 characters".into(),
+            });
+        }
+    }
 
     // Create the server
     let server =
-        servers::create_server(&state.db.pool, server_id, &body.name, auth.user_id, is_public)
+        servers::create_server(
+            &state.db.pool, server_id, &body.name, auth.user_id, is_public,
+            tags, body.category.as_deref(),
+        )
             .await?;
 
     // Create @everyone role with default permissions
@@ -180,6 +198,22 @@ async fn update_server(
         return Err(NexusError::Forbidden);
     }
 
+    // Enforce max 5 tags, each max 32 chars
+    if let Some(ref tags) = body.tags {
+        if tags.len() > 5 {
+            return Err(NexusError::Validation {
+                message: "Maximum 5 tags allowed".into(),
+            });
+        }
+        for tag in tags {
+            if tag.len() > 32 || tag.is_empty() {
+                return Err(NexusError::Validation {
+                    message: "Tags must be 1-32 characters".into(),
+                });
+            }
+        }
+    }
+
     let updated = servers::update_server(
         &state.db.pool,
         server_id,
@@ -189,6 +223,9 @@ async fn update_server(
         body.require_2fa,
         body.spam_window_secs,
         body.spam_max_messages,
+        body.tags.as_deref(),
+        body.category.as_deref(),
+        body.tip_jar_url.as_deref(),
     )
     .await?;
 

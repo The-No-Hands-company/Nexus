@@ -106,6 +106,9 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::badges::router())                          // user badges
         .merge(routes::boosters::router())                        // server supporter tiers
         .merge(routes::canvas::router())                          // canvas document channels
+        // v0.16 Discovery & Monetization
+        .merge(routes::discovery::router())                       // server discovery browsing
+        .merge(routes::monetization::router())                    // creator monetization
         // v0.8.5 Federation UX — admin management + cross-instance search
         .merge(routes::federation_admin::router())                // federation admin panel API
         // Make Arc<AppState> available as an Axum Extension so that

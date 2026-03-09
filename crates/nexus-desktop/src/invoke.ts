@@ -112,6 +112,15 @@ function mapServer(s: Raw) {
     require2fa: (s.require_2fa as boolean) ?? false,
     spamWindowSecs: (s.spam_window_secs as number) ?? 30,
     spamMaxMessages: (s.spam_max_messages as number) ?? 3,
+    boostTier: (s.boost_tier as number) ?? 0,
+    boosterCount: (s.booster_count as number) ?? 0,
+    vanityCode: s.vanity_code ?? null,
+    tags: (s.tags as string[]) ?? [],
+    category: s.category ?? null,
+    activityScore: (s.activity_score as number) ?? 0,
+    featuredAt: s.featured_at ?? null,
+    tipJarUrl: s.tip_jar_url ?? null,
+    description: s.description ?? null,
   };
 }
 
@@ -428,6 +437,8 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
       const raw = await apiFetch<Raw>("POST", "/api/v1/servers", {
         name: args.name,
         is_public: args.isPublic ?? false,
+        tags: args.tags ?? undefined,
+        category: args.category ?? undefined,
       });
       return mapServer(raw) as T;
     }
@@ -441,6 +452,9 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
         require_2fa: args.require2fa ?? undefined,
         spam_window_secs: args.spamWindowSecs ?? undefined,
         spam_max_messages: args.spamMaxMessages ?? undefined,
+        tags: args.tags ?? undefined,
+        category: args.category ?? undefined,
+        tip_jar_url: args.tipJarUrl ?? undefined,
       });
       return mapServer(raw) as T;
     }
@@ -1148,6 +1162,86 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
       return apiFetch<T>("POST", "/api/v1/directory/rooms/join", { room_id: args.roomId });
     }
 
+    // ── Discovery (v0.16) ─────────────────────────────────────────────────
+    case "discover_browse_servers": {
+      const params = new URLSearchParams();
+      params.set("limit", String(args.limit ?? 20));
+      params.set("offset", String(args.offset ?? 0));
+      if (args.tag) params.set("tag", args.tag as string);
+      if (args.category) params.set("category", args.category as string);
+      const resp = await apiFetch<Raw>("GET", `/api/v1/discover/servers?${params}`);
+      return { ...resp, servers: ((resp as Record<string, unknown>).servers as Raw[]).map(mapServer) } as T;
+    }
+
+    case "discover_featured_servers": {
+      const resp = await apiFetch<Raw>("GET", "/api/v1/discover/servers/featured");
+      return { ...resp, servers: ((resp as Record<string, unknown>).servers as Raw[]).map(mapServer) } as T;
+    }
+
+    case "discover_search_servers": {
+      const params = new URLSearchParams();
+      params.set("q", String(args.query ?? ""));
+      params.set("limit", String(args.limit ?? 20));
+      params.set("offset", String(args.offset ?? 0));
+      const resp = await apiFetch<Raw>("GET", `/api/v1/discover/servers/search?${params}`);
+      return { ...resp, servers: ((resp as Record<string, unknown>).servers as Raw[]).map(mapServer) } as T;
+    }
+
+    case "discover_server_preview": {
+      const resp = await apiFetch<Raw>("GET", `/api/v1/discover/servers/${args.serverId}/preview`);
+      // Flatten: the server fields are at the root level due to #[serde(flatten)]
+      return resp as T;
+    }
+
+    case "discover_categories": {
+      return apiFetch<T>("GET", "/api/v1/discover/categories");
+    }
+
+    case "discover_feature_server": {
+      const raw = await apiFetch<Raw>(
+        "POST",
+        `/api/v1/discover/servers/${args.serverId}/feature`,
+        { featured: args.featured ?? true },
+      );
+      return mapServer(raw) as T;
+    }
+
+    // ── Monetization (v0.16) ──────────────────────────────────────────────
+    case "get_monetization_config": {
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/monetization`);
+    }
+
+    case "update_monetization_config": {
+      return apiFetch<T>("PUT", `/api/v1/servers/${args.serverId}/monetization`, {
+        provider: args.provider ?? undefined,
+        webhook_url: args.webhookUrl ?? undefined,
+        enabled: args.enabled ?? undefined,
+        tip_jar_url: args.tipJarUrl ?? undefined,
+      });
+    }
+
+    case "list_subscription_tiers": {
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/subscription-tiers`);
+    }
+
+    case "create_subscription_tier": {
+      return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/subscription-tiers`, {
+        name: args.name,
+        description: args.description ?? undefined,
+        price_cents: args.priceCents,
+        currency: args.currency ?? undefined,
+        interval: args.interval ?? undefined,
+        role_id: args.roleId ?? undefined,
+        position: args.position ?? undefined,
+      });
+    }
+
+    case "get_creator_analytics": {
+      const days = args.days ?? 30;
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/analytics?days=${days}`);
+    }
+
+    default:
       throw new Error(`[browser] Unhandled invoke command: "${cmd}"`);
   }
 }

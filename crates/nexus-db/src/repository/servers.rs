@@ -13,10 +13,16 @@ pub async fn create_server(
     name: &str,
     owner_id: Uuid,
     is_public: bool,
+    tags: &[String],
+    category: Option<&str>,
 ) -> Result<Server, sqlx::Error> {
+    let tags_json = serde_json::to_string(tags).unwrap_or_else(|_| "[]".into());
     let q = format!(
-        "INSERT INTO servers (id, name, owner_id, is_public, features, settings, member_count, created_at, updated_at) \
-         VALUES ($1::uuid, $2, $3::uuid, $4, '{{}}', '{{}}', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) \
+        "INSERT INTO servers (id, name, owner_id, is_public, features, settings, member_count, \
+         tags, category, created_at, updated_at) \
+         VALUES ($1::uuid, $2, $3::uuid, $4, '{{}}', '{{}}', 1, \
+         ARRAY(SELECT jsonb_array_elements_text($5::jsonb)), $6, \
+         CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) \
          RETURNING {SERVER_COLS}"
     );
     sqlx::query_as::<_, Server>(&q)
@@ -24,6 +30,8 @@ pub async fn create_server(
     .bind(name)
     .bind(owner_id.to_string())
     .bind(is_public)
+    .bind(&tags_json)
+    .bind(category)
     .fetch_one(pool)
     .await
 }
@@ -61,7 +69,12 @@ pub async fn update_server(
     require_2fa: Option<bool>,
     spam_window_secs: Option<i32>,
     spam_max_messages: Option<i32>,
+    tags: Option<&[String]>,
+    category: Option<&str>,
+    tip_jar_url: Option<&str>,
 ) -> Result<Server, sqlx::Error> {
+    // Build tags update expression: only touch the column when tags is Some
+    let tags_json = tags.map(|t| serde_json::to_string(t).unwrap_or_else(|_| "[]".into()));
     let q = format!(
         "UPDATE servers SET \
              name = COALESCE($1, name), \
@@ -70,6 +83,9 @@ pub async fn update_server(
              require_2fa = COALESCE($4, require_2fa), \
              spam_window_secs = COALESCE($5, spam_window_secs), \
              spam_max_messages = COALESCE($6, spam_max_messages), \
+             tags = CASE WHEN $8::text IS NOT NULL THEN ARRAY(SELECT jsonb_array_elements_text($8::jsonb)) ELSE tags END, \
+             category = COALESCE($9, category), \
+             tip_jar_url = COALESCE($10, tip_jar_url), \
              updated_at = CURRENT_TIMESTAMP \
          WHERE id = $7::uuid \
          RETURNING {SERVER_COLS}"
@@ -82,6 +98,9 @@ pub async fn update_server(
     .bind(spam_window_secs)
     .bind(spam_max_messages)
     .bind(id.to_string())
+    .bind(tags_json.as_deref())
+    .bind(category)
+    .bind(tip_jar_url)
     .fetch_one(pool)
     .await
 }
@@ -217,4 +236,140 @@ pub async fn list_public_servers(
     .bind(offset)
     .fetch_all(pool)
     .await
+}
+
+// ── Discovery queries (v0.16) ─────────────────────────────────────────────────
+
+/// List featured public servers (ordered by featured_at descending).
+pub async fn list_featured_servers(
+    pool: &sqlx::AnyPool,
+    limit: i64,
+) -> Result<Vec<Server>, sqlx::Error> {
+    let q = format!(
+        "SELECT {SERVER_COLS} FROM servers \
+         WHERE is_public = true AND featured_at IS NOT NULL \
+         ORDER BY featured_at DESC \
+         LIMIT $1"
+    );
+    sqlx::query_as::<_, Server>(&q)
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+}
+
+/// List public servers filtered by category.
+pub async fn list_servers_by_category(
+    pool: &sqlx::AnyPool,
+    category: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<Server>, sqlx::Error> {
+    let q = format!(
+        "SELECT {SERVER_COLS} FROM servers \
+         WHERE is_public = true AND category = $1 \
+         ORDER BY activity_score DESC, member_count DESC \
+         LIMIT $2 OFFSET $3"
+    );
+    sqlx::query_as::<_, Server>(&q)
+        .bind(category)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(pool)
+        .await
+}
+
+/// List public servers that contain a specific tag.
+pub async fn list_servers_by_tag(
+    pool: &sqlx::AnyPool,
+    tag: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<Server>, sqlx::Error> {
+    let q = format!(
+        "SELECT {SERVER_COLS} FROM servers \
+         WHERE is_public = true AND $1 = ANY(tags) \
+         ORDER BY activity_score DESC, member_count DESC \
+         LIMIT $2 OFFSET $3"
+    );
+    sqlx::query_as::<_, Server>(&q)
+        .bind(tag)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(pool)
+        .await
+}
+
+/// Full-text search across public server names and descriptions.
+pub async fn search_public_servers(
+    pool: &sqlx::AnyPool,
+    query: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<Server>, sqlx::Error> {
+    let q = format!(
+        "SELECT {SERVER_COLS} FROM servers \
+         WHERE is_public = true \
+           AND to_tsvector('english', COALESCE(name, '') || ' ' || COALESCE(description, '')) \
+               @@ plainto_tsquery('english', $1) \
+         ORDER BY activity_score DESC, member_count DESC \
+         LIMIT $2 OFFSET $3"
+    );
+    sqlx::query_as::<_, Server>(&q)
+        .bind(query)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(pool)
+        .await
+}
+
+/// Get a server preview (public info + public channel list) without auth.
+/// Returns `None` if the server doesn't exist or is not public.
+pub async fn get_server_preview(
+    pool: &sqlx::AnyPool,
+    server_id: Uuid,
+) -> Result<Option<Server>, sqlx::Error> {
+    let q = format!(
+        "SELECT {SERVER_COLS} FROM servers \
+         WHERE id = $1::uuid AND is_public = true"
+    );
+    sqlx::query_as::<_, Server>(&q)
+        .bind(server_id.to_string())
+        .fetch_optional(pool)
+        .await
+}
+
+/// Feature or un-feature a server (admin action).
+pub async fn set_featured(
+    pool: &sqlx::AnyPool,
+    server_id: Uuid,
+    featured: bool,
+) -> Result<Server, sqlx::Error> {
+    let q = format!(
+        "UPDATE servers SET \
+             featured_at = CASE WHEN $1 THEN CURRENT_TIMESTAMP ELSE NULL END, \
+             updated_at = CURRENT_TIMESTAMP \
+         WHERE id = $2::uuid \
+         RETURNING {SERVER_COLS}"
+    );
+    sqlx::query_as::<_, Server>(&q)
+        .bind(featured)
+        .bind(server_id.to_string())
+        .fetch_one(pool)
+        .await
+}
+
+/// Update the activity_score for a server (called periodically by a background task).
+pub async fn update_activity_score(
+    pool: &sqlx::AnyPool,
+    server_id: Uuid,
+    score: i32,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE servers SET activity_score = $1 WHERE id = $2::uuid"
+    )
+        .bind(score)
+        .bind(server_id.to_string())
+        .execute(pool)
+        .await?;
+    Ok(())
 }

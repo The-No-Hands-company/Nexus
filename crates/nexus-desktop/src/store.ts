@@ -26,6 +26,19 @@ export interface Server {
   boosterCount?: number;
   /** v0.15 — vanity invite code */
   vanityCode?: string;
+  /** v0.16 — discovery tags */
+  tags?: string[];
+  /** v0.16 — discovery category */
+  category?: string;
+  /** v0.16 — popularity score */
+  activityScore?: number;
+  /** v0.16 — when featured (null = not featured) */
+  featuredAt?: string;
+  /** v0.16 — external donation/tip URL */
+  tipJarUrl?: string;
+  /** member count */
+  memberCount?: number;
+  description?: string;
 }
 
 export interface Channel {
