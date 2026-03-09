@@ -172,7 +172,7 @@ pub struct UpdateEmojiRequest {
 // ============================================================
 
 /// Row from the `attachments` table.
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AttachmentRow {
     pub id: Uuid,
     pub uploader_id: Uuid,

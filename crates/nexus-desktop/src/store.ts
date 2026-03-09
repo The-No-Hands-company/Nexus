@@ -470,6 +470,106 @@ export interface ChannelDigest {
   createdAt: string;
 }
 
+// ─── v1.6 Multimedia & Expression ─────────────────────────────────────────
+
+export interface VoiceNote {
+  id: string;
+  channelId: string;
+  authorId: string;
+  storageKey: string;
+  filename: string;
+  contentType: string;
+  size: number;
+  durationMs: number;
+  waveform: string | null;
+  transcript: string | null;
+  messageId: string | null;
+  createdAt: string;
+}
+
+export interface VideoNote {
+  id: string;
+  channelId: string;
+  authorId: string;
+  storageKey: string;
+  filename: string;
+  contentType: string;
+  size: number;
+  durationMs: number;
+  width: number | null;
+  height: number | null;
+  thumbnailKey: string | null;
+  transcript: string | null;
+  messageId: string | null;
+  createdAt: string;
+}
+
+export interface Story {
+  id: string;
+  authorId: string;
+  mediaType: string;
+  storageKey: string | null;
+  textContent: string | null;
+  textStyle: Record<string, unknown> | null;
+  expiresAt: string;
+  visibility: string;
+  createdAt: string;
+}
+
+export interface StoryView {
+  storyId: string;
+  viewerId: string;
+  viewedAt: string;
+}
+
+export interface Drawing {
+  id: string;
+  channelId: string;
+  authorId: string;
+  drawingData: Record<string, unknown>;
+  width: number;
+  height: number;
+  previewKey: string | null;
+  messageId: string | null;
+  isWhiteboard: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface VoiceSettings {
+  userId: string;
+  spatialAudio: boolean;
+  noiseGateEnabled: boolean;
+  noiseGateThreshold: number;
+  echoCancelLevel: string;
+  autoGain: boolean;
+  updatedAt: string;
+}
+
+export interface VoiceMusicQueueItem {
+  id: string;
+  channelId: string;
+  addedBy: string;
+  title: string;
+  sourceUrl: string;
+  durationMs: number;
+  position: number;
+  status: string;
+  createdAt: string;
+}
+
+export interface MediaGalleryFilter {
+  id: string;
+  userId: string;
+  serverId: string | null;
+  channelId: string | null;
+  name: string;
+  mediaTypes: string[];
+  dateFrom: string | null;
+  dateTo: string | null;
+  createdAt: string;
+}
+
 interface StoreState {
   // Auth
   session: Session | null;
@@ -667,6 +767,37 @@ interface StoreState {
   aiPreferences: AiPreferences | null;
   setAiPreferences: (prefs: AiPreferences) => void;
   loadAiPreferences: () => Promise<void>;
+
+  // ─── v1.6 Multimedia & Expression ─────────────────────────────────────
+
+  // Voice notes — keyed by channelId
+  channelVoiceNotes: Record<string, VoiceNote[]>;
+  loadVoiceNotes: (channelId: string) => Promise<void>;
+
+  // Video notes — keyed by channelId
+  channelVideoNotes: Record<string, VideoNote[]>;
+  loadVideoNotes: (channelId: string) => Promise<void>;
+
+  // Stories — feed of active stories
+  storyFeed: Story[];
+  loadStoryFeed: () => Promise<void>;
+
+  // Drawings — keyed by channelId
+  channelDrawings: Record<string, Drawing[]>;
+  loadDrawings: (channelId: string) => Promise<void>;
+
+  // Voice settings (per-user)
+  voiceSettings: VoiceSettings | null;
+  setVoiceSettings: (settings: VoiceSettings) => void;
+  loadVoiceSettings: () => Promise<void>;
+
+  // Music queue — keyed by channelId
+  musicQueue: Record<string, VoiceMusicQueueItem[]>;
+  loadMusicQueue: (channelId: string) => Promise<void>;
+
+  // Media gallery filters
+  mediaGalleryFilters: MediaGalleryFilter[];
+  loadMediaGalleryFilters: () => Promise<void>;
 }
 
 // Module-level map so typing-clear timeouts survive re-renders
@@ -1332,6 +1463,79 @@ export const useStore = create<StoreState>((set, get) => ({
       set({ aiPreferences: prefs });
     } catch (e) {
       console.error("loadAiPreferences error", e);
+    }
+  },
+
+  // ─── v1.6 Multimedia & Expression ───────────────────────────────────────
+
+  channelVoiceNotes: {},
+  loadVoiceNotes: async (channelId) => {
+    try {
+      const notes = await invoke<VoiceNote[]>("list_voice_notes", { channelId });
+      set((s) => ({ channelVoiceNotes: { ...s.channelVoiceNotes, [channelId]: notes } }));
+    } catch (e) {
+      console.error("loadVoiceNotes error", e);
+    }
+  },
+
+  channelVideoNotes: {},
+  loadVideoNotes: async (channelId) => {
+    try {
+      const notes = await invoke<VideoNote[]>("list_video_notes", { channelId });
+      set((s) => ({ channelVideoNotes: { ...s.channelVideoNotes, [channelId]: notes } }));
+    } catch (e) {
+      console.error("loadVideoNotes error", e);
+    }
+  },
+
+  storyFeed: [],
+  loadStoryFeed: async () => {
+    try {
+      const stories = await invoke<Story[]>("get_story_feed", {});
+      set({ storyFeed: stories });
+    } catch (e) {
+      console.error("loadStoryFeed error", e);
+    }
+  },
+
+  channelDrawings: {},
+  loadDrawings: async (channelId) => {
+    try {
+      const drawings = await invoke<Drawing[]>("list_drawings", { channelId });
+      set((s) => ({ channelDrawings: { ...s.channelDrawings, [channelId]: drawings } }));
+    } catch (e) {
+      console.error("loadDrawings error", e);
+    }
+  },
+
+  voiceSettings: null,
+  setVoiceSettings: (settings) => set({ voiceSettings: settings }),
+  loadVoiceSettings: async () => {
+    try {
+      const settings = await invoke<VoiceSettings>("get_voice_settings", {});
+      set({ voiceSettings: settings });
+    } catch (e) {
+      console.error("loadVoiceSettings error", e);
+    }
+  },
+
+  musicQueue: {},
+  loadMusicQueue: async (channelId) => {
+    try {
+      const queue = await invoke<VoiceMusicQueueItem[]>("list_music_queue", { channelId });
+      set((s) => ({ musicQueue: { ...s.musicQueue, [channelId]: queue } }));
+    } catch (e) {
+      console.error("loadMusicQueue error", e);
+    }
+  },
+
+  mediaGalleryFilters: [],
+  loadMediaGalleryFilters: async () => {
+    try {
+      const filters = await invoke<MediaGalleryFilter[]>("list_media_filters", {});
+      set({ mediaGalleryFilters: filters });
+    } catch (e) {
+      console.error("loadMediaGalleryFilters error", e);
     }
   },
 }));

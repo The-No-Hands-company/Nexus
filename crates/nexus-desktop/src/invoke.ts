@@ -1391,6 +1391,186 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
       });
     }
 
+    // ── Voice Notes (v1.6 — 17-01) ───────────────────────────────────────
+    case "list_voice_notes": {
+      return apiFetch<T>("GET", `/api/v1/channels/${args.channelId}/voice-notes`);
+    }
+    case "create_voice_note": {
+      return apiFetch<T>("POST", `/api/v1/channels/${args.channelId}/voice-notes`, {
+        storage_key: args.storageKey,
+        filename: args.filename,
+        content_type: args.contentType,
+        size: args.size,
+        duration_ms: args.durationMs,
+        waveform: args.waveform ?? undefined,
+        message_id: args.messageId ?? undefined,
+      });
+    }
+    case "get_voice_note": {
+      return apiFetch<T>("GET", `/api/v1/voice-notes/${args.id}`);
+    }
+    case "delete_voice_note": {
+      return apiFetch<T>("DELETE", `/api/v1/voice-notes/${args.id}`);
+    }
+    case "set_voice_note_transcript": {
+      return apiFetch<T>("PATCH", `/api/v1/voice-notes/${args.id}/transcript`, {
+        transcript: args.transcript,
+      });
+    }
+
+    // ── Video Notes (v1.6 — 17-01) ───────────────────────────────────────
+    case "list_video_notes": {
+      return apiFetch<T>("GET", `/api/v1/channels/${args.channelId}/video-notes`);
+    }
+    case "create_video_note": {
+      return apiFetch<T>("POST", `/api/v1/channels/${args.channelId}/video-notes`, {
+        storage_key: args.storageKey,
+        filename: args.filename,
+        content_type: args.contentType,
+        size: args.size,
+        duration_ms: args.durationMs,
+        width: args.width ?? undefined,
+        height: args.height ?? undefined,
+        thumbnail_key: args.thumbnailKey ?? undefined,
+        message_id: args.messageId ?? undefined,
+      });
+    }
+    case "get_video_note": {
+      return apiFetch<T>("GET", `/api/v1/video-notes/${args.id}`);
+    }
+    case "delete_video_note": {
+      return apiFetch<T>("DELETE", `/api/v1/video-notes/${args.id}`);
+    }
+    case "set_video_note_transcript": {
+      return apiFetch<T>("PATCH", `/api/v1/video-notes/${args.id}/transcript`, {
+        transcript: args.transcript,
+      });
+    }
+
+    // ── Stories (v1.6 — 17-02) ───────────────────────────────────────────
+    case "create_story": {
+      return apiFetch<T>("POST", "/api/v1/stories", {
+        media_type: args.mediaType,
+        storage_key: args.storageKey ?? undefined,
+        text_content: args.textContent ?? undefined,
+        text_style: args.textStyle ?? undefined,
+        visibility: args.visibility ?? undefined,
+        duration_hours: args.durationHours ?? undefined,
+      });
+    }
+    case "get_story_feed": {
+      return apiFetch<T>("GET", "/api/v1/users/@me/stories/feed");
+    }
+    case "get_user_stories": {
+      return apiFetch<T>("GET", `/api/v1/users/${args.userId}/stories`);
+    }
+    case "get_story": {
+      return apiFetch<T>("GET", `/api/v1/stories/${args.id}`);
+    }
+    case "delete_story": {
+      return apiFetch<T>("DELETE", `/api/v1/stories/${args.id}`);
+    }
+    case "view_story": {
+      return apiFetch<T>("POST", `/api/v1/stories/${args.id}/view`);
+    }
+    case "list_story_viewers": {
+      return apiFetch<T>("GET", `/api/v1/stories/${args.id}/viewers`);
+    }
+
+    // ── Drawings (v1.6 — 17-03) ──────────────────────────────────────────
+    case "list_drawings": {
+      return apiFetch<T>("GET", `/api/v1/channels/${args.channelId}/drawings`);
+    }
+    case "create_drawing": {
+      return apiFetch<T>("POST", `/api/v1/channels/${args.channelId}/drawings`, {
+        drawing_data: args.drawingData,
+        width: args.width ?? undefined,
+        height: args.height ?? undefined,
+        preview_key: args.previewKey ?? undefined,
+        message_id: args.messageId ?? undefined,
+        is_whiteboard: args.isWhiteboard ?? undefined,
+      });
+    }
+    case "get_drawing": {
+      return apiFetch<T>("GET", `/api/v1/drawings/${args.id}`);
+    }
+    case "update_drawing": {
+      return apiFetch<T>("PATCH", `/api/v1/drawings/${args.id}`, {
+        drawing_data: args.drawingData,
+        preview_key: args.previewKey ?? undefined,
+      });
+    }
+    case "delete_drawing": {
+      return apiFetch<T>("DELETE", `/api/v1/drawings/${args.id}`);
+    }
+    case "list_whiteboards": {
+      return apiFetch<T>("GET", `/api/v1/channels/${args.channelId}/whiteboards`);
+    }
+
+    // ── Voice Settings (v1.6 — 17-04) ────────────────────────────────────
+    case "get_voice_settings": {
+      return apiFetch<T>("GET", "/api/v1/users/@me/voice-settings");
+    }
+    case "update_voice_settings": {
+      return apiFetch<T>("PATCH", "/api/v1/users/@me/voice-settings", {
+        spatial_audio: args.spatialAudio ?? undefined,
+        noise_gate_enabled: args.noiseGateEnabled ?? undefined,
+        noise_gate_threshold: args.noiseGateThreshold ?? undefined,
+        echo_cancel_level: args.echoCancelLevel ?? undefined,
+        auto_gain: args.autoGain ?? undefined,
+      });
+    }
+
+    // ── Music Queue (v1.6 — 17-04) ───────────────────────────────────────
+    case "list_music_queue": {
+      return apiFetch<T>("GET", `/api/v1/channels/${args.channelId}/music-queue`);
+    }
+    case "add_to_music_queue": {
+      return apiFetch<T>("POST", `/api/v1/channels/${args.channelId}/music-queue`, {
+        title: args.title,
+        source_url: args.sourceUrl,
+        duration_ms: args.durationMs,
+      });
+    }
+    case "update_queue_status": {
+      return apiFetch<T>("PATCH", `/api/v1/music-queue/${args.id}`, {
+        status: args.status,
+      });
+    }
+    case "skip_track": {
+      return apiFetch<T>("POST", `/api/v1/channels/${args.channelId}/music-queue/skip`);
+    }
+    case "clear_music_queue": {
+      return apiFetch<T>("DELETE", `/api/v1/channels/${args.channelId}/music-queue`);
+    }
+
+    // ── Media Gallery (v1.6 — 17-05) ─────────────────────────────────────
+    case "browse_media": {
+      const params = new URLSearchParams();
+      if (args.serverId) params.set("server_id", args.serverId as string);
+      if (args.channelId) params.set("channel_id", args.channelId as string);
+      if (args.limit) params.set("limit", String(args.limit));
+      if (args.offset) params.set("offset", String(args.offset));
+      const qs = params.toString();
+      return apiFetch<T>("GET", `/api/v1/media/browse${qs ? `?${qs}` : ""}`);
+    }
+    case "list_media_filters": {
+      return apiFetch<T>("GET", "/api/v1/media/filters");
+    }
+    case "create_media_filter": {
+      return apiFetch<T>("POST", "/api/v1/media/filters", {
+        name: args.name,
+        server_id: args.serverId ?? undefined,
+        channel_id: args.channelId ?? undefined,
+        media_types: args.mediaTypes ?? undefined,
+        date_from: args.dateFrom ?? undefined,
+        date_to: args.dateTo ?? undefined,
+      });
+    }
+    case "delete_media_filter": {
+      return apiFetch<T>("DELETE", `/api/v1/media/filters/${args.id}`);
+    }
+
     default:
       throw new Error(`[browser] Unhandled invoke command: "${cmd}"`);
   }

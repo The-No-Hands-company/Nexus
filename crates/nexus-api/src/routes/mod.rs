@@ -57,3 +57,10 @@ pub mod tasks;
 pub mod calendar;
 pub mod file_versions;
 pub mod ai_assists;
+
+// v1.6 Multimedia & Expression
+pub mod voice_notes;
+pub mod stories;
+pub mod drawings;
+pub mod voice_settings;
+pub mod media_gallery;

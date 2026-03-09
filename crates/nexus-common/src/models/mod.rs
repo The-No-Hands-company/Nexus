@@ -20,6 +20,9 @@ pub mod webhook;
 // v1.5 Collaboration & Productivity
 pub mod collaboration;
 
+// v1.6 Multimedia & Expression
+pub mod multimedia;
+
 /// Re-export all model types for convenience.
 pub use bot::*;
 pub use channel::*;
@@ -37,3 +40,6 @@ pub use webhook::*;
 
 // v1.5 Collaboration & Productivity
 pub use collaboration::*;
+
+// v1.6 Multimedia & Expression
+pub use multimedia::*;

@@ -114,6 +114,12 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::calendar::router())                        // calendar events + RSVP + ICS
         .merge(routes::file_versions::router())                   // file versioning + quotas
         .merge(routes::ai_assists::router())                      // on-device AI preferences + digests
+        // v1.6 Multimedia & Expression
+        .merge(routes::voice_notes::router())                     // voice & video notes
+        .merge(routes::stories::router())                         // stories & ephemeral status
+        .merge(routes::drawings::router())                        // in-chat drawing & annotation
+        .merge(routes::voice_settings::router())                  // voice settings & music queue
+        .merge(routes::media_gallery::router())                   // media gallery browsing + filters
         // v0.8.5 Federation UX — admin management + cross-instance search
         .merge(routes::federation_admin::router())                // federation admin panel API
         // Make Arc<AppState> available as an Axum Extension so that

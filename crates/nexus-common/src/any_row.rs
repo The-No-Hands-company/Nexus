@@ -26,6 +26,10 @@ use crate::models::{
     },
     crypto::{Device, DeviceType, DeviceVerification, E2eeChannel, E2eeSession, EncryptedMessage, OneTimePreKey, VerificationMethod},
     member::Member,
+    multimedia::{
+        Drawing, MediaGalleryFilter, Story, StoryView, VideoNote, VoiceMusicQueueItem,
+        VoiceNote, VoiceSettings,
+    },
     relationship::{Relationship, RelationshipStatus},
     rich::{AttachmentRow, ServerEmojiRow, ThreadRow},
     role::Role,
@@ -660,6 +664,162 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for ChannelDigest {
             period_end: dt(row, "period_end")?,
             summary: row.try_get("summary")?,
             message_count: row.try_get("message_count").unwrap_or(0),
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  Phase 17 — Multimedia & Expression
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── VoiceNote ─────────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for VoiceNote {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(VoiceNote {
+            id: uuid(row, "id")?,
+            channel_id: uuid(row, "channel_id")?,
+            author_id: uuid(row, "author_id")?,
+            storage_key: row.try_get("storage_key")?,
+            filename: row.try_get("filename")?,
+            content_type: row.try_get("content_type")?,
+            size: row.try_get::<i64, _>("size").or_else(|_| {
+                row.try_get::<i32, _>("size").map(|v| v as i64)
+            })?,
+            duration_ms: row.try_get("duration_ms")?,
+            waveform: row.try_get::<Option<String>, _>("waveform").unwrap_or(None),
+            transcript: row.try_get::<Option<String>, _>("transcript").unwrap_or(None),
+            message_id: opt_uuid(row, "message_id")?,
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── VideoNote ─────────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for VideoNote {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(VideoNote {
+            id: uuid(row, "id")?,
+            channel_id: uuid(row, "channel_id")?,
+            author_id: uuid(row, "author_id")?,
+            storage_key: row.try_get("storage_key")?,
+            filename: row.try_get("filename")?,
+            content_type: row.try_get("content_type")?,
+            size: row.try_get::<i64, _>("size").or_else(|_| {
+                row.try_get::<i32, _>("size").map(|v| v as i64)
+            })?,
+            duration_ms: row.try_get("duration_ms")?,
+            width: row.try_get::<Option<i32>, _>("width").unwrap_or(None),
+            height: row.try_get::<Option<i32>, _>("height").unwrap_or(None),
+            thumbnail_key: row.try_get::<Option<String>, _>("thumbnail_key").unwrap_or(None),
+            transcript: row.try_get::<Option<String>, _>("transcript").unwrap_or(None),
+            message_id: opt_uuid(row, "message_id")?,
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── Story ─────────────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for Story {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(Story {
+            id: uuid(row, "id")?,
+            author_id: uuid(row, "author_id")?,
+            media_type: row.try_get("media_type")?,
+            storage_key: row.try_get::<Option<String>, _>("storage_key").unwrap_or(None),
+            text_content: row.try_get::<Option<String>, _>("text_content").unwrap_or(None),
+            text_style: json(row, "text_style").ok(),
+            expires_at: dt(row, "expires_at")?,
+            visibility: row.try_get("visibility")?,
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── StoryView ─────────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for StoryView {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(StoryView {
+            story_id: uuid(row, "story_id")?,
+            viewer_id: uuid(row, "viewer_id")?,
+            viewed_at: dt(row, "viewed_at")?,
+        })
+    }
+}
+
+// ── Drawing ───────────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for Drawing {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(Drawing {
+            id: uuid(row, "id")?,
+            channel_id: uuid(row, "channel_id")?,
+            author_id: uuid(row, "author_id")?,
+            drawing_data: json(row, "drawing_data")?,
+            width: row.try_get("width").unwrap_or(800),
+            height: row.try_get("height").unwrap_or(600),
+            preview_key: row.try_get::<Option<String>, _>("preview_key").unwrap_or(None),
+            message_id: opt_uuid(row, "message_id")?,
+            is_whiteboard: row.try_get("is_whiteboard").unwrap_or(false),
+            created_at: dt(row, "created_at")?,
+            updated_at: dt(row, "updated_at")?,
+        })
+    }
+}
+
+// ── VoiceSettings ─────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for VoiceSettings {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(VoiceSettings {
+            user_id: uuid(row, "user_id")?,
+            spatial_audio: row.try_get("spatial_audio").unwrap_or(false),
+            noise_gate_enabled: row.try_get("noise_gate_enabled").unwrap_or(true),
+            noise_gate_threshold: row.try_get::<f32, _>("noise_gate_threshold")
+                .or_else(|_| row.try_get::<f64, _>("noise_gate_threshold").map(|v| v as f32))
+                .unwrap_or(-50.0),
+            echo_cancel_level: row.try_get("echo_cancel_level").unwrap_or_else(|_| "moderate".to_string()),
+            auto_gain: row.try_get("auto_gain").unwrap_or(true),
+            updated_at: dt(row, "updated_at")?,
+        })
+    }
+}
+
+// ── VoiceMusicQueueItem ───────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for VoiceMusicQueueItem {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(VoiceMusicQueueItem {
+            id: uuid(row, "id")?,
+            channel_id: uuid(row, "channel_id")?,
+            added_by: uuid(row, "added_by")?,
+            title: row.try_get("title")?,
+            source_url: row.try_get("source_url")?,
+            duration_ms: row.try_get("duration_ms")?,
+            position: row.try_get("position")?,
+            status: row.try_get("status")?,
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── MediaGalleryFilter ────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for MediaGalleryFilter {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(MediaGalleryFilter {
+            id: uuid(row, "id")?,
+            user_id: uuid(row, "user_id")?,
+            server_id: opt_uuid(row, "server_id")?,
+            channel_id: opt_uuid(row, "channel_id")?,
+            name: row.try_get("name")?,
+            media_types: str_vec(row, "media_types")?,
+            date_from: opt_dt(row, "date_from")?,
+            date_to: opt_dt(row, "date_to")?,
             created_at: dt(row, "created_at")?,
         })
     }

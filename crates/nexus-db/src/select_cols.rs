@@ -183,3 +183,47 @@ pub const FILE_VERSION_COLS: &str =
     "id::text AS id, attachment_id::text AS attachment_id, uploader_id::text AS uploader_id, \
      version_number, filename, content_type, size, storage_key, sha256, comment, \
      created_at::text AS created_at";
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  Phase 17 — Multimedia & Expression
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── voice_notes ───────────────────────────────────────────────────────────────
+pub const VOICE_NOTE_COLS: &str =
+    "id::text AS id, channel_id::text AS channel_id, author_id::text AS author_id, \
+     storage_key, filename, content_type, size, duration_ms, waveform, transcript, \
+     message_id::text AS message_id, created_at::text AS created_at";
+
+// ── video_notes ───────────────────────────────────────────────────────────────
+pub const VIDEO_NOTE_COLS: &str =
+    "id::text AS id, channel_id::text AS channel_id, author_id::text AS author_id, \
+     storage_key, filename, content_type, size, duration_ms, width, height, \
+     thumbnail_key, transcript, message_id::text AS message_id, \
+     created_at::text AS created_at";
+
+// ── stories ───────────────────────────────────────────────────────────────────
+pub const STORY_COLS: &str =
+    "id::text AS id, author_id::text AS author_id, media_type, storage_key, \
+     text_content, text_style::text AS text_style, \
+     expires_at::text AS expires_at, visibility, created_at::text AS created_at";
+
+// ── drawings ──────────────────────────────────────────────────────────────────
+pub const DRAWING_COLS: &str =
+    "id::text AS id, channel_id::text AS channel_id, author_id::text AS author_id, \
+     drawing_data::text AS drawing_data, width, height, preview_key, \
+     message_id::text AS message_id, is_whiteboard, \
+     created_at::text AS created_at, updated_at::text AS updated_at";
+
+// ── voice_music_queue ─────────────────────────────────────────────────────────
+pub const VOICE_MUSIC_QUEUE_COLS: &str =
+    "id::text AS id, channel_id::text AS channel_id, added_by::text AS added_by, \
+     title, source_url, duration_ms, position, status, \
+     created_at::text AS created_at";
+
+// ── media_gallery_filters ─────────────────────────────────────────────────────
+pub const MEDIA_GALLERY_FILTER_COLS: &str =
+    "id::text AS id, user_id::text AS user_id, server_id::text AS server_id, \
+     channel_id::text AS channel_id, name, \
+     array_to_json(media_types)::text AS media_types, \
+     date_from::text AS date_from, date_to::text AS date_to, \
+     created_at::text AS created_at";
