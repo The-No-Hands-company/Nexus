@@ -17,6 +17,9 @@ pub mod slash_command;
 pub mod user;
 pub mod webhook;
 
+// v1.5 Collaboration & Productivity
+pub mod collaboration;
+
 /// Re-export all model types for convenience.
 pub use bot::*;
 pub use channel::*;
@@ -31,3 +34,6 @@ pub use server::*;
 pub use slash_command::*;
 pub use user::*;
 pub use webhook::*;
+
+// v1.5 Collaboration & Productivity
+pub use collaboration::*;

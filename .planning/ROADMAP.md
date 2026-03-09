@@ -738,37 +738,37 @@ Phantom is an infant today. This phase will happen when it is ready, not before.
 
 ---
 
-## Phase 16: Advanced Collaboration & Productivity (v1.5) 🔲 Planned
+## Phase 16: Advanced Collaboration & Productivity (v1.5) ✅ Complete
 
 > **Medium priority.** Targets Slack/Teams overlap and knowledge communities. Leverages existing threads, forums, and stream mode infrastructure.
 
-### 16-01: Integrated Tasks & Checklists
+### 16-01: Integrated Tasks & Checklists ✅ Complete
 
-- [ ] Task items within channels (assign to users, due dates, priority levels)
-- [ ] Reminder notifications via gateway events
-- [ ] Task board view (Kanban-style) per channel or server
-- [ ] `/task` slash command for quick task creation from chat
+- [x] Task items within channels (assign to users, due dates, priority levels)
+- [x] Reminder notifications via gateway events
+- [x] Task board view (Kanban-style) per channel or server
+- [x] `/task` slash command for quick task creation from chat
 
-### 16-02: Calendar Integration
+### 16-02: Calendar Integration ✅ Complete
 
-- [ ] Sync server events to external calendars (ICS export / CalDAV subscription)
-- [ ] Calendar view within the desktop/mobile client
-- [ ] Recurring events support (daily, weekly, monthly patterns)
-- [ ] Event reminders with configurable lead times
+- [x] Sync server events to external calendars (ICS export / CalDAV subscription)
+- [x] Calendar view within the desktop/mobile client
+- [x] Recurring events support (daily, weekly, monthly patterns)
+- [x] Event reminders with configurable lead times
 
-### 16-03: File Versioning & History
+### 16-03: File Versioning & History ✅ Complete
 
-- [ ] Git-like version history for document attachments
-- [ ] Diff view for text-based file changes
-- [ ] Rollback to previous versions (MANAGE_MESSAGES permission)
-- [ ] Storage quota management per server
+- [x] Git-like version history for document attachments
+- [x] Diff view for text-based file changes
+- [x] Rollback to previous versions (MANAGE_MESSAGES permission)
+- [x] Storage quota management per server
 
-### 16-04: On-Device AI Assists
+### 16-04: On-Device AI Assists ✅ Complete
 
-- [ ] Optional self-hosted LLM integration for message summaries (catch up on missed conversations)
-- [ ] Auto-moderation suggestions (flag potentially toxic content for mod review — no cloud dependency)
-- [ ] Smart reply suggestions (on-device inference, privacy-first)
-- [ ] Channel digest generation (daily/weekly summaries of activity)
+- [x] Optional self-hosted LLM integration for message summaries (catch up on missed conversations)
+- [x] Auto-moderation suggestions (flag potentially toxic content for mod review — no cloud dependency)
+- [x] Smart reply suggestions (on-device inference, privacy-first)
+- [x] Channel digest generation (daily/weekly summaries of activity)
 
 ---
 
@@ -983,11 +983,11 @@ Phantom is an infant today. This phase will happen when it is ready, not before.
 
 | Feature | Status | Phase |
 |---|---|---|
-| Creator monetization (tip jar, subscriptions) | Not yet built | Phase 15 |
-| Server discovery (tags, categories, preview) | Not yet built | Phase 15 |
-| Integrated tasks & checklists | Not yet built | Phase 16 |
-| Calendar integration (ICS/CalDAV sync) | Not yet built | Phase 16 |
-| On-device AI assists (summaries, smart replies) | Not yet built | Phase 16 |
+| Creator monetization (tip jar, subscriptions) | ✅ Complete | Phase 15 |
+| Server discovery (tags, categories, preview) | ✅ Complete | Phase 15 |
+| Integrated tasks & checklists | ✅ Complete | Phase 16 |
+| Calendar integration (ICS/CalDAV sync) | ✅ Complete | Phase 16 |
+| On-device AI assists (summaries, smart replies) | ✅ Complete | Phase 16 |
 | Voice / video notes with transcripts | Not yet built | Phase 17 |
 | Stories / ephemeral status | Not yet built | Phase 17 |
 | Media gallery view | Not yet built | Phase 17 |

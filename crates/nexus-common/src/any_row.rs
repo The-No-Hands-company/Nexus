@@ -20,6 +20,10 @@ use uuid::Uuid;
 
 use crate::models::{
     channel::{Channel, ChannelType},
+    collaboration::{
+        AiPreferences, CalendarEvent, CalendarRsvp, ChannelDigest,
+        ChecklistItem, FileVersion, ServerStorageQuota, Task, TaskReminder,
+    },
     crypto::{Device, DeviceType, DeviceVerification, E2eeChannel, E2eeSession, EncryptedMessage, OneTimePreKey, VerificationMethod},
     member::Member,
     relationship::{Relationship, RelationshipStatus},
@@ -506,6 +510,157 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for Relationship {
             })?,
             created_at: dt(row, "created_at")?,
             updated_at: dt(row, "updated_at")?,
+        })
+    }
+}
+
+// ── Task ──────────────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for Task {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(Task {
+            id: uuid(row, "id")?,
+            server_id: uuid(row, "server_id")?,
+            channel_id: uuid(row, "channel_id")?,
+            creator_id: uuid(row, "creator_id")?,
+            assignee_id: opt_uuid(row, "assignee_id")?,
+            title: row.try_get("title")?,
+            description: row.try_get("description").unwrap_or(None),
+            status: row.try_get("status")?,
+            priority: row.try_get("priority")?,
+            due_at: opt_dt(row, "due_at").unwrap_or(None),
+            completed_at: opt_dt(row, "completed_at").unwrap_or(None),
+            position: row.try_get("position").unwrap_or(0),
+            created_at: dt(row, "created_at")?,
+            updated_at: dt(row, "updated_at")?,
+        })
+    }
+}
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for ChecklistItem {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(ChecklistItem {
+            id: uuid(row, "id")?,
+            task_id: uuid(row, "task_id")?,
+            content: row.try_get("content")?,
+            checked: row.try_get("checked").unwrap_or(false),
+            position: row.try_get("position").unwrap_or(0),
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for TaskReminder {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(TaskReminder {
+            id: uuid(row, "id")?,
+            task_id: uuid(row, "task_id")?,
+            user_id: uuid(row, "user_id")?,
+            remind_at: dt(row, "remind_at")?,
+            fired: row.try_get("fired").unwrap_or(false),
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── CalendarEvent ─────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for CalendarEvent {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(CalendarEvent {
+            id: uuid(row, "id")?,
+            server_id: uuid(row, "server_id")?,
+            channel_id: opt_uuid(row, "channel_id")?,
+            creator_id: uuid(row, "creator_id")?,
+            title: row.try_get("title")?,
+            description: row.try_get("description").unwrap_or(None),
+            location: row.try_get("location").unwrap_or(None),
+            starts_at: dt(row, "starts_at")?,
+            ends_at: dt(row, "ends_at")?,
+            all_day: row.try_get("all_day").unwrap_or(false),
+            rrule: row.try_get("rrule").unwrap_or(None),
+            color: row.try_get("color").unwrap_or(None),
+            created_at: dt(row, "created_at")?,
+            updated_at: dt(row, "updated_at")?,
+        })
+    }
+}
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for CalendarRsvp {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(CalendarRsvp {
+            event_id: uuid(row, "event_id")?,
+            user_id: uuid(row, "user_id")?,
+            status: row.try_get("status")?,
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── FileVersion ───────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for FileVersion {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(FileVersion {
+            id: uuid(row, "id")?,
+            attachment_id: uuid(row, "attachment_id")?,
+            uploader_id: uuid(row, "uploader_id")?,
+            version_number: row.try_get("version_number").unwrap_or(1),
+            filename: row.try_get("filename")?,
+            content_type: row.try_get("content_type").unwrap_or(None),
+            size: row.try_get::<i64, _>("size").or_else(|_| {
+                row.try_get::<i32, _>("size").map(|v| v as i64)
+            }).unwrap_or(0),
+            storage_key: row.try_get("storage_key")?,
+            sha256: row.try_get("sha256").unwrap_or(None),
+            comment: row.try_get("comment").unwrap_or(None),
+            created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for ServerStorageQuota {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(ServerStorageQuota {
+            server_id: uuid(row, "server_id")?,
+            max_bytes: row.try_get::<i64, _>("max_bytes").or_else(|_| {
+                row.try_get::<i32, _>("max_bytes").map(|v| v as i64)
+            }).unwrap_or(0),
+            used_bytes: row.try_get::<i64, _>("used_bytes").or_else(|_| {
+                row.try_get::<i32, _>("used_bytes").map(|v| v as i64)
+            }).unwrap_or(0),
+            updated_at: dt(row, "updated_at")?,
+        })
+    }
+}
+
+// ── AiPreferences ─────────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for AiPreferences {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(AiPreferences {
+            user_id: uuid(row, "user_id")?,
+            summaries_enabled: row.try_get("summaries_enabled").unwrap_or(false),
+            smart_replies: row.try_get("smart_replies").unwrap_or(false),
+            auto_mod_suggest: row.try_get("auto_mod_suggest").unwrap_or(false),
+            digest_enabled: row.try_get("digest_enabled").unwrap_or(false),
+            digest_interval: row.try_get("digest_interval").unwrap_or_else(|_| "daily".to_string()),
+            updated_at: dt(row, "updated_at")?,
+        })
+    }
+}
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for ChannelDigest {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(ChannelDigest {
+            id: uuid(row, "id")?,
+            channel_id: uuid(row, "channel_id")?,
+            user_id: uuid(row, "user_id")?,
+            period_start: dt(row, "period_start")?,
+            period_end: dt(row, "period_end")?,
+            summary: row.try_get("summary")?,
+            message_count: row.try_get("message_count").unwrap_or(0),
+            created_at: dt(row, "created_at")?,
         })
     }
 }

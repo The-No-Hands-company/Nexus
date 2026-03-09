@@ -51,3 +51,9 @@ pub mod canvas;
 // v0.16 Discovery & Monetization
 pub mod discovery;
 pub mod monetization;
+
+// v1.5 Collaboration & Productivity
+pub mod tasks;
+pub mod calendar;
+pub mod file_versions;
+pub mod ai_assists;

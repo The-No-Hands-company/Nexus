@@ -1241,6 +1241,156 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
       return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/analytics?days=${days}`);
     }
 
+    // ── Tasks (v1.5 — 16-01) ─────────────────────────────────────────────
+    case "list_tasks": {
+      let url = `/api/v1/servers/${args.serverId}/tasks?channel_id=${args.channelId}`;
+      if (args.status) url += `&status=${args.status}`;
+      return apiFetch<T>("GET", url);
+    }
+    case "create_task": {
+      return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/tasks`, {
+        channel_id: args.channelId,
+        title: args.title,
+        description: args.description ?? undefined,
+        priority: args.priority ?? undefined,
+        assignee_id: args.assigneeId ?? undefined,
+        due_at: args.dueAt ?? undefined,
+      });
+    }
+    case "get_task": {
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/tasks/${args.taskId}`);
+    }
+    case "update_task": {
+      return apiFetch<T>("PUT", `/api/v1/servers/${args.serverId}/tasks/${args.taskId}`, args.body);
+    }
+    case "delete_task": {
+      return apiFetch<T>("DELETE", `/api/v1/servers/${args.serverId}/tasks/${args.taskId}`);
+    }
+    case "my_tasks": {
+      return apiFetch<T>("GET", "/api/v1/users/@me/tasks");
+    }
+    case "add_checklist_item": {
+      return apiFetch<T>("POST", `/api/v1/tasks/${args.taskId}/checklist`, {
+        content: args.content,
+      });
+    }
+    case "list_checklist": {
+      return apiFetch<T>("GET", `/api/v1/tasks/${args.taskId}/checklist`);
+    }
+    case "toggle_checklist_item": {
+      return apiFetch<T>("PUT", `/api/v1/tasks/${args.taskId}/checklist/${args.itemId}`);
+    }
+    case "delete_checklist_item": {
+      return apiFetch<T>("DELETE", `/api/v1/tasks/${args.taskId}/checklist/${args.itemId}`);
+    }
+    case "create_task_reminder": {
+      return apiFetch<T>("POST", `/api/v1/tasks/${args.taskId}/reminders`, {
+        remind_at: args.remindAt,
+      });
+    }
+    case "my_task_reminders": {
+      return apiFetch<T>("GET", "/api/v1/users/@me/reminders");
+    }
+    case "delete_task_reminder": {
+      return apiFetch<T>("DELETE", `/api/v1/reminders/${args.reminderId}`);
+    }
+
+    // ── Calendar (v1.5 — 16-02) ──────────────────────────────────────────
+    case "list_calendar_events": {
+      let url = `/api/v1/servers/${args.serverId}/calendar`;
+      const params: string[] = [];
+      if (args.from) params.push(`from=${args.from}`);
+      if (args.to) params.push(`to=${args.to}`);
+      if (params.length) url += `?${params.join("&")}`;
+      return apiFetch<T>("GET", url);
+    }
+    case "create_calendar_event": {
+      return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/calendar`, {
+        title: args.title,
+        description: args.description ?? undefined,
+        location: args.location ?? undefined,
+        starts_at: args.startsAt,
+        ends_at: args.endsAt,
+        all_day: args.allDay ?? false,
+        rrule: args.rrule ?? undefined,
+        color: args.color ?? undefined,
+        channel_id: args.channelId ?? undefined,
+      });
+    }
+    case "get_calendar_event": {
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/calendar/${args.eventId}`);
+    }
+    case "update_calendar_event": {
+      return apiFetch<T>("PUT", `/api/v1/servers/${args.serverId}/calendar/${args.eventId}`, args.body);
+    }
+    case "delete_calendar_event": {
+      return apiFetch<T>("DELETE", `/api/v1/servers/${args.serverId}/calendar/${args.eventId}`);
+    }
+    case "calendar_rsvp": {
+      return apiFetch<T>("POST", `/api/v1/calendar/${args.eventId}/rsvp`, {
+        status: args.status,
+      });
+    }
+    case "list_calendar_rsvps": {
+      return apiFetch<T>("GET", `/api/v1/calendar/${args.eventId}/rsvp`);
+    }
+    case "remove_calendar_rsvp": {
+      return apiFetch<T>("DELETE", `/api/v1/calendar/${args.eventId}/rsvp`);
+    }
+    case "export_calendar_ics": {
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/calendar.ics`);
+    }
+
+    // ── File Versions (v1.5 — 16-03) ─────────────────────────────────────
+    case "list_file_versions": {
+      return apiFetch<T>("GET", `/api/v1/attachments/${args.attachmentId}/versions`);
+    }
+    case "create_file_version": {
+      return apiFetch<T>("POST", `/api/v1/attachments/${args.attachmentId}/versions`, {
+        filename: args.filename,
+        content_type: args.contentType ?? undefined,
+        size: args.size,
+        storage_key: args.storageKey,
+        sha256: args.sha256 ?? undefined,
+        comment: args.comment ?? undefined,
+      });
+    }
+    case "get_file_version": {
+      return apiFetch<T>("GET", `/api/v1/attachments/${args.attachmentId}/versions/${args.version}`);
+    }
+    case "delete_file_version": {
+      return apiFetch<T>("DELETE", `/api/v1/attachments/${args.attachmentId}/versions/${args.version}`);
+    }
+    case "get_server_storage_quota": {
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/storage`);
+    }
+    case "set_server_storage_quota": {
+      return apiFetch<T>("PUT", `/api/v1/servers/${args.serverId}/storage`, {
+        max_bytes: args.maxBytes,
+      });
+    }
+
+    // ── AI Assists (v1.5 — 16-04) ────────────────────────────────────────
+    case "get_ai_preferences": {
+      return apiFetch<T>("GET", "/api/v1/users/@me/ai-preferences");
+    }
+    case "update_ai_preferences": {
+      return apiFetch<T>("PUT", "/api/v1/users/@me/ai-preferences", args.body);
+    }
+    case "list_channel_digests": {
+      let url = `/api/v1/channels/${args.channelId}/digests`;
+      if (args.limit) url += `?limit=${args.limit}`;
+      return apiFetch<T>("GET", url);
+    }
+    case "save_channel_digest": {
+      return apiFetch<T>("POST", `/api/v1/channels/${args.channelId}/digests`, {
+        period_start: args.periodStart,
+        period_end: args.periodEnd,
+        summary: args.summary,
+        message_count: args.messageCount ?? undefined,
+      });
+    }
+
     default:
       throw new Error(`[browser] Unhandled invoke command: "${cmd}"`);
   }

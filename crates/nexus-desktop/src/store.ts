@@ -369,6 +369,107 @@ export interface FederationAuditEntry {
   createdAt: string;
 }
 
+// ─── v1.5 Collaboration & Productivity ────────────────────────────────────────
+
+export type TaskStatus = "open" | "in_progress" | "done" | "cancelled";
+export type TaskPriority = "low" | "medium" | "high" | "urgent";
+
+export interface Task {
+  id: string;
+  serverId: string;
+  channelId: string;
+  creatorId: string;
+  assigneeId?: string;
+  title: string;
+  description?: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  dueAt?: string;
+  completedAt?: string;
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChecklistItem {
+  id: string;
+  taskId: string;
+  content: string;
+  checked: boolean;
+  position: number;
+  createdAt: string;
+}
+
+export interface CalendarEvent {
+  id: string;
+  serverId: string;
+  channelId?: string;
+  creatorId: string;
+  title: string;
+  description?: string;
+  location?: string;
+  startsAt: string;
+  endsAt: string;
+  allDay: boolean;
+  rrule?: string;
+  color?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type RsvpStatus = "going" | "interested" | "declined";
+
+export interface CalendarRsvp {
+  eventId: string;
+  userId: string;
+  status: RsvpStatus;
+  respondedAt: string;
+}
+
+export interface FileVersion {
+  id: string;
+  attachmentId: string;
+  uploaderId: string;
+  versionNumber: number;
+  filename: string;
+  contentType?: string;
+  size: number;
+  storageKey: string;
+  sha256?: string;
+  comment?: string;
+  createdAt: string;
+}
+
+export interface ServerStorageQuota {
+  serverId: string;
+  maxBytes: number;
+  usedBytes: number;
+  updatedAt: string;
+}
+
+export type DigestInterval = "daily" | "weekly";
+
+export interface AiPreferences {
+  userId: string;
+  summariesEnabled: boolean;
+  smartReplies: boolean;
+  autoModSuggest: boolean;
+  digestEnabled: boolean;
+  digestInterval: DigestInterval;
+  updatedAt: string;
+}
+
+export interface ChannelDigest {
+  id: string;
+  channelId: string;
+  userId: string;
+  periodStart: string;
+  periodEnd: string;
+  summary: string;
+  messageCount: number;
+  createdAt: string;
+}
+
 interface StoreState {
   // Auth
   session: Session | null;
@@ -540,6 +641,32 @@ interface StoreState {
   loadFederatedPeers: () => Promise<void>;
   peeringRequests: PeeringRequest[];
   loadPeeringRequests: (status?: string) => Promise<void>;
+
+  // ─── v1.5 Collaboration & Productivity ────────────────────────────────
+
+  // Tasks — keyed by channelId
+  channelTasks: Record<string, Task[]>;
+  setChannelTasks: (channelId: string, tasks: Task[]) => void;
+  upsertTask: (channelId: string, task: Task) => void;
+  removeTask: (channelId: string, taskId: string) => void;
+  loadChannelTasks: (channelId: string, serverId: string) => Promise<void>;
+
+  // Calendar events — keyed by serverId
+  calendarEvents: Record<string, CalendarEvent[]>;
+  setCalendarEvents: (serverId: string, events: CalendarEvent[]) => void;
+  upsertCalendarEvent: (serverId: string, event: CalendarEvent) => void;
+  removeCalendarEvent: (serverId: string, eventId: string) => void;
+  loadCalendarEvents: (serverId: string, from?: string, to?: string) => Promise<void>;
+
+  // File versions — keyed by attachmentId
+  fileVersions: Record<string, FileVersion[]>;
+  setFileVersions: (attachmentId: string, versions: FileVersion[]) => void;
+  loadFileVersions: (attachmentId: string) => Promise<void>;
+
+  // AI preferences
+  aiPreferences: AiPreferences | null;
+  setAiPreferences: (prefs: AiPreferences) => void;
+  loadAiPreferences: () => Promise<void>;
 }
 
 // Module-level map so typing-clear timeouts survive re-renders
@@ -1130,6 +1257,81 @@ export const useStore = create<StoreState>((set, get) => ({
       set({ peeringRequests: data.requests ?? [] });
     } catch (e) {
       console.error("loadPeeringRequests error", e);
+    }
+  },
+
+  // ─── v1.5 Collaboration & Productivity ─────────────────────────────────
+
+  channelTasks: {},
+  setChannelTasks: (channelId, tasks) =>
+    set((s) => ({ channelTasks: { ...s.channelTasks, [channelId]: tasks } })),
+  upsertTask: (channelId, task) =>
+    set((s) => {
+      const existing = s.channelTasks[channelId] ?? [];
+      const without = existing.filter((t) => t.id !== task.id);
+      return { channelTasks: { ...s.channelTasks, [channelId]: [...without, task].sort((a, b) => a.position - b.position) } };
+    }),
+  removeTask: (channelId, taskId) =>
+    set((s) => ({
+      channelTasks: {
+        ...s.channelTasks,
+        [channelId]: (s.channelTasks[channelId] ?? []).filter((t) => t.id !== taskId),
+      },
+    })),
+  loadChannelTasks: async (channelId, serverId) => {
+    try {
+      const tasks = await invoke<Task[]>("list_tasks", { channelId, serverId });
+      set((s) => ({ channelTasks: { ...s.channelTasks, [channelId]: tasks } }));
+    } catch (e) {
+      console.error("loadChannelTasks error", e);
+    }
+  },
+
+  calendarEvents: {},
+  setCalendarEvents: (serverId, events) =>
+    set((s) => ({ calendarEvents: { ...s.calendarEvents, [serverId]: events } })),
+  upsertCalendarEvent: (serverId, event) =>
+    set((s) => {
+      const existing = s.calendarEvents[serverId] ?? [];
+      const without = existing.filter((e) => e.id !== event.id);
+      return { calendarEvents: { ...s.calendarEvents, [serverId]: [...without, event] } };
+    }),
+  removeCalendarEvent: (serverId, eventId) =>
+    set((s) => ({
+      calendarEvents: {
+        ...s.calendarEvents,
+        [serverId]: (s.calendarEvents[serverId] ?? []).filter((e) => e.id !== eventId),
+      },
+    })),
+  loadCalendarEvents: async (serverId, from?, to?) => {
+    try {
+      const events = await invoke<CalendarEvent[]>("list_calendar_events", { serverId, from, to });
+      set((s) => ({ calendarEvents: { ...s.calendarEvents, [serverId]: events } }));
+    } catch (e) {
+      console.error("loadCalendarEvents error", e);
+    }
+  },
+
+  fileVersions: {},
+  setFileVersions: (attachmentId, versions) =>
+    set((s) => ({ fileVersions: { ...s.fileVersions, [attachmentId]: versions } })),
+  loadFileVersions: async (attachmentId) => {
+    try {
+      const versions = await invoke<FileVersion[]>("list_file_versions", { attachmentId });
+      set((s) => ({ fileVersions: { ...s.fileVersions, [attachmentId]: versions } }));
+    } catch (e) {
+      console.error("loadFileVersions error", e);
+    }
+  },
+
+  aiPreferences: null,
+  setAiPreferences: (prefs) => set({ aiPreferences: prefs }),
+  loadAiPreferences: async () => {
+    try {
+      const prefs = await invoke<AiPreferences>("get_ai_preferences", {});
+      set({ aiPreferences: prefs });
+    } catch (e) {
+      console.error("loadAiPreferences error", e);
     }
   },
 }));

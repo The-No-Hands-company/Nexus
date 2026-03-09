@@ -109,6 +109,11 @@ pub fn build_router(state: AppState) -> Router {
         // v0.16 Discovery & Monetization
         .merge(routes::discovery::router())                       // server discovery browsing
         .merge(routes::monetization::router())                    // creator monetization
+        // v1.5 Collaboration & Productivity
+        .merge(routes::tasks::router())                           // task boards + checklists
+        .merge(routes::calendar::router())                        // calendar events + RSVP + ICS
+        .merge(routes::file_versions::router())                   // file versioning + quotas
+        .merge(routes::ai_assists::router())                      // on-device AI preferences + digests
         // v0.8.5 Federation UX — admin management + cross-instance search
         .merge(routes::federation_admin::router())                // federation admin panel API
         // Make Arc<AppState> available as an Axum Extension so that

@@ -23,3 +23,8 @@ pub mod threads;
 pub mod two_fa;
 pub mod users;
 pub mod webhooks;
+
+// v1.5 Collaboration & Productivity
+pub mod tasks;
+pub mod calendar;
+pub mod file_versions;

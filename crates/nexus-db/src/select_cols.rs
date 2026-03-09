@@ -162,3 +162,24 @@ pub const THREAD_COLS_T: &str =
      t.auto_archive_minutes, t.archived, t.archived_at::text AS archived_at, t.locked, \
      COALESCE(array_to_json(t.tags), '[]'::json)::text AS tags, \
      t.created_at::text AS created_at, t.updated_at::text AS updated_at";
+
+// ── tasks ─────────────────────────────────────────────────────────────────────
+pub const TASK_COLS: &str =
+    "id::text AS id, server_id::text AS server_id, channel_id::text AS channel_id, \
+     creator_id::text AS creator_id, assignee_id::text AS assignee_id, \
+     title, description, status, priority, \
+     due_at::text AS due_at, completed_at::text AS completed_at, \
+     position, created_at::text AS created_at, updated_at::text AS updated_at";
+
+// ── calendar_events ───────────────────────────────────────────────────────────
+pub const CALENDAR_EVENT_COLS: &str =
+    "id::text AS id, server_id::text AS server_id, channel_id::text AS channel_id, \
+     creator_id::text AS creator_id, title, description, location, \
+     starts_at::text AS starts_at, ends_at::text AS ends_at, all_day, rrule, color, \
+     created_at::text AS created_at, updated_at::text AS updated_at";
+
+// ── file_versions ─────────────────────────────────────────────────────────────
+pub const FILE_VERSION_COLS: &str =
+    "id::text AS id, attachment_id::text AS attachment_id, uploader_id::text AS uploader_id, \
+     version_number, filename, content_type, size, storage_key, sha256, comment, \
+     created_at::text AS created_at";
