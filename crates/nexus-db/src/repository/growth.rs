@@ -52,11 +52,11 @@ pub async fn list_recommendations(
 pub async fn dismiss_recommendation(
     pool: &AnyPool,
     user_id: Uuid,
-    server_id: Uuid,
+    rec_id: Uuid,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE server_recommendations SET dismissed = TRUE WHERE user_id = $1 AND server_id = $2")
+    sqlx::query("UPDATE server_recommendations SET dismissed = TRUE WHERE id = $1 AND user_id = $2")
+        .bind(rec_id.to_string())
         .bind(user_id.to_string())
-        .bind(server_id.to_string())
         .execute(pool)
         .await?;
     Ok(())
@@ -285,7 +285,8 @@ pub async fn award_achievement(
 ) -> Result<UserAchievement, sqlx::Error> {
     let q = format!(
         "INSERT INTO user_achievements (user_id, achievement_id) \
-         VALUES ($1, $2) ON CONFLICT DO NOTHING \
+         VALUES ($1, $2) \
+         ON CONFLICT (user_id, achievement_id) DO UPDATE SET earned_at = user_achievements.earned_at \
          RETURNING {USER_ACHIEVEMENT_COLS}"
     );
     sqlx::query_as::<_, UserAchievement>(&q)
@@ -296,6 +297,24 @@ pub async fn award_achievement(
 }
 
 // ── 23-04: Sync Cursors / Offline Queue ───────────────────────────────────
+
+pub async fn get_sync_cursor(
+    pool: &AnyPool,
+    user_id: Uuid,
+    device_id: &str,
+    channel_id: Uuid,
+) -> Result<Option<SyncCursor>, sqlx::Error> {
+    let q = format!(
+        "SELECT {SYNC_CURSOR_COLS} FROM sync_cursors \
+         WHERE user_id = $1 AND device_id = $2 AND channel_id = $3"
+    );
+    sqlx::query_as::<_, SyncCursor>(&q)
+        .bind(user_id.to_string())
+        .bind(device_id)
+        .bind(channel_id.to_string())
+        .fetch_optional(pool)
+        .await
+}
 
 pub async fn upsert_sync_cursor(
     pool: &AnyPool,

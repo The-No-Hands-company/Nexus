@@ -1791,13 +1791,13 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
 
     // ── v1.9 Scalability & Performance Hardening ─────────────────────────
     case "list_scaling_configs": {
-      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/scaling-configs`);
+      return apiFetch<T>("GET", `/api/v1/admin/scaling-configs`);
     }
     case "upsert_scaling_config": {
-      return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/scaling-configs`, args.body);
+      return apiFetch<T>("POST", `/api/v1/admin/scaling-configs`, args.body);
     }
     case "get_scaling_config": {
-      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/scaling-configs/${args.configId}`);
+      return apiFetch<T>("GET", `/api/v1/admin/scaling-configs/${args.configId}`);
     }
     case "list_sfu_nodes": {
       return apiFetch<T>("GET", `/api/v1/admin/sfu-nodes`);
@@ -1812,10 +1812,10 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
       return apiFetch<T>("GET", `/api/v1/admin/federation-routes`);
     }
     case "list_voice_quality_logs": {
-      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/voice-quality-logs`);
+      return apiFetch<T>("GET", `/api/v1/channels/${args.channelId}/voice-quality-logs`);
     }
     case "create_voice_quality_log": {
-      return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/voice-quality-logs`, args.body);
+      return apiFetch<T>("POST", `/api/v1/channels/${args.channelId}/voice-quality-logs`, args.body);
     }
     case "get_prune_rule": {
       return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/prune-rules`);
@@ -1824,10 +1824,10 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
       return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/prune-rules`, args.body);
     }
     case "list_slow_mode_overrides": {
-      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/slow-mode-overrides`);
+      return apiFetch<T>("GET", `/api/v1/channels/${args.channelId}/slow-mode-overrides`);
     }
     case "upsert_slow_mode_override": {
-      return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/slow-mode-overrides`, args.body);
+      return apiFetch<T>("POST", `/api/v1/channels/${args.channelId}/slow-mode-overrides`, args.body);
     }
     case "list_scaling_metrics": {
       return apiFetch<T>("GET", `/api/v1/admin/scaling-metrics`);
@@ -1844,10 +1844,10 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
 
     // ── v2.0 AI & Intelligence Layer ────────────────────────────────────
     case "list_ai_suggestions": {
-      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/ai-suggestions`);
+      return apiFetch<T>("GET", `/api/v1/channels/${args.channelId}/ai-suggestions`);
     }
     case "create_ai_suggestion": {
-      return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/ai-suggestions`, args.body);
+      return apiFetch<T>("POST", `/api/v1/channels/${args.channelId}/ai-suggestions`, args.body);
     }
     case "get_thread_summary": {
       return apiFetch<T>("GET", `/api/v1/channels/${args.channelId}/thread-summary`);
@@ -1865,13 +1865,13 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
       return apiFetch<T>("GET", `/api/v1/channels/${args.channelId}/voice-transcripts`);
     }
     case "list_ai_consent": {
-      return apiFetch<T>("GET", `/api/v1/users/@me/ai-consent`);
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/ai-consent`);
     }
     case "upsert_ai_consent": {
-      return apiFetch<T>("POST", `/api/v1/users/@me/ai-consent`, args.body);
+      return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/ai-consent`, args.body);
     }
     case "list_ai_audit_log": {
-      return apiFetch<T>("GET", `/api/v1/admin/ai-audit-log`);
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/ai-audit-log`);
     }
 
     // ── v2.1 Voice & Real-Time Collaboration ────────────────────────────
@@ -1888,7 +1888,7 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
       return apiFetch<T>("POST", `/api/v1/users/@me/virtual-backgrounds`, args.body);
     }
     case "list_live_streams": {
-      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/live-streams`);
+      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/live-streams?channel_id=${args.channelId}`);
     }
     case "create_live_stream": {
       return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/live-streams`, args.body);
@@ -1923,7 +1923,7 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
       return apiFetch<T>("GET", `/api/v1/users/@me/recommendations`);
     }
     case "dismiss_recommendation": {
-      return apiFetch<T>("GET", `/api/v1/users/@me/recommendations/${args.recId}/dismiss`);
+      return apiFetch<T>("POST", `/api/v1/users/@me/recommendations/${args.recId}/dismiss`);
     }
     case "get_onboarding_flow": {
       return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/onboarding-flow`);
@@ -1959,7 +1959,7 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
       return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/achievements`, args.body);
     }
     case "award_achievement": {
-      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/achievements/${args.achievementId}/award`);
+      return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/achievements/${args.achievementId}/award`);
     }
     case "upsert_sync_cursor": {
       return apiFetch<T>("POST", `/api/v1/users/@me/sync-cursors`, args.body);
@@ -1985,7 +1985,7 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
       return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/governance/polls`, args.body);
     }
     case "cast_governance_vote": {
-      return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/governance/polls/${args.pollId}/vote?option_index=${args.optionIndex}`);
+      return apiFetch<T>("POST", `/api/v1/servers/${args.serverId}/governance/polls/${args.pollId}/vote`, { option_index: args.optionIndex });
     }
     case "list_governance_proposals": {
       return apiFetch<T>("GET", `/api/v1/servers/${args.serverId}/governance/proposals`);

@@ -139,7 +139,8 @@ pub async fn cast_vote(
 ) -> Result<PollVote, sqlx::Error> {
     let q = format!(
         "INSERT INTO poll_votes (poll_id, user_id, option_index) \
-         VALUES ($1, $2, $3) ON CONFLICT DO NOTHING \
+         VALUES ($1, $2, $3) \
+         ON CONFLICT (poll_id, user_id, option_index) DO UPDATE SET voted_at = poll_votes.voted_at \
          RETURNING {POLL_VOTE_COLS}"
     );
     sqlx::query_as::<_, PollVote>(&q)

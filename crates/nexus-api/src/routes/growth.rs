@@ -6,7 +6,7 @@
 use axum::{
     extract::{Extension, Path, Query, State},
     middleware,
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
@@ -30,7 +30,7 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         .route(
             "/users/@me/recommendations/:rec_id/dismiss",
-            get(dismiss_recommendation),
+            post(dismiss_recommendation),
         )
         // Onboarding flows
         .route(
@@ -57,7 +57,7 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         .route(
             "/servers/:server_id/achievements/:achievement_id/award",
-            get(award_achievement),
+            post(award_achievement),
         )
         // Sync cursors
         .route("/users/@me/sync-cursors", get(get_sync_cursor).post(upsert_sync_cursor))
@@ -324,9 +324,9 @@ async fn get_sync_cursor(
     Extension(ctx): Extension<AuthContext>,
     Query(q): Query<SyncCursorQuery>,
 ) -> NexusResult<Json<Option<SyncCursor>>> {
-    let row = growth::upsert_sync_cursor(
-        &state.db.pool, ctx.user_id, &q.device_id, q.channel_id, None,
-    ).await.ok();
+    let row = growth::get_sync_cursor(
+        &state.db.pool, ctx.user_id, &q.device_id, q.channel_id,
+    ).await.map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(row))
 }
 

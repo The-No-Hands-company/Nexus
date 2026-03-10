@@ -6,7 +6,7 @@
 use axum::{
     extract::{Extension, Path, Query, State},
     middleware,
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
@@ -33,7 +33,7 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         .route(
             "/servers/:server_id/governance/polls/:poll_id/vote",
-            get(cast_vote),
+            post(cast_vote),
         )
         // Governance proposals
         .route(
@@ -47,7 +47,7 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         .route(
             "/users/:user_id/contributor-badges/award",
-            get(award_contributor_badge).post(award_contributor_badge),
+            post(award_contributor_badge),
         )
         // Security audits (admin)
         .route("/admin/security-audits", get(list_security_audits).post(create_security_audit))
@@ -199,13 +199,13 @@ async fn cast_vote(
     State(state): State<Arc<AppState>>,
     Extension(ctx): Extension<AuthContext>,
     Path((server_id, poll_id)): Path<(Uuid, Uuid)>,
-    Query(q): Query<CastVoteReq>,
+    Json(body): Json<CastVoteReq>,
 ) -> NexusResult<Json<PollVote>> {
     let _m: Option<Member> = members::find_member(&state.db.pool, ctx.user_id, server_id)
         .await.map_err(|e| NexusError::Internal(e.into()))?;
     if _m.is_none() { return Err(NexusError::Forbidden); }
 
-    let row = sustainability::cast_vote(&state.db.pool, poll_id, ctx.user_id, q.option_index)
+    let row = sustainability::cast_vote(&state.db.pool, poll_id, ctx.user_id, body.option_index)
         .await.map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(row))
 }
