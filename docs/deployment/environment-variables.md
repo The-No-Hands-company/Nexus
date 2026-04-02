@@ -97,3 +97,14 @@ When `SCYLLA__ENABLED=true`, monitor these metrics during `canary`/`prefer` roll
 	ratio of Scylla list-read rows that required SQL metadata hydration.
 - `nexus_scylla_batch_lookup_total{kind,outcome}`:
 	success/error rates for batch and single lookups used in hydration (`sql_meta`, `reaction_counts`, `user_reactions`, and `*_single` variants).
+
+## Search and Voice Telemetry
+
+Monitor these counters for search and voice API behavior:
+
+- `nexus_search_requests_total{scope,outcome}`:
+	counts search requests by scope (`global`, `server`, `channel`) and outcome (`ok`, `forbidden`, `unsupported_dm`, `no_memberships`).
+- `nexus_voice_requests_total{route,outcome}`:
+	tracks voice REST endpoint traffic and denials (`channel_state`, `join_preflight`, `leave`, `update_state`, `server_mute`, `stats`).
+- `nexus_voice_captions_requests_total{route,outcome}`:
+	tracks caption submit/list/finalise operations and outcomes (`ok`, validation denials, ownership denials).
