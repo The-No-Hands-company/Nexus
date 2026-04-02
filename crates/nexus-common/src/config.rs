@@ -60,6 +60,7 @@ pub fn init() -> Result<&'static AppConfig, config::ConfigError> {
         .set_default("limits.max_attachment_count", 10)?
         .set_default("scylla.nodes", "127.0.0.1:9042")?
         .set_default("scylla.keyspace", "nexus")?
+        .set_default("scylla.enabled", false)?
         // Search: default to empty so the server starts without MeiliSearch.
         // Set NEXUS__SEARCH__URL=http://localhost:7700 to enable it.
         .set_default("search.url", "")?
@@ -139,6 +140,11 @@ pub struct RedisConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct ScyllaConfig {
+    /// Enables ScyllaDB message-store integration.
+    ///
+    /// Current default is `false` until the Scylla write/read path is fully
+    /// migrated from SQL repositories.
+    pub enabled: bool,
     /// ScyllaDB contact points — comma-separated, e.g. `127.0.0.1:9042,127.0.0.2:9042`
     pub nodes: String,
     /// Cassandra keyspace name

@@ -31,6 +31,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
+mod import_worker;
+
 // ── CLI ───────────────────────────────────────────────────────────────────────
 
 #[derive(Parser)]
@@ -316,6 +318,14 @@ async fn run_server(
             // Broadcast to all servers; ignore error if all receivers already dropped.
             let _ = tx.send(());
         });
+    }
+
+    // ── Import worker (Phase 19-01) ─────────────────────────────────────────
+    // Claims pending import jobs and processes metadata payloads into channels
+    // and messages in the background.
+    {
+        let import_rx = shutdown_tx.subscribe();
+        import_worker::spawn_import_worker(db.pool.clone(), import_rx.resubscribe());
     }
 
     // ── Moderation background sweep ───────────────────────────────────────────

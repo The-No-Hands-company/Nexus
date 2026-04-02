@@ -43,6 +43,8 @@ pub struct Database {
     pub redis: Option<redis::aio::ConnectionManager>,
     /// Which backend is active.
     pub backend: DbBackend,
+    /// Whether Scylla integration has been explicitly enabled by config.
+    pub scylla_enabled: bool,
 }
 
 impl Database {
@@ -91,7 +93,20 @@ impl Database {
             None
         };
 
-        Ok(Self { pool, redis, backend })
+        if config.scylla.enabled {
+            tracing::warn!(
+                nodes = %config.scylla.nodes,
+                keyspace = %config.scylla.keyspace,
+                "Scylla is enabled in config, but message repositories still use SQL in this build"
+            );
+        }
+
+        Ok(Self {
+            pool,
+            redis,
+            backend,
+            scylla_enabled: config.scylla.enabled,
+        })
     }
 
     /// Probe Redis connectivity.

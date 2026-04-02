@@ -82,10 +82,21 @@ async fn send_encrypted_message(
         });
     }
 
+    let recipient_map = body.ciphertext_map.as_object().ok_or(NexusError::Validation {
+        message: "ciphertext_map must be a JSON object".into(),
+    })?;
+
     // Require at least one recipient
-    if body.ciphertext_map.as_object().map(|m| m.is_empty()).unwrap_or(true) {
+    if recipient_map.is_empty() {
         return Err(NexusError::Validation {
             message: "ciphertext_map must contain at least one recipient".into(),
+        });
+    }
+
+    // Keep request size bounded to avoid abuse with huge per-recipient maps.
+    if recipient_map.len() > 4096 {
+        return Err(NexusError::Validation {
+            message: "ciphertext_map exceeds recipient limit (max 4096)".into(),
         });
     }
 
@@ -102,6 +113,70 @@ async fn send_encrypted_message(
     let sender_device = devices.into_iter().next().ok_or(NexusError::Validation {
         message: "No device registered for sender. Register a device before sending E2EE messages.".into(),
     })?;
+
+    // Ensure sender includes their own device in recipient map so local replay
+    // and multi-device sync keep a canonical encrypted copy.
+    if !recipient_map.contains_key(&sender_device.id.to_string()) {
+        return Err(NexusError::Validation {
+            message: "ciphertext_map must include sender's device_id as a recipient".into(),
+        });
+    }
+
+    // Validate recipient IDs + envelope shape before persisting.
+    for (device_id_str, envelope) in recipient_map {
+        let recipient_device_id = Uuid::parse_str(device_id_str).map_err(|_| NexusError::Validation {
+            message: format!("Invalid recipient device UUID: {device_id_str}"),
+        })?;
+
+        let Some(envelope_obj) = envelope.as_object() else {
+            return Err(NexusError::Validation {
+                message: format!("ciphertext envelope for device {device_id_str} must be an object"),
+            });
+        };
+
+        let msg_type = envelope_obj
+            .get("type")
+            .and_then(|v| v.as_u64())
+            .ok_or(NexusError::Validation {
+                message: format!("ciphertext envelope for device {device_id_str} must include numeric 'type'"),
+            })?;
+
+        if msg_type != 1 && msg_type != 2 {
+            return Err(NexusError::Validation {
+                message: format!("ciphertext envelope type for device {device_id_str} must be 1 or 2"),
+            });
+        }
+
+        let body_b64 = envelope_obj
+            .get("body")
+            .and_then(|v| v.as_str())
+            .ok_or(NexusError::Validation {
+                message: format!("ciphertext envelope for device {device_id_str} must include string 'body'"),
+            })?;
+
+        if body_b64.is_empty() {
+            return Err(NexusError::Validation {
+                message: format!("ciphertext body for device {device_id_str} cannot be empty"),
+            });
+        }
+
+        if body_b64.len() > 1_000_000 {
+            return Err(NexusError::Validation {
+                message: format!("ciphertext body for device {device_id_str} exceeds max length"),
+            });
+        }
+
+        let device_exists = keystore::find_device(&state.db.pool, recipient_device_id)
+            .await
+            .map_err(|e| NexusError::Internal(e.into()))?
+            .is_some();
+
+        if !device_exists {
+            return Err(NexusError::Validation {
+                message: format!("Unknown recipient device_id: {device_id_str}"),
+            });
+        }
+    }
 
     let msg = keystore::store_encrypted_message(
         &state.db.pool,

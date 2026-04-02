@@ -44,6 +44,7 @@ struct CheckResult {
 struct Checks {
     database: CheckResult,
     redis: CheckResult,
+    scylla: CheckResult,
     search: CheckResult,
 }
 
@@ -90,6 +91,23 @@ async fn health_check(State(state): State<Arc<AppState>>) -> (StatusCode, Json<H
     };
 
     // ── Search ────────────────────────────────────────────────────────────────
+    let scylla_check = if state.db.scylla_enabled {
+        CheckResult {
+            status: "error",
+            latency_ms: None,
+            backend: Some("scylla"),
+            error: Some("enabled in config but not yet wired for message repositories".to_string()),
+        }
+    } else {
+        CheckResult {
+            status: "disabled",
+            latency_ms: None,
+            backend: Some("scylla"),
+            error: None,
+        }
+    };
+
+    // ── Search ────────────────────────────────────────────────────────────────
     let search_check = {
         let t = Instant::now();
         let (ok, backend_name, err) = tokio::time::timeout(timeout, state.search.health_check())
@@ -111,6 +129,7 @@ async fn health_check(State(state): State<Arc<AppState>>) -> (StatusCode, Json<H
     // ── Aggregate ─────────────────────────────────────────────────────────────
     let degraded = db_check.status == "error"
         || redis_check.status == "error"
+        || scylla_check.status == "error"
         || search_check.status == "error";
 
     let http_status = if degraded { StatusCode::SERVICE_UNAVAILABLE } else { StatusCode::OK };
@@ -121,7 +140,7 @@ async fn health_check(State(state): State<Arc<AppState>>) -> (StatusCode, Json<H
             status: if degraded { "degraded" } else { "healthy" },
             version: env!("CARGO_PKG_VERSION"),
             uptime_secs: state.started_at.elapsed().as_secs(),
-            checks: Checks { database: db_check, redis: redis_check, search: search_check },
+            checks: Checks { database: db_check, redis: redis_check, scylla: scylla_check, search: search_check },
         }),
     )
 }

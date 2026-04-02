@@ -244,7 +244,7 @@ async fn run_sfu_room(
                 match cmd {
                     SfuCommand::AddPeer { peer_id, user_id, offer_sdp, reply } => {
                         match create_peer(peer_id, user_id, &offer_sdp, local_ip, shared_tx.clone()).await {
-                            Ok((peer, answer_sdp)) => {
+                            Ok((mut peer, answer_sdp)) => {
                                 tracing::info!(
                                     channel = %channel_id, peer = %peer_id,
                                     user = %user_id, "Peer added"
@@ -252,7 +252,7 @@ async fn run_sfu_room(
                                 // Register forwarding tracks: this peer gains outgoing
                                 // mids for all existing peers' recv tracks, and all
                                 // existing peers gain an outgoing mid for this peer's tracks.
-                                setup_forwarding_tracks(&mut peers, &peer, &mut forward_table);
+                                setup_forwarding_tracks(&mut peers, &mut peer, &mut forward_table);
                                 peers.insert(peer_id, peer);
                                 let _ = reply.send(SfuResponse::Answer { sdp: answer_sdp }).await;
                             }
@@ -508,30 +508,25 @@ async fn forward_media(
 /// instance so that `rtc.writer(mid, pt)` succeeds once DTLS is up.
 fn setup_forwarding_tracks(
     existing_peers: &mut HashMap<PeerId, ActivePeer>,
-    new_peer: &ActivePeer,
+    new_peer: &mut ActivePeer,
     forward_table: &mut HashMap<(PeerId, Mid), Vec<PeerId>>,
 ) {
     // ── new peer subscribes to all existing publishers ────────────────────
     for existing in existing_peers.values_mut() {
-        for &(src_mid, _kind) in &existing.recv_mids {
+        for &(src_mid, kind) in &existing.recv_mids {
             let src_key = (existing.peer_id, src_mid);
 
-            // Declare a SendOnly track in new_peer for this source.
-            // We can't call new_peer.rtc here because we only have a shared ref;
-            // this is resolved by the caller inserting the peer after this call.
-            // We record the intent so create_peer can finish the wiring.
-            // The actual add_media call for new_peer happens in create_peer before
-            // the peer is inserted — see register_forward_mid below.
+            // Declare the forwarded media in the new peer RTC so writer(mid)
+            // can be resolved once DTLS is established.
+            let mut api = new_peer.rtc.direct_api();
+            api.declare_media(src_mid, kind);
 
-            // Add existing peer as a destination for (existing, src_mid).
-            forward_table
-                .entry((new_peer.peer_id, src_mid))
-                .or_default();
+            new_peer.forward_mids.insert(src_key, src_mid);
 
-            forward_table
-                .entry(src_key)
-                .or_default()
-                .push(new_peer.peer_id);
+            let dests = forward_table.entry(src_key).or_default();
+            if !dests.contains(&new_peer.peer_id) {
+                dests.push(new_peer.peer_id);
+            }
         }
     }
 
@@ -544,10 +539,10 @@ fn setup_forwarding_tracks(
             // writer(mid) succeeds once DTLS is established.
             existing.forward_mids.insert(src_key, new_mid);
 
-            forward_table
-                .entry(src_key)
-                .or_default()
-                .push(existing.peer_id);
+            let dests = forward_table.entry(src_key).or_default();
+            if !dests.contains(&existing.peer_id) {
+                dests.push(existing.peer_id);
+            }
 
             let mut api = existing.rtc.direct_api();
             api.declare_media(new_mid, new_kind);

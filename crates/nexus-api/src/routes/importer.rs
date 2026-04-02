@@ -81,7 +81,21 @@ async fn create_import(
     }
 
     let id = Uuid::new_v4();
-    let metadata = body.metadata.unwrap_or(serde_json::Value::Null);
+    let metadata = body.metadata.unwrap_or(serde_json::json!({}));
+
+    if !metadata.is_object() {
+        return Err(NexusError::Validation {
+            message: "metadata must be a JSON object".into(),
+        });
+    }
+
+    let metadata_bytes = serde_json::to_vec(&metadata)
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    if metadata_bytes.len() > 2 * 1024 * 1024 {
+        return Err(NexusError::Validation {
+            message: "metadata payload exceeds 2MB limit".into(),
+        });
+    }
 
     let job = import_jobs::create_import_job(
         &state.db.pool,
