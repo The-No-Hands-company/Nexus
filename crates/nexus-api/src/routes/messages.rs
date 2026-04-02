@@ -1315,19 +1315,76 @@ async fn list_messages_from_scylla(
     }
 
     let message_ids: Vec<Uuid> = scylla_rows.iter().map(|(id, _, _, _, _)| *id).collect();
-    let sql_meta_map = messages::find_by_ids_map(&state.db.pool, &message_ids)
-        .await
-        .unwrap_or_default();
-    let reaction_counts_map = reactions::get_reaction_counts_for_messages(&state.db.pool, &message_ids)
-        .await
-        .unwrap_or_default();
-    let my_reactions_map = reactions::get_user_reaction_emojis_for_messages(
+    let sql_meta_map = match messages::find_by_ids_map(&state.db.pool, &message_ids).await {
+        Ok(rows) => {
+            metrics::counter!(
+                "nexus_scylla_batch_lookup_total",
+                "kind" => "sql_meta",
+                "outcome" => "ok",
+            )
+            .increment(1);
+            rows
+        }
+        Err(error) => {
+            tracing::debug!(%channel_id, %error, "Scylla list read: SQL metadata batch lookup failed");
+            metrics::counter!(
+                "nexus_scylla_batch_lookup_total",
+                "kind" => "sql_meta",
+                "outcome" => "error",
+            )
+            .increment(1);
+            std::collections::HashMap::new()
+        }
+    };
+
+    let reaction_counts_map = match reactions::get_reaction_counts_for_messages(&state.db.pool, &message_ids).await {
+        Ok(rows) => {
+            metrics::counter!(
+                "nexus_scylla_batch_lookup_total",
+                "kind" => "reaction_counts",
+                "outcome" => "ok",
+            )
+            .increment(1);
+            rows
+        }
+        Err(error) => {
+            tracing::debug!(%channel_id, %error, "Scylla list read: reaction counts batch lookup failed");
+            metrics::counter!(
+                "nexus_scylla_batch_lookup_total",
+                "kind" => "reaction_counts",
+                "outcome" => "error",
+            )
+            .increment(1);
+            std::collections::HashMap::new()
+        }
+    };
+
+    let my_reactions_map = match reactions::get_user_reaction_emojis_for_messages(
         &state.db.pool,
         user_id,
         &message_ids,
     )
-    .await
-    .unwrap_or_default();
+    .await {
+        Ok(rows) => {
+            metrics::counter!(
+                "nexus_scylla_batch_lookup_total",
+                "kind" => "user_reactions",
+                "outcome" => "ok",
+            )
+            .increment(1);
+            rows
+        }
+        Err(error) => {
+            tracing::debug!(%channel_id, %user_id, %error, "Scylla list read: user reactions batch lookup failed");
+            metrics::counter!(
+                "nexus_scylla_batch_lookup_total",
+                "kind" => "user_reactions",
+                "outcome" => "error",
+            )
+            .increment(1);
+            std::collections::HashMap::new()
+        }
+    };
 
     let mut result = Vec::with_capacity(scylla_rows.len());
     let mut hydrated_count: usize = 0;
@@ -1473,7 +1530,15 @@ async fn get_message_from_scylla(
     let reaction_counts = reactions::get_reaction_counts(&state.db.pool, message_id)
         .await
         .unwrap_or_default();
-    let my_reactions = get_user_reactions(state, message_id, user_id, &reaction_counts).await;
+    let my_reactions = reactions::get_user_reaction_emojis_for_messages(
+        &state.db.pool,
+        user_id,
+        &[message_id],
+    )
+    .await
+    .ok()
+    .and_then(|map| map.get(&message_id).cloned())
+    .unwrap_or_default();
 
     let sql_meta = messages::find_by_id(&state.db.pool, message_id)
         .await
