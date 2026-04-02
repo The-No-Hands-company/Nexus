@@ -100,6 +100,12 @@ pub mod user_flags {
     pub const SUSPENDED: i64 = 1 << 6;
     /// Instance administrator — can manage federation, instance settings, etc.
     pub const INSTANCE_ADMIN: i64 = 1 << 7;
+    /// Marketplace reviewer — can review and approve Store plugins
+    pub const MARKETPLACE_REVIEWER: i64 = 1 << 8;
+    /// Marketplace moderator — can quarantine, takedown, and handle reports
+    pub const MARKETPLACE_MODERATOR: i64 = 1 << 9;
+    /// Creator account — allows publishing to marketplace
+    pub const MARKETPLACE_CREATOR: i64 = 1 << 10;
 }
 
 /// Registration request — minimal by design. No ID, no phone, no nonsense.

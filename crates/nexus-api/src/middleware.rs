@@ -85,6 +85,61 @@ pub struct AuthContext {
     /// Whether the user's email was verified at the time of token issuance.
     /// Always `true` for bot tokens and for users with no email registered.
     pub email_verified: bool,
+    /// User account flags (staff, admin, creator, etc.)
+    /// Lazily loaded on demand by helpers
+    #[serde(skip)]
+    pub flags: std::sync::Arc<tokio::sync::Mutex<Option<i64>>>,
+}
+
+impl AuthContext {
+    /// Check if user has a specific flag. Caches flags in-memory.
+    pub async fn has_flag(&self, flag: i64) -> bool {
+        if let Some(flags) = *self.flags.lock().await {
+            flags & flag != 0
+        } else {
+            false
+        }
+    }
+
+    /// Check if user is a marketplace admin (reviewer or moderator)
+    pub async fn is_marketplace_admin(&self) -> bool {
+        use nexus_common::models::user_flags;
+        self.has_flag(user_flags::MARKETPLACE_REVIEWER).await
+            || self.has_flag(user_flags::MARKETPLACE_MODERATOR).await
+            || self.has_flag(user_flags::INSTANCE_ADMIN).await
+    }
+
+    /// Check if user can review plugins
+    pub async fn can_review_plugins(&self) -> bool {
+        use nexus_common::models::user_flags;
+        self.has_flag(user_flags::MARKETPLACE_REVIEWER).await
+            || self.has_flag(user_flags::INSTANCE_ADMIN).await
+    }
+
+    /// Check if user can handle takedowns
+    pub async fn can_handle_takedowns(&self) -> bool {
+        use nexus_common::models::user_flags;
+        self.has_flag(user_flags::MARKETPLACE_MODERATOR).await
+            || self.has_flag(user_flags::INSTANCE_ADMIN).await
+    }
+
+    /// Load flags from database (call once per request if needed)
+    pub async fn load_flags(&self, pool: &sqlx::AnyPool) -> Result<i64, sqlx::Error> {
+        if self.flags.lock().await.is_some() {
+            return Ok(self.flags.lock().await.unwrap());
+        }
+
+        let flags = sqlx::query_scalar::<_, i64>(
+            "SELECT flags FROM users WHERE id = $1"
+        )
+        .bind(self.user_id.to_string())
+        .fetch_optional(pool)
+        .await?
+        .unwrap_or(0);
+
+        *self.flags.lock().await = Some(flags);
+        Ok(flags)
+    }
 }
 
 // ── SHA-256 helper (used for bot token hashing) ──────────────────────────────
@@ -142,6 +197,7 @@ pub async fn auth_middleware(
         session_id,
         two_fa_verified,
         email_verified,
+        flags: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
     };
 
     // Insert auth context into request extensions for handlers to use
@@ -205,6 +261,7 @@ pub async fn combined_auth_middleware(
             two_fa_verified: false,
             // Bots are not subject to email verification requirements.
             email_verified: true,
+            flags: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
         }
     } else {
         // ── JWT Bearer authentication ─────────────────────────────────────
@@ -236,6 +293,7 @@ pub async fn combined_auth_middleware(
             session_id,
             two_fa_verified,
             email_verified,
+            flags: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
         }
     };
 

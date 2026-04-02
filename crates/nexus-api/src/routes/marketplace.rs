@@ -75,6 +75,27 @@ pub fn router() -> Router<Arc<AppState>> {
             "/marketplace/admin/takedowns/:takedown_id/reinstate",
             post(reinstate_plugin_admin),
         )
+        // Creator vetting
+        .route(
+            "/marketplace/creator/vetting",
+            get(get_creator_vetting_status).post(apply_for_creator),
+        )
+        .route(
+            "/marketplace/admin/creators/vetting-queue",
+            get(get_vetting_queue),
+        )
+        .route(
+            "/marketplace/admin/creators/:user_id/approve",
+            post(approve_creator),
+        )
+        .route(
+            "/marketplace/admin/creators/:user_id/reject",
+            post(reject_creator),
+        )
+        .route(
+            "/marketplace/admin/dashboard/stats",
+            get(get_dashboard_stats),
+        )
         // Server installs
         .route(
             "/servers/:server_id/plugin-installs",
@@ -159,6 +180,40 @@ struct TakedownRequest {
 struct ReviewTakedownRequest {
     status: String, // 'pending', 'quarantined', 'reviewed', 'reinstated', 'permanent_takedown'
     notes: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApplyForCreatorRequest {
+    rights_attestation: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApproveCreatorRequest {
+    identity_level: String, // "email_verified", "domain_verified", "legal_verified"
+}
+
+#[derive(Debug, Deserialize)]
+struct RejectCreatorRequest {
+    reason: String,
+}
+
+#[derive(Debug, Serialize)]
+struct CreatorVettingStatus {
+    id: Uuid,
+    identity_level: String,
+    status: String,
+    applied_at: chrono::DateTime<chrono::Utc>,
+    approved_at: Option<chrono::DateTime<chrono::Utc>>,
+    can_publish: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct DashboardStats {
+    review_queue_count: i64,
+    vetting_queue_count: i64,
+    todays_approvals: i64,
+    todays_rejections: i64,
+    pending_takedowns: i64,
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -439,10 +494,17 @@ async fn submit_plugin_for_review(
 
 async fn get_review_queue(
     State(state): State<Arc<AppState>>,
-    Extension(_ctx): Extension<AuthContext>,
+    Extension(mut ctx): Extension<AuthContext>,
     Query(limit): Query<Option<i64>>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    // TODO: Check if user is admin/moderator
+    // Load user flags and check permissions
+    ctx.load_flags(&state.db.pool)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    
+    if !ctx.can_review_plugins().await {
+        return Err(NexusError::Forbidden);
+    }
     
     let items = marketplace::get_review_queue(&state.db.pool, limit.unwrap_or(20), 0)
         .await
@@ -456,11 +518,18 @@ async fn get_review_queue(
 
 async fn approve_plugin(
     State(state): State<Arc<AppState>>,
-    Extension(ctx): Extension<AuthContext>,
+    Extension(mut ctx): Extension<AuthContext>,
     Path(plugin_id): Path<Uuid>,
     Json(body): Json<ApprovePluginRequest>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    // TODO: Check if user is admin/moderator
+    // Load user flags and check permissions
+    ctx.load_flags(&state.db.pool)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    
+    if !ctx.can_review_plugins().await {
+        return Err(NexusError::Forbidden);
+    }
     
     let tier = match body.trust_tier.as_deref().unwrap_or("reviewed") {
         "verified" => TrustTier::Verified,
@@ -501,11 +570,18 @@ async fn approve_plugin(
 
 async fn reject_plugin(
     State(state): State<Arc<AppState>>,
-    Extension(ctx): Extension<AuthContext>,
+    Extension(mut ctx): Extension<AuthContext>,
     Path(plugin_id): Path<Uuid>,
     Json(body): Json<RejectPluginRequest>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    // TODO: Check if user is admin/moderator
+    // Load user flags and check permissions
+    ctx.load_flags(&state.db.pool)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    
+    if !ctx.can_review_plugins().await {
+        return Err(NexusError::Forbidden);
+    }
     
     marketplace::update_review_status(
         &state.db.pool,
@@ -537,11 +613,18 @@ async fn reject_plugin(
 
 async fn quarantine_plugin(
     State(state): State<Arc<AppState>>,
-    Extension(ctx): Extension<AuthContext>,
+    Extension(mut ctx): Extension<AuthContext>,
     Path(plugin_id): Path<Uuid>,
     Json(body): Json<QuarantinePluginRequest>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    // TODO: Check if user is admin/moderator
+    // Load user flags and check permissions
+    ctx.load_flags(&state.db.pool)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    
+    if !ctx.can_handle_takedowns().await {
+        return Err(NexusError::Forbidden);
+    }
     
     marketplace::update_review_status(
         &state.db.pool,
@@ -573,11 +656,18 @@ async fn quarantine_plugin(
 
 async fn request_takedown_admin(
     State(state): State<Arc<AppState>>,
-    Extension(ctx): Extension<AuthContext>,
+    Extension(mut ctx): Extension<AuthContext>,
     Path(plugin_id): Path<Uuid>,
     Json(body): Json<TakedownRequest>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    // TODO: Check if user is admin/moderator
+    // Load user flags and check permissions
+    ctx.load_flags(&state.db.pool)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    
+    if !ctx.can_handle_takedowns().await {
+        return Err(NexusError::Forbidden);
+    }
     
     let takedown_id = Uuid::new_v4();
     marketplace::request_takedown(
@@ -599,11 +689,18 @@ async fn request_takedown_admin(
 
 async fn review_takedown(
     State(state): State<Arc<AppState>>,
-    Extension(ctx): Extension<AuthContext>,
+    Extension(mut ctx): Extension<AuthContext>,
     Path(takedown_id): Path<Uuid>,
     Json(body): Json<ReviewTakedownRequest>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    // TODO: Check if user is admin/moderator
+    // Load user flags and check permissions
+    ctx.load_flags(&state.db.pool)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    
+    if !ctx.can_handle_takedowns().await {
+        return Err(NexusError::Forbidden);
+    }
     
     marketplace::review_takedown(
         &state.db.pool,
@@ -620,15 +717,213 @@ async fn review_takedown(
 
 async fn reinstate_plugin_admin(
     State(state): State<Arc<AppState>>,
-    Extension(_ctx): Extension<AuthContext>,
+    Extension(mut ctx): Extension<AuthContext>,
     Path(takedown_id): Path<Uuid>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    // TODO: Check if user is admin/moderator
+    // Load user flags and check permissions
+    ctx.load_flags(&state.db.pool)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    
+    if !ctx.can_handle_takedowns().await {
+        return Err(NexusError::Forbidden);
+    }
     
     marketplace::reinstate_plugin(&state.db.pool, takedown_id)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
 
     Ok(Json(serde_json::json!({ "reinstated": true })))
+}
+
+// ── Creator Vetting Handlers ──────────────────────────────────────────────────────
+
+async fn get_creator_vetting_status(
+    State(state): State<Arc<AppState>>,
+    Extension(ctx): Extension<AuthContext>,
+) -> NexusResult<Json<CreatorVettingStatus>> {
+    let vetting = marketplace::get_creator_vetting(&state.db.pool, ctx.user_id)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?
+        .ok_or_else(|| NexusError::NotFound {
+            resource: "creator_vetting".into(),
+        })?;
+
+    let can_publish = vetting.status == "approved";
+
+    Ok(Json(CreatorVettingStatus {
+        id: vetting.id,
+        identity_level: vetting.identity_level.to_string(),
+        status: vetting.status,
+        applied_at: vetting.created_at,
+        approved_at: vetting.approved_at,
+        can_publish,
+    }))
+}
+
+async fn apply_for_creator(
+    State(state): State<Arc<AppState>>,
+    Extension(ctx): Extension<AuthContext>,
+    Json(body): Json<ApplyForCreatorRequest>,
+) -> NexusResult<Json<serde_json::Value>> {
+    // Create or get existing vetting record
+    let vetting = match marketplace::get_creator_vetting(&state.db.pool, ctx.user_id)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?
+    {
+        Some(v) => v,
+        None => marketplace::create_creator_vetting(&state.db.pool, Uuid::new_v4(), ctx.user_id)
+            .await
+            .map_err(|e| NexusError::Internal(e.into()))?,
+    };
+
+    // Verify not already approved
+    if vetting.status == "approved" {
+        return Err(NexusError::Validation {
+            message: "Creator account already approved".into(),
+        });
+    }
+
+    Ok(Json(serde_json::json!({
+        "vetting_id": vetting.id,
+        "status": "pending",
+        "message": "Application submitted for review"
+    })))
+}
+
+async fn get_vetting_queue(
+    State(state): State<Arc<AppState>>,
+    Extension(mut ctx): Extension<AuthContext>,
+    Query(limit): Query<Option<i64>>,
+) -> NexusResult<Json<serde_json::Value>> {
+    // Load flags and check permissions
+    ctx.load_flags(&state.db.pool)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    
+    if !ctx.is_marketplace_admin().await {
+        return Err(NexusError::Forbidden);
+    }
+
+    let items = marketplace::get_creator_vetting_queue(&state.db.pool, "pending", limit.unwrap_or(20), 0)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+
+    Ok(Json(serde_json::json!({
+        "queue": items,
+        "count": items.len()
+    })))
+}
+
+async fn approve_creator(
+    State(state): State<Arc<AppState>>,
+    Extension(mut ctx): Extension<AuthContext>,
+    Path(user_id): Path<Uuid>,
+    Json(body): Json<ApproveCreatorRequest>,
+) -> NexusResult<Json<serde_json::Value>> {
+    // Load flags and check permissions
+    ctx.load_flags(&state.db.pool)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    
+    if !ctx.is_marketplace_admin().await {
+        return Err(NexusError::Forbidden);
+    }
+
+    // Update identity level
+    marketplace::update_creator_identity_level(&state.db.pool, user_id, &body.identity_level)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+
+    // Approve vetting
+    marketplace::approve_creator_vetting(&state.db.pool, user_id, ctx.user_id)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+
+    Ok(Json(serde_json::json!({ "approved": true })))
+}
+
+async fn reject_creator(
+    State(state): State<Arc<AppState>>,
+    Extension(mut ctx): Extension<AuthContext>,
+    Path(user_id): Path<Uuid>,
+    Json(body): Json<RejectCreatorRequest>,
+) -> NexusResult<Json<serde_json::Value>> {
+    // Load flags and check permissions
+    ctx.load_flags(&state.db.pool)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    
+    if !ctx.is_marketplace_admin().await {
+        return Err(NexusError::Forbidden);
+    }
+
+    marketplace::reject_creator_vetting(&state.db.pool, user_id, &body.reason)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+
+    Ok(Json(serde_json::json!({ "rejected": true })))
+}
+
+async fn get_dashboard_stats(
+    State(state): State<Arc<AppState>>,
+    Extension(mut ctx): Extension<AuthContext>,
+) -> NexusResult<Json<DashboardStats>> {
+    // Load flags and check permissions
+    ctx.load_flags(&state.db.pool)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    
+    if !ctx.is_marketplace_admin().await {
+        return Err(NexusError::Forbidden);
+    }
+
+    // Query review queue count
+    let review_queue: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM marketplace_plugins WHERE review_status IN ('submitted', 'scanning', 'review')"
+    )
+    .fetch_one(&state.db.pool)
+    .await
+    .unwrap_or(0);
+
+    // Query vetting queue count
+    let vetting_queue: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM creator_vetting WHERE status = 'pending'"
+    )
+    .fetch_one(&state.db.pool)
+    .await
+    .unwrap_or(0);
+
+    // Query today's approvals
+    let todays_approvals: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM marketplace_reviews WHERE action = 'approved' AND created_at > NOW() - INTERVAL '24 hours'"
+    )
+    .fetch_one(&state.db.pool)
+    .await
+    .unwrap_or(0);
+
+    // Query today's rejections
+    let todays_rejections: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM marketplace_reviews WHERE action = 'rejected' AND created_at > NOW() - INTERVAL '24 hours'"
+    )
+    .fetch_one(&state.db.pool)
+    .await
+    .unwrap_or(0);
+
+    // Query pending takedowns
+    let pending_takedowns: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM marketplace_takedowns WHERE quarantine_status = 'pending'"
+    )
+    .fetch_one(&state.db.pool)
+    .await
+    .unwrap_or(0);
+
+    Ok(Json(DashboardStats {
+        review_queue_count: review_queue,
+        vetting_queue_count: vetting_queue,
+        todays_approvals,
+        todays_rejections,
+        pending_takedowns,
+    }))
 }
 }

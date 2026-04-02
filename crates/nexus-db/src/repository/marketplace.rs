@@ -1,6 +1,7 @@
 //! Repository for the plugin marketplace.
 
-use nexus_common::models::ecosystem::{MarketplacePlugin, PluginInstall, PluginReview};
+use nexus_common::models::ecosystem::{MarketplacePlugin, PluginInstall, PluginReview, CreatorVetting, MarketplaceMonetization};
+use nexus_common::models::user_flags;
 use sqlx::AnyPool;
 use uuid::Uuid;
 
@@ -513,4 +514,203 @@ pub async fn reinstate_plugin(
         .await?;
     }
     Ok(())
+}
+
+// ── Creator Vetting ───────────────────────────────────────────────────────────
+
+pub async fn get_creator_vetting(
+    pool: &AnyPool,
+    user_id: Uuid,
+) -> Result<Option<CreatorVetting>, sqlx::Error> {
+    sqlx::query_as::<_, CreatorVetting>(
+        "SELECT id, user_id, identity_level, identity_documents, domain, domain_verified, \
+         legal_name, legal_entity_id, rights_attestation, two_factor_enabled, ip_whitelist, \
+         status, approved_by, approved_at, rejection_reason, created_at, updated_at \
+         FROM creator_vetting WHERE user_id = $1"
+    )
+    .bind(user_id.to_string())
+    .fetch_optional(pool)
+    .await
+}
+
+pub async fn create_creator_vetting(
+    pool: &AnyPool,
+    id: Uuid,
+    user_id: Uuid,
+) -> Result<CreatorVetting, sqlx::Error> {
+    sqlx::query_as::<_, CreatorVetting>(
+        "INSERT INTO creator_vetting (id, user_id, identity_level, status) \
+         VALUES ($1, $2, $3, $4) \
+         RETURNING id, user_id, identity_level, identity_documents, domain, domain_verified, \
+         legal_name, legal_entity_id, rights_attestation, two_factor_enabled, ip_whitelist, \
+         status, approved_by, approved_at, rejection_reason, created_at, updated_at"
+    )
+    .bind(id.to_string())
+    .bind(user_id.to_string())
+    .bind("unverified")
+    .bind("pending")
+    .fetch_one(pool)
+    .await
+}
+
+pub async fn update_creator_identity_level(
+    pool: &AnyPool,
+    user_id: Uuid,
+    level: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE creator_vetting SET identity_level = $1, updated_at = now() WHERE user_id = $2"
+    )
+    .bind(level)
+    .bind(user_id.to_string())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn approve_creator_vetting(
+    pool: &AnyPool,
+    user_id: Uuid,
+    reviewer_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE creator_vetting SET \
+         status = 'approved', approved_by = $1, approved_at = now(), updated_at = now() \
+         WHERE user_id = $2"
+    )
+    .bind(reviewer_id.to_string())
+    .bind(user_id.to_string())
+    .execute(pool)
+    .await?;
+    
+    // Grant MARKETPLACE_CREATOR flag to user
+    sqlx::query(
+        "UPDATE users SET flags = flags | $1 WHERE id = $2"
+    )
+    .bind(nexus_common::models::user_flags::MARKETPLACE_CREATOR)
+    .bind(user_id.to_string())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn reject_creator_vetting(
+    pool: &AnyPool,
+    user_id: Uuid,
+    reason: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE creator_vetting SET \
+         status = 'rejected', rejection_reason = $1, updated_at = now() \
+         WHERE user_id = $2"
+    )
+    .bind(reason)
+    .bind(user_id.to_string())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn get_creator_vetting_queue(
+    pool: &AnyPool,
+    status: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<(String, String, String)>, sqlx::Error> {
+    // Returns (id, user_id, identity_level)
+    sqlx::query_as::<_, (String, String, String)>(
+        "SELECT id, user_id, identity_level FROM creator_vetting \
+         WHERE status = $1 ORDER BY created_at ASC LIMIT $2 OFFSET $3"
+    )
+    .bind(status)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(pool)
+    .await
+}
+
+// ── Monetization ──────────────────────────────────────────────────────────────
+
+pub async fn create_monetization_record(
+    pool: &AnyPool,
+    id: Uuid,
+    plugin_id: Uuid,
+    creator_id: Uuid,
+) -> Result<MarketplaceMonetization, sqlx::Error> {
+    use nexus_common::models::ecosystem::MarketplaceMonetization;
+    
+    sqlx::query_as::<_, MarketplaceMonetization>(
+        "INSERT INTO marketplace_monetization \
+         (id, plugin_id, creator_id, is_monetized, currency, revenue_share_pct) \
+         VALUES ($1, $2, $3, $4, $5, $6) \
+         RETURNING id, plugin_id, creator_id, is_monetized, price_cents, currency, \
+         revenue_share_pct, total_sales_cents, creator_earnings_cents, platform_earnings_cents, \
+         payout_address, last_payout_at, created_at, updated_at"
+    )
+    .bind(id.to_string())
+    .bind(plugin_id.to_string())
+    .bind(creator_id.to_string())
+    .bind(false)
+    .bind("USD")
+    .bind(70.0)
+    .fetch_one(pool)
+    .await
+}
+
+pub async fn update_monetization_price(
+    pool: &AnyPool,
+    plugin_id: Uuid,
+    price_cents: Option<i32>,
+) -> Result<(), sqlx::Error> {
+    let is_monetized = price_cents.is_some() && price_cents.unwrap() > 0;
+    sqlx::query(
+        "UPDATE marketplace_monetization SET \
+         price_cents = $1, is_monetized = $2, updated_at = now() \
+         WHERE plugin_id = $3"
+    )
+    .bind(price_cents)
+    .bind(is_monetized)
+    .bind(plugin_id.to_string())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn record_sale(
+    pool: &AnyPool,
+    plugin_id: Uuid,
+    amount_cents: i64,
+) -> Result<(), sqlx::Error> {
+    let creator_share = (amount_cents as f64 * 0.70) as i64;
+    let platform_share = amount_cents - creator_share;
+    
+    sqlx::query(
+        "UPDATE marketplace_monetization SET \
+         total_sales_cents = total_sales_cents + $1, \
+         creator_earnings_cents = creator_earnings_cents + $2, \
+         platform_earnings_cents = platform_earnings_cents + $3, \
+         updated_at = now() \
+         WHERE plugin_id = $4"
+    )
+    .bind(amount_cents)
+    .bind(creator_share)
+    .bind(platform_share)
+    .bind(plugin_id.to_string())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn get_creator_earnings_summary(
+    pool: &AnyPool,
+    creator_id: Uuid,
+) -> Result<Option<(i64, i64, i64)>, sqlx::Error> {
+    // Returns (total_sales, creator_earnings, platform_earnings)
+    sqlx::query_as::<_, (i64, i64, i64)>(
+        "SELECT total_sales_cents, creator_earnings_cents, platform_earnings_cents \
+         FROM marketplace_monetization WHERE creator_id = $1"
+    )
+    .bind(creator_id.to_string())
+    .fetch_optional(pool)
+    .await
 }
