@@ -27,6 +27,37 @@ use uuid::Uuid;
 
 use crate::{middleware::AuthContext, AppState};
 
+async fn ensure_channel_access(
+    state: &AppState,
+    user_id: Uuid,
+    channel_id: Uuid,
+) -> NexusResult<()> {
+    let channel = nexus_db::repository::channels::find_by_id(&state.db.pool, channel_id)
+        .await?
+        .ok_or(NexusError::NotFound {
+            resource: "Channel".into(),
+        })?;
+
+    if let Some(server_id) = channel.server_id {
+        if !nexus_db::repository::members::is_member(&state.db.pool, user_id, server_id).await? {
+            return Err(NexusError::Forbidden);
+        }
+    } else {
+        let is_dm_participant: (bool,) = sqlx::query_as(
+            "SELECT EXISTS(SELECT 1 FROM dm_participants WHERE channel_id = $1::uuid AND user_id = $2::uuid)",
+        )
+        .bind(channel_id.to_string())
+        .bind(user_id.to_string())
+        .fetch_one(&state.db.pool)
+        .await?;
+        if !is_dm_participant.0 {
+            return Err(NexusError::Forbidden);
+        }
+    }
+
+    Ok(())
+}
+
 // ============================================================
 // Router
 // ============================================================
@@ -140,6 +171,8 @@ async fn create_scheduled(
     Path(channel_id): Path<Uuid>,
     Json(body): Json<CreateScheduledRequest>,
 ) -> NexusResult<Json<ScheduledMessage>> {
+    ensure_channel_access(&state, ctx.user_id, channel_id).await?;
+
     if body.scheduled_at <= Utc::now() {
         return Err(NexusError::Validation {
             message: "scheduled_at must be in the future".into(),
@@ -186,6 +219,8 @@ async fn list_scheduled(
     Extension(ctx): Extension<AuthContext>,
     Path(channel_id): Path<Uuid>,
 ) -> NexusResult<Json<Vec<ScheduledMessage>>> {
+    ensure_channel_access(&state, ctx.user_id, channel_id).await?;
+
     // Users can see their own scheduled messages only
     let rows: Vec<ScheduledRow> = sqlx::query_as(
         r#"
@@ -211,9 +246,11 @@ async fn list_scheduled(
 async fn update_scheduled(
     State(state): State<Arc<AppState>>,
     Extension(ctx): Extension<AuthContext>,
-    Path((_channel_id, sm_id)): Path<(Uuid, Uuid)>,
+    Path((channel_id, sm_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<UpdateScheduledRequest>,
 ) -> NexusResult<Json<ScheduledMessage>> {
+    ensure_channel_access(&state, ctx.user_id, channel_id).await?;
+
     if let Some(scheduled_at) = body.scheduled_at {
         if scheduled_at <= Utc::now() {
             return Err(NexusError::Validation {
@@ -229,10 +266,11 @@ async fn update_scheduled(
                attachments::text, scheduled_at::text, status,
                created_at::text, updated_at::text
         FROM scheduled_messages
-        WHERE id = $1 AND author_id = $2 AND status = 'pending'
+        WHERE id = $1 AND channel_id = $2 AND author_id = $3 AND status = 'pending'
         "#,
     )
     .bind(sm_id.to_string())
+    .bind(channel_id.to_string())
     .bind(ctx.user_id.to_string())
     .fetch_optional(&state.db.pool)
     .await
@@ -277,16 +315,19 @@ async fn update_scheduled(
 async fn cancel_scheduled(
     State(state): State<Arc<AppState>>,
     Extension(ctx): Extension<AuthContext>,
-    Path((_channel_id, sm_id)): Path<(Uuid, Uuid)>,
+    Path((channel_id, sm_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<serde_json::Value>> {
+    ensure_channel_access(&state, ctx.user_id, channel_id).await?;
+
     let result = sqlx::query(
         r#"
         UPDATE scheduled_messages
         SET status = 'cancelled', updated_at = NOW()
-        WHERE id = $1 AND author_id = $2 AND status = 'pending'
+        WHERE id = $1 AND channel_id = $2 AND author_id = $3 AND status = 'pending'
         "#,
     )
     .bind(sm_id.to_string())
+    .bind(channel_id.to_string())
     .bind(ctx.user_id.to_string())
     .execute(&state.db.pool)
     .await

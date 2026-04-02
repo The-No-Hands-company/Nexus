@@ -78,6 +78,37 @@ fn thread_response(row: ThreadRow) -> Thread {
     }
 }
 
+async fn ensure_channel_access(
+    state: &AppState,
+    user_id: Uuid,
+    channel_id: Uuid,
+) -> NexusResult<nexus_common::models::channel::Channel> {
+    let channel = channels::find_by_id(&state.db.pool, channel_id)
+        .await?
+        .ok_or(NexusError::NotFound {
+            resource: "Channel".into(),
+        })?;
+
+    if let Some(server_id) = channel.server_id {
+        if !nexus_db::repository::members::is_member(&state.db.pool, user_id, server_id).await? {
+            return Err(NexusError::Forbidden);
+        }
+    } else {
+        let is_dm_participant: (bool,) = sqlx::query_as(
+            "SELECT EXISTS(SELECT 1 FROM dm_participants WHERE channel_id = $1::uuid AND user_id = $2::uuid)",
+        )
+        .bind(channel_id.to_string())
+        .bind(user_id.to_string())
+        .fetch_one(&state.db.pool)
+        .await?;
+        if !is_dm_participant.0 {
+            return Err(NexusError::Forbidden);
+        }
+    }
+
+    Ok(channel)
+}
+
 // ============================================================
 // POST /channels/:channel_id/threads
 // ============================================================
@@ -90,16 +121,8 @@ async fn create_thread(
 ) -> NexusResult<Json<Thread>> {
     validate_request(&body)?;
 
-    // Verify parent channel exists
-    let _channel = channels::find_by_id(&state.db.pool, channel_id)
-        .await?
-        .ok_or(NexusError::NotFound {
-            resource: "Channel".into(),
-        })?;
-
-    // Verify the user is a member of the server / channel
-    // (simplified: just check the channel row exists — full permission
-    //  system would check role bitflags)
+    // Verify parent channel exists and user can access it.
+    let _channel = ensure_channel_access(&state, auth.user_id, channel_id).await?;
 
     // Validate auto-archive value
     let auto_archive = body.auto_archive_minutes.unwrap_or(1440);
@@ -171,7 +194,7 @@ async fn list_active_threads(
     Path(channel_id): Path<Uuid>,
     Query(params): Query<ListThreadsParams>,
 ) -> NexusResult<Json<Vec<Thread>>> {
-    let _ = auth;
+    let _channel = ensure_channel_access(&state, auth.user_id, channel_id).await?;
     let limit = params.limit.unwrap_or(50).min(100);
 
     let rows = threads::list_active(&state.db.pool, channel_id, limit).await?;
@@ -195,7 +218,7 @@ async fn list_archived_threads(
     Path(channel_id): Path<Uuid>,
     Query(params): Query<ArchivedParams>,
 ) -> NexusResult<Json<Vec<Thread>>> {
-    let _ = auth;
+    let _channel = ensure_channel_access(&state, auth.user_id, channel_id).await?;
     let limit = params.limit.unwrap_or(25).min(100);
 
     let rows = threads::list_archived(&state.db.pool, channel_id, limit, params.before).await?;
@@ -210,14 +233,21 @@ async fn list_archived_threads(
 async fn get_thread(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
-    Path((_channel_id, thread_id)): Path<(Uuid, Uuid)>,
+    Path((channel_id, thread_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<Thread>> {
-    let _ = auth;
+    let _channel = ensure_channel_access(&state, auth.user_id, channel_id).await?;
+
     let row = threads::find_by_id(&state.db.pool, thread_id)
         .await?
         .ok_or(NexusError::NotFound {
             resource: "Thread".into(),
         })?;
+    if row.parent_channel_id != Some(channel_id) {
+        return Err(NexusError::NotFound {
+            resource: "Thread".into(),
+        });
+    }
+
     Ok(Json(thread_response(row)))
 }
 
@@ -228,10 +258,12 @@ async fn get_thread(
 async fn update_thread(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
-    Path((_channel_id, thread_id)): Path<(Uuid, Uuid)>,
+    Path((channel_id, thread_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<UpdateThreadRequest>,
 ) -> NexusResult<Json<Thread>> {
     validate_request(&body)?;
+
+    let _channel = ensure_channel_access(&state, auth.user_id, channel_id).await?;
 
     // Must be thread owner or have MANAGE_THREADS permission (simplified: owner only)
     let existing = threads::find_by_id(&state.db.pool, thread_id)
@@ -239,6 +271,11 @@ async fn update_thread(
         .ok_or(NexusError::NotFound {
             resource: "Thread".into(),
         })?;
+    if existing.parent_channel_id != Some(channel_id) {
+        return Err(NexusError::NotFound {
+            resource: "Thread".into(),
+        });
+    }
 
     if existing.owner_id != auth.user_id {
         return Err(NexusError::MissingPermission {
@@ -278,8 +315,20 @@ async fn update_thread(
 async fn join_thread(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
-    Path((_channel_id, thread_id)): Path<(Uuid, Uuid)>,
+    Path((channel_id, thread_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<serde_json::Value>> {
+    let _channel = ensure_channel_access(&state, auth.user_id, channel_id).await?;
+    let thread = threads::find_by_id(&state.db.pool, thread_id)
+        .await?
+        .ok_or(NexusError::NotFound {
+            resource: "Thread".into(),
+        })?;
+    if thread.parent_channel_id != Some(channel_id) {
+        return Err(NexusError::NotFound {
+            resource: "Thread".into(),
+        });
+    }
+
     threads::add_member(&state.db.pool, thread_id, auth.user_id).await?;
     Ok(Json(serde_json::json!({ "joined": true })))
 }
@@ -287,8 +336,20 @@ async fn join_thread(
 async fn leave_thread(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
-    Path((_channel_id, thread_id)): Path<(Uuid, Uuid)>,
+    Path((channel_id, thread_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<serde_json::Value>> {
+    let _channel = ensure_channel_access(&state, auth.user_id, channel_id).await?;
+    let thread = threads::find_by_id(&state.db.pool, thread_id)
+        .await?
+        .ok_or(NexusError::NotFound {
+            resource: "Thread".into(),
+        })?;
+    if thread.parent_channel_id != Some(channel_id) {
+        return Err(NexusError::NotFound {
+            resource: "Thread".into(),
+        });
+    }
+
     let removed = threads::remove_member(&state.db.pool, thread_id, auth.user_id).await?;
     Ok(Json(serde_json::json!({ "left": removed })))
 }
@@ -296,9 +357,20 @@ async fn leave_thread(
 async fn list_thread_members(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
-    Path((_channel_id, thread_id)): Path<(Uuid, Uuid)>,
+    Path((channel_id, thread_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<Vec<Uuid>>> {
-    let _ = auth;
+    let _channel = ensure_channel_access(&state, auth.user_id, channel_id).await?;
+    let thread = threads::find_by_id(&state.db.pool, thread_id)
+        .await?
+        .ok_or(NexusError::NotFound {
+            resource: "Thread".into(),
+        })?;
+    if thread.parent_channel_id != Some(channel_id) {
+        return Err(NexusError::NotFound {
+            resource: "Thread".into(),
+        });
+    }
+
     let members = threads::list_members(&state.db.pool, thread_id).await?;
     Ok(Json(members))
 }

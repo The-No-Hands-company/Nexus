@@ -129,6 +129,56 @@ async fn add_bookmark(
     Extension(ctx): Extension<AuthContext>,
     Json(body): Json<AddBookmarkRequest>,
 ) -> NexusResult<Json<Bookmark>> {
+    let message_row: (String, Option<String>) = sqlx::query_as(
+        r#"
+        SELECT m.channel_id::text AS channel_id, c.server_id::text AS server_id
+        FROM messages m
+        INNER JOIN channels c ON c.id = m.channel_id
+        WHERE m.id = $1 AND m.deleted_at IS NULL
+        "#,
+    )
+    .bind(body.message_id.to_string())
+    .fetch_optional(&state.db.pool)
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?
+    .ok_or(NexusError::NotFound {
+        resource: "Message".into(),
+    })?;
+
+    let actual_channel_id = message_row
+        .0
+        .parse::<Uuid>()
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    if body.channel_id != actual_channel_id {
+        return Err(NexusError::Validation {
+            message: "channel_id does not match message channel".into(),
+        });
+    }
+
+    if let Some(server_id_str) = message_row.1 {
+        let server_id = server_id_str
+            .parse::<Uuid>()
+            .map_err(|e| NexusError::Internal(e.into()))?;
+        if !nexus_db::repository::members::is_member(&state.db.pool, ctx.user_id, server_id)
+            .await
+            .map_err(|e| NexusError::Internal(e.into()))?
+        {
+            return Err(NexusError::Forbidden);
+        }
+    } else {
+        let is_dm_participant: (bool,) = sqlx::query_as(
+            "SELECT EXISTS(SELECT 1 FROM dm_participants WHERE channel_id = $1::uuid AND user_id = $2::uuid)",
+        )
+        .bind(actual_channel_id.to_string())
+        .bind(ctx.user_id.to_string())
+        .fetch_one(&state.db.pool)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+        if !is_dm_participant.0 {
+            return Err(NexusError::Forbidden);
+        }
+    }
+
     let bm_id = snowflake::generate_id();
 
     let row: BookmarkRow = sqlx::query_as(
@@ -142,7 +192,7 @@ async fn add_bookmark(
     .bind(bm_id.to_string())
     .bind(ctx.user_id.to_string())
     .bind(body.message_id.to_string())
-    .bind(body.channel_id.to_string())
+    .bind(actual_channel_id.to_string())
     .bind(body.note.as_deref())
     .fetch_one(&state.db.pool)
     .await
