@@ -550,84 +550,17 @@ async fn submit_plugin_for_review(
     let actor_id = ctx.user_id;
 
     tokio::spawn(async move {
-        if let Err(error) = marketplace::update_review_status(
+        if let Err(error) = run_security_scan_pipeline(
             &pool,
             plugin_id,
-            ReviewStatus::Scanning,
             actor_id,
-            None,
-            Some("Automated security scan started"),
+            &manifest_url,
+            source_url.as_deref(),
+            true,
         )
         .await
         {
-            tracing::warn!(%plugin_id, ?error, "failed to transition plugin to scanning");
-            return;
-        }
-
-        let scanner = MockMalwareScanner::new();
-        match scanner
-            .scan_manifest(plugin_id, &manifest_url, source_url.as_deref())
-            .await
-        {
-            Ok(scan_result) => {
-                let scan_payload = serde_json::json!({
-                    "scan_id": scan_result.id,
-                    "scanner": scan_result.scanner,
-                    "passed": scan_result.passed,
-                    "threat_level": scan_result.threat_level,
-                    "issues": scan_result.issues,
-                });
-
-                if let Err(error) = marketplace::mark_security_scan(&pool, plugin_id, &scan_payload).await {
-                    tracing::warn!(%plugin_id, ?error, "failed to persist scan result");
-                }
-
-                let is_critical = scan_result.threat_level == "critical" && !scan_result.issues.is_empty();
-                let next_status = if is_critical {
-                    ReviewStatus::Quarantined
-                } else {
-                    ReviewStatus::Review
-                };
-                let reason = if is_critical {
-                    Some("Automatic quarantine: Critical security threats detected")
-                } else {
-                    None
-                };
-                let notes = if is_critical {
-                    Some("Automated scan quarantined plugin")
-                } else {
-                    Some("Automated scan passed; queued for manual review")
-                };
-
-                if let Err(error) = marketplace::update_review_status(
-                    &pool,
-                    plugin_id,
-                    next_status,
-                    actor_id,
-                    reason,
-                    notes,
-                )
-                .await
-                {
-                    tracing::warn!(%plugin_id, ?error, "failed to transition plugin after automated scan");
-                }
-            }
-            Err(error) => {
-                tracing::warn!(%plugin_id, error = %error, "automated scan failed; requiring manual review");
-
-                if let Err(update_error) = marketplace::update_review_status(
-                    &pool,
-                    plugin_id,
-                    ReviewStatus::Review,
-                    actor_id,
-                    None,
-                    Some("Automated scan failed; manual security review required"),
-                )
-                .await
-                {
-                    tracing::warn!(%plugin_id, ?update_error, "failed to transition plugin to manual review fallback");
-                }
-            }
+            tracing::warn!(%plugin_id, %error, "background security scan pipeline failed");
         }
     });
 
@@ -1318,62 +1251,16 @@ async fn trigger_security_scan(
             resource: "marketplace_plugin".into(),
         })?;
 
-    marketplace::update_review_status(
+    let scan_result = run_security_scan_pipeline(
         &state.db.pool,
         plugin_id,
-        ReviewStatus::Scanning,
         ctx.user_id,
-        None,
-        Some("Manual security scan started"),
+        &plugin.manifest_url,
+        plugin.source_url.as_deref(),
+        false,
     )
     .await
-    .map_err(|e| NexusError::Internal(e.into()))?;
-    
-    let scanner = MockMalwareScanner::new();
-    let scan_result = scanner
-        .scan_manifest(plugin_id, &plugin.manifest_url, plugin.source_url.as_deref())
-        .await
-        .map_err(|e| NexusError::Internal(anyhow::Error::msg(e)))?;
-
-    // Store scan result
-    marketplace::mark_security_scan(
-        &state.db.pool,
-        plugin_id,
-        &serde_json::json!({
-            "scan_id": scan_result.id,
-            "scanner": scan_result.scanner,
-            "passed": scan_result.passed,
-            "threat_level": scan_result.threat_level,
-            "issues": scan_result.issues,
-        }),
-    )
-    .await
-    .map_err(|e| NexusError::Internal(e.into()))?;
-
-    // If critical threats detected, auto-quarantine; otherwise move to manual review.
-    if scan_result.threat_level == "critical" && !scan_result.issues.is_empty() {
-        marketplace::update_review_status(
-            &state.db.pool,
-            plugin_id,
-            ReviewStatus::Quarantined,
-            ctx.user_id,
-            Some("Automatic quarantine: Critical security threats detected"),
-            None,
-        )
-        .await
-        .map_err(|e| NexusError::Internal(e.into()))?;
-    } else {
-        marketplace::update_review_status(
-            &state.db.pool,
-            plugin_id,
-            ReviewStatus::Review,
-            ctx.user_id,
-            None,
-            Some("Scan complete; queued for manual review"),
-        )
-        .await
-        .map_err(|e| NexusError::Internal(e.into()))?;
-    }
+    .map_err(|e| NexusError::Internal(anyhow::Error::msg(e)))?;
 
     Ok(Json(SecurityScanResponse {
         scan_id: scan_result.id,
@@ -1383,4 +1270,98 @@ async fn trigger_security_scan(
         issues_count: scan_result.issues.len(),
         scanner: scan_result.scanner,
     }))
+}
+
+async fn run_security_scan_pipeline(
+    pool: &sqlx::AnyPool,
+    plugin_id: Uuid,
+    actor_id: Uuid,
+    manifest_url: &str,
+    source_url: Option<&str>,
+    automated: bool,
+) -> Result<nexus_common::security_scanning::ScanResult, String> {
+    let start_note = if automated {
+        "Automated security scan started"
+    } else {
+        "Manual security scan started"
+    };
+
+    marketplace::update_review_status(
+        pool,
+        plugin_id,
+        ReviewStatus::Scanning,
+        actor_id,
+        None,
+        Some(start_note),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let _ = marketplace::log_review(
+        pool,
+        Uuid::new_v4(),
+        plugin_id,
+        Some(actor_id),
+        "submitted",
+        "scanning",
+        if automated { "auto_scan_started" } else { "manual_scan_started" },
+        None,
+        Some(start_note),
+    )
+    .await;
+
+    let scanner = MockMalwareScanner::new();
+    let scan_result = scanner
+        .scan_manifest(plugin_id, manifest_url, source_url)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let scan_payload = serde_json::json!({
+        "scan_id": scan_result.id,
+        "scanner": scan_result.scanner,
+        "passed": scan_result.passed,
+        "threat_level": scan_result.threat_level,
+        "issues": scan_result.issues,
+        "mode": if automated { "automated" } else { "manual" },
+    });
+
+    if let Err(error) = marketplace::mark_security_scan(pool, plugin_id, &scan_payload).await {
+        tracing::warn!(%plugin_id, ?error, "failed to persist scan result");
+    }
+
+    let is_critical = scan_result.threat_level == "critical" && !scan_result.issues.is_empty();
+    let next_status = if is_critical {
+        ReviewStatus::Quarantined
+    } else {
+        ReviewStatus::Review
+    };
+    let reason = if is_critical {
+        Some("Automatic quarantine: Critical security threats detected")
+    } else {
+        None
+    };
+    let notes = if is_critical {
+        Some("Security scan quarantined plugin")
+    } else {
+        Some("Security scan complete; queued for manual review")
+    };
+
+    marketplace::update_review_status(pool, plugin_id, next_status, actor_id, reason, notes)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let _ = marketplace::log_review(
+        pool,
+        Uuid::new_v4(),
+        plugin_id,
+        Some(actor_id),
+        "scanning",
+        if is_critical { "quarantined" } else { "review" },
+        if is_critical { "scan_quarantined" } else { "scan_passed" },
+        reason,
+        notes,
+    )
+    .await;
+
+    Ok(scan_result)
 }
