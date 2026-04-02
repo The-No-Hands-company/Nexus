@@ -128,3 +128,163 @@ pub struct PluginInstall {
     pub is_enabled: bool,
     pub created_at: DateTime<Utc>,
 }
+
+// ── 20-01: Store Governance & Trust Model ────────────────────────────────────
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewStatus {
+    Draft,
+    Submitted,
+    Scanning,
+    Review,
+    Approved,
+    Rejected,
+    Quarantined,
+    Takedown,
+    Archived,
+}
+
+impl std::fmt::Display for ReviewStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ReviewStatus::Draft => write!(f, "draft"),
+            ReviewStatus::Submitted => write!(f, "submitted"),
+            ReviewStatus::Scanning => write!(f, "scanning"),
+            ReviewStatus::Review => write!(f, "review"),
+            ReviewStatus::Approved => write!(f, "approved"),
+            ReviewStatus::Rejected => write!(f, "rejected"),
+            ReviewStatus::Quarantined => write!(f, "quarantined"),
+            ReviewStatus::Takedown => write!(f, "takedown"),
+            ReviewStatus::Archived => write!(f, "archived"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TrustTier {
+    Unlisted,
+    Reviewed,
+    Verified,
+}
+
+impl std::fmt::Display for TrustTier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TrustTier::Unlisted => write!(f, "unlisted"),
+            TrustTier::Reviewed => write!(f, "reviewed"),
+            TrustTier::Verified => write!(f, "verified"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum IdentityLevel {
+    Unverified,
+    EmailVerified,
+    DomainVerified,
+    LegalVerified,
+}
+
+impl std::fmt::Display for IdentityLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IdentityLevel::Unverified => write!(f, "unverified"),
+            IdentityLevel::EmailVerified => write!(f, "email_verified"),
+            IdentityLevel::DomainVerified => write!(f, "domain_verified"),
+            IdentityLevel::LegalVerified => write!(f, "legal_verified"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarketplacePluginGovernance {
+    pub id: Uuid,
+    pub review_status: ReviewStatus,
+    pub trust_tier: TrustTier,
+    pub creator_identity_level: IdentityLevel,
+    pub provenance_verified: bool,
+    pub rights_attestation: Option<String>,
+    pub security_scan_result: Option<serde_json::Value>,
+    pub last_scanned_at: Option<DateTime<Utc>>,
+    pub rejected_reason: Option<String>,
+    pub quarantine_reason: Option<String>,
+    pub review_notes: Option<String>,
+    pub reviewer_id: Option<Uuid>,
+    pub reviewed_at: Option<DateTime<Utc>>,
+    pub takedown_requested_by: Option<Uuid>,
+    pub takedown_reason: Option<String>,
+    pub takedown_requested_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarketplaceReview {
+    pub id: Uuid,
+    pub plugin_id: Uuid,
+    pub reviewer_id: Option<Uuid>,
+    pub previous_status: ReviewStatus,
+    pub new_status: ReviewStatus,
+    pub action: String,
+    pub reason: Option<String>,
+    pub notes: Option<String>,
+    pub metadata: Option<serde_json::Value>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreatorVetting {
+    pub id: Uuid,
+    pub user_id: Uuid,
+    pub identity_level: IdentityLevel,
+    pub identity_documents: Option<serde_json::Value>, // Encrypted in DB
+    pub domain: Option<String>,
+    pub domain_verified: bool,
+    pub legal_name: Option<String>, // Encrypted in DB
+    pub legal_entity_id: Option<String>, // Encrypted in DB
+    pub rights_attestation: Option<String>,
+    pub two_factor_enabled: bool,
+    pub ip_whitelist: Option<serde_json::Value>,
+    pub status: String,
+    pub approved_by: Option<Uuid>,
+    pub approved_at: Option<DateTime<Utc>>,
+    pub rejection_reason: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarketplaceMonetization {
+    pub id: Uuid,
+    pub plugin_id: Uuid,
+    pub creator_id: Uuid,
+    pub is_monetized: bool,
+    pub price_cents: Option<i32>,
+    pub currency: String,
+    pub revenue_share_pct: f32,
+    pub total_sales_cents: i64,
+    pub creator_earnings_cents: i64,
+    pub platform_earnings_cents: i64,
+    pub payout_address: Option<String>, // Encrypted in DB
+    pub last_payout_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MarketplaceTakedown {
+    pub id: Uuid,
+    pub plugin_id: Uuid,
+    pub reported_by: Option<Uuid>,
+    pub reason: String,
+    pub description: String,
+    pub evidence_urls: Option<serde_json::Value>,
+    pub quarantine_status: String,
+    pub reviewer_id: Option<Uuid>,
+    pub review_notes: Option<String>,
+    pub reviewed_at: Option<DateTime<Utc>>,
+    pub reinstated_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}

@@ -18,7 +18,7 @@ use axum::{
     Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
-use nexus_common::models::ecosystem::{MarketplacePlugin, PluginInstall, PluginReview};
+use nexus_common::models::ecosystem::{MarketplacePlugin, PluginInstall, PluginReview, ReviewStatus, TrustTier};
 use nexus_db::repository::{marketplace, members};
 use nexus_common::models::Member;
 use serde::Deserialize;
@@ -37,10 +37,43 @@ pub fn router() -> Router<Arc<AppState>> {
             get(search_plugins).post(publish_plugin),
         )
         .route("/marketplace/plugins/:slug", get(get_plugin_by_slug))
-        // Reviews
+        // Reviews (user ratings)
         .route(
             "/marketplace/plugins/:plugin_id/reviews",
             get(list_reviews).post(submit_review).delete(delete_review),
+        )
+        // Store governance (admin endpoints)
+        .route(
+            "/marketplace/plugins/:plugin_id/submit-review",
+            post(submit_plugin_for_review),
+        )
+        .route(
+            "/marketplace/admin/review-queue",
+            get(get_review_queue),
+        )
+        .route(
+            "/marketplace/admin/plugins/:plugin_id/approve",
+            post(approve_plugin),
+        )
+        .route(
+            "/marketplace/admin/plugins/:plugin_id/reject",
+            post(reject_plugin),
+        )
+        .route(
+            "/marketplace/admin/plugins/:plugin_id/quarantine",
+            post(quarantine_plugin),
+        )
+        .route(
+            "/marketplace/admin/plugins/:plugin_id/takedown",
+            post(request_takedown_admin),
+        )
+        .route(
+            "/marketplace/admin/takedowns/:takedown_id/review",
+            post(review_takedown),
+        )
+        .route(
+            "/marketplace/admin/takedowns/:takedown_id/reinstate",
+            post(reinstate_plugin_admin),
         )
         // Server installs
         .route(
@@ -95,6 +128,37 @@ struct InstallRequest {
 #[derive(Debug, Deserialize)]
 struct ToggleRequest {
     enabled: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct ApprovePluginRequest {
+    trust_tier: Option<String>, // "reviewed" or "verified", default "reviewed"
+    notes: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RejectPluginRequest {
+    reason: String,
+    notes: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct QuarantinePluginRequest {
+    reason: String,
+    notes: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TakedownRequest {
+    reason: String, // 'copyright', 'malware', 'abuse', 'spam', 'tos_violation'
+    description: String,
+    evidence_urls: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReviewTakedownRequest {
+    status: String, // 'pending', 'quarantined', 'reviewed', 'reinstated', 'permanent_takedown'
+    notes: Option<String>,
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -345,4 +409,226 @@ async fn uninstall_plugin(
     }
 
     Ok(Json(serde_json::json!({ "deleted": true })))
+}
+
+// ── Store Governance Handlers ─────────────────────────────────────────────────────
+
+async fn submit_plugin_for_review(
+    State(state): State<Arc<AppState>>,
+    Extension(ctx): Extension<AuthContext>,
+    Path(plugin_id): Path<Uuid>,
+) -> NexusResult<Json<serde_json::Value>> {
+    // Verify user is the plugin author
+    let plugin = marketplace::get_plugin(&state.db.pool, plugin_id)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?
+        .ok_or_else(|| NexusError::NotFound {
+            resource: "marketplace_plugin".into(),
+        })?;
+
+    if plugin.author_id != Some(ctx.user_id) {
+        return Err(NexusError::Forbidden);
+    }
+
+    marketplace::submit_for_review(&state.db.pool, plugin_id)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+
+    Ok(Json(serde_json::json!({ "submitted": true })))
+}
+
+async fn get_review_queue(
+    State(state): State<Arc<AppState>>,
+    Extension(_ctx): Extension<AuthContext>,
+    Query(limit): Query<Option<i64>>,
+) -> NexusResult<Json<serde_json::Value>> {
+    // TODO: Check if user is admin/moderator
+    
+    let items = marketplace::get_review_queue(&state.db.pool, limit.unwrap_or(20), 0)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+
+    Ok(Json(serde_json::json!({
+        "queue": items,
+        "count": items.len()
+    })))
+}
+
+async fn approve_plugin(
+    State(state): State<Arc<AppState>>,
+    Extension(ctx): Extension<AuthContext>,
+    Path(plugin_id): Path<Uuid>,
+    Json(body): Json<ApprovePluginRequest>,
+) -> NexusResult<Json<serde_json::Value>> {
+    // TODO: Check if user is admin/moderator
+    
+    let tier = match body.trust_tier.as_deref().unwrap_or("reviewed") {
+        "verified" => TrustTier::Verified,
+        _ => TrustTier::Reviewed,
+    };
+
+    marketplace::update_review_status(
+        &state.db.pool,
+        plugin_id,
+        ReviewStatus::Approved,
+        ctx.user_id,
+        None,
+        body.notes.as_deref(),
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
+
+    marketplace::update_trust_tier(&state.db.pool, plugin_id, tier)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+
+    marketplace::log_review(
+        &state.db.pool,
+        Uuid::new_v4(),
+        plugin_id,
+        Some(ctx.user_id),
+        "review",
+        "approved",
+        "approved",
+        None,
+        body.notes.as_deref(),
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
+
+    Ok(Json(serde_json::json!({ "approved": true })))
+}
+
+async fn reject_plugin(
+    State(state): State<Arc<AppState>>,
+    Extension(ctx): Extension<AuthContext>,
+    Path(plugin_id): Path<Uuid>,
+    Json(body): Json<RejectPluginRequest>,
+) -> NexusResult<Json<serde_json::Value>> {
+    // TODO: Check if user is admin/moderator
+    
+    marketplace::update_review_status(
+        &state.db.pool,
+        plugin_id,
+        ReviewStatus::Rejected,
+        ctx.user_id,
+        Some(&body.reason),
+        body.notes.as_deref(),
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
+
+    marketplace::log_review(
+        &state.db.pool,
+        Uuid::new_v4(),
+        plugin_id,
+        Some(ctx.user_id),
+        "review",
+        "rejected",
+        "rejected",
+        Some(&body.reason),
+        body.notes.as_deref(),
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
+
+    Ok(Json(serde_json::json!({ "rejected": true })))
+}
+
+async fn quarantine_plugin(
+    State(state): State<Arc<AppState>>,
+    Extension(ctx): Extension<AuthContext>,
+    Path(plugin_id): Path<Uuid>,
+    Json(body): Json<QuarantinePluginRequest>,
+) -> NexusResult<Json<serde_json::Value>> {
+    // TODO: Check if user is admin/moderator
+    
+    marketplace::update_review_status(
+        &state.db.pool,
+        plugin_id,
+        ReviewStatus::Quarantined,
+        ctx.user_id,
+        Some(&body.reason),
+        body.notes.as_deref(),
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
+
+    marketplace::log_review(
+        &state.db.pool,
+        Uuid::new_v4(),
+        plugin_id,
+        Some(ctx.user_id),
+        "review",
+        "quarantined",
+        "quarantined",
+        Some(&body.reason),
+        body.notes.as_deref(),
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
+
+    Ok(Json(serde_json::json!({ "quarantined": true })))
+}
+
+async fn request_takedown_admin(
+    State(state): State<Arc<AppState>>,
+    Extension(ctx): Extension<AuthContext>,
+    Path(plugin_id): Path<Uuid>,
+    Json(body): Json<TakedownRequest>,
+) -> NexusResult<Json<serde_json::Value>> {
+    // TODO: Check if user is admin/moderator
+    
+    let takedown_id = Uuid::new_v4();
+    marketplace::request_takedown(
+        &state.db.pool,
+        takedown_id,
+        plugin_id,
+        Some(ctx.user_id),
+        &body.reason,
+        &body.description,
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
+
+    Ok(Json(serde_json::json!({
+        "takedown_id": takedown_id,
+        "plugin_id": plugin_id
+    })))
+}
+
+async fn review_takedown(
+    State(state): State<Arc<AppState>>,
+    Extension(ctx): Extension<AuthContext>,
+    Path(takedown_id): Path<Uuid>,
+    Json(body): Json<ReviewTakedownRequest>,
+) -> NexusResult<Json<serde_json::Value>> {
+    // TODO: Check if user is admin/moderator
+    
+    marketplace::review_takedown(
+        &state.db.pool,
+        takedown_id,
+        ctx.user_id,
+        &body.status,
+        body.notes.as_deref(),
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
+
+    Ok(Json(serde_json::json!({ "reviewed": true })))
+}
+
+async fn reinstate_plugin_admin(
+    State(state): State<Arc<AppState>>,
+    Extension(_ctx): Extension<AuthContext>,
+    Path(takedown_id): Path<Uuid>,
+) -> NexusResult<Json<serde_json::Value>> {
+    // TODO: Check if user is admin/moderator
+    
+    marketplace::reinstate_plugin(&state.db.pool, takedown_id)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+
+    Ok(Json(serde_json::json!({ "reinstated": true })))
+}
 }

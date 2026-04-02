@@ -1599,6 +1599,20 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
       });
     }
 
+    // Experience profile (full vs messaging mode)
+    case "get_experience_profile": {
+      return apiFetch<T>("GET", "/api/v1/users/@me/experience-profile");
+    }
+    case "update_experience_profile": {
+      return apiFetch<T>("PUT", "/api/v1/users/@me/experience-profile", {
+        experience_mode: args.experienceMode,
+        default_surface: args.defaultSurface,
+        enabled_modules: args.enabledModules,
+        compact_navigation: args.compactNavigation,
+        minimal_notifications: args.minimalNotifications,
+      });
+    }
+
     // Voice captions
     case "submit_voice_caption": {
       return apiFetch<T>("POST", `/api/v1/channels/${args.channelId}/captions`, {

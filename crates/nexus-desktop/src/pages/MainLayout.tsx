@@ -12,7 +12,7 @@ import SettingsPage from "./Settings";
 import FriendsPanel from "../components/FriendsPanel";
 
 export default function MainLayout() {
-  const { loadServers, activeServerId, loadChannels } = useStore();
+  const { loadServers, activeServerId, loadChannels, loadExperienceProfile, experienceProfile } = useStore();
 
   // Open gateway WebSocket
   useGateway();
@@ -37,7 +37,8 @@ export default function MainLayout() {
 
   useEffect(() => {
     loadServers();
-  }, [loadServers]);
+    loadExperienceProfile();
+  }, [loadServers, loadExperienceProfile]);
 
   useEffect(() => {
     if (activeServerId) {
@@ -48,7 +49,7 @@ export default function MainLayout() {
   return (
     <div className="flex h-full overflow-hidden">
       {/* Column 1: Server list (icon rail) */}
-      <ServerList />
+      {!experienceProfile?.messagingMode && <ServerList />}
 
       {/* Column 2: Channel list */}
       <ChannelList />

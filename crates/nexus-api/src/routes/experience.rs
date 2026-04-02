@@ -11,7 +11,9 @@ use axum::{
     Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
+use nexus_common::module_gating;
 use nexus_db::repository::user_experience;
+use serde::Serialize;
 use serde::Deserialize;
 use std::sync::Arc;
 
@@ -35,21 +37,34 @@ struct UpdateExperienceRequest {
     minimal_notifications: Option<bool>,
 }
 
+#[derive(Debug, Serialize)]
+struct ExperienceProfileResponse {
+    user_id: uuid::Uuid,
+    experience_mode: String,
+    default_surface: String,
+    enabled_modules: serde_json::Value,
+    effective_enabled_modules: serde_json::Value,
+    compact_navigation: bool,
+    minimal_notifications: bool,
+    updated_at: chrono::DateTime<chrono::Utc>,
+    messaging_mode: bool,
+}
+
 async fn get_profile(
     State(state): State<Arc<AppState>>,
     Extension(ctx): Extension<AuthContext>,
-) -> NexusResult<Json<user_experience::UserExperienceProfile>> {
+) -> NexusResult<Json<ExperienceProfileResponse>> {
     let profile = user_experience::get_or_create(&state.db.pool, ctx.user_id)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
-    Ok(Json(profile))
+    Ok(Json(to_response(profile)))
 }
 
 async fn update_profile(
     State(state): State<Arc<AppState>>,
     Extension(ctx): Extension<AuthContext>,
     Json(body): Json<UpdateExperienceRequest>,
-) -> NexusResult<Json<user_experience::UserExperienceProfile>> {
+) -> NexusResult<Json<ExperienceProfileResponse>> {
     if let Some(ref mode) = body.experience_mode {
         if !matches!(mode.as_str(), "full" | "messaging") {
             return Err(NexusError::Validation {
@@ -97,13 +112,8 @@ async fn update_profile(
     let enabled_modules = if body.enabled_modules.is_some() {
         body.enabled_modules.as_ref()
     } else if mode == Some("messaging") {
-        messaging_defaults = serde_json::json!([
-            "messages",
-            "dms",
-            "calls",
-            "contacts",
-            "notifications"
-        ]);
+        messaging_defaults = serde_json::to_value(module_gating::default_modules_messaging())
+            .unwrap_or_else(|_| serde_json::json!([]));
         Some(&messaging_defaults)
     } else {
         None
@@ -121,5 +131,36 @@ async fn update_profile(
     .await
     .map_err(|e| NexusError::Internal(e.into()))?;
 
-    Ok(Json(profile))
+    Ok(Json(to_response(profile)))
+}
+
+fn to_response(profile: user_experience::UserExperienceProfile) -> ExperienceProfileResponse {
+    let messaging_mode = profile.experience_mode == "messaging";
+    
+    let effective_enabled_modules = if profile
+        .enabled_modules
+        .as_array()
+        .map(|v| !v.is_empty())
+        .unwrap_or(false)
+    {
+        profile.enabled_modules.clone()
+    } else if messaging_mode {
+        let modules = module_gating::default_modules_messaging();
+        serde_json::to_value(&modules).unwrap_or_else(|_| serde_json::json!([]))
+    } else {
+        let modules = module_gating::default_modules_full();
+        serde_json::to_value(&modules).unwrap_or_else(|_| serde_json::json!([]))
+    };
+
+    ExperienceProfileResponse {
+        user_id: profile.user_id,
+        experience_mode: profile.experience_mode,
+        default_surface: profile.default_surface,
+        enabled_modules: profile.enabled_modules,
+        effective_enabled_modules,
+        compact_navigation: profile.compact_navigation,
+        minimal_notifications: profile.minimal_notifications,
+        updated_at: profile.updated_at,
+        messaging_mode,
+    }
 }

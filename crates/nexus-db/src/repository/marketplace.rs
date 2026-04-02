@@ -269,3 +269,248 @@ pub async fn toggle_plugin_install(
         .fetch_optional(pool)
         .await
 }
+
+// ── Store Governance ──────────────────────────────────────────────────────────
+
+use nexus_common::models::ecosystem::{
+    ReviewStatus, TrustTier, IdentityLevel, MarketplacePluginGovernance,
+    MarketplaceReview, CreatorVetting, MarketplaceMonetization, MarketplaceTakedown,
+};
+
+pub async fn submit_for_review(
+    pool: &AnyPool,
+    plugin_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE marketplace_plugins SET review_status = 'submitted', updated_at = now() \
+         WHERE id = $1"
+    )
+    .bind(plugin_id.to_string())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn update_review_status(
+    pool: &AnyPool,
+    plugin_id: Uuid,
+    new_status: ReviewStatus,
+    reviewer_id: Uuid,
+    reason: Option<&str>,
+    notes: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    let status_str = new_status.to_string();
+    sqlx::query(
+        "UPDATE marketplace_plugins SET \
+         review_status = $1, reviewer_id = $2, review_notes = $3, reviewed_at = now(), \
+         rejected_reason = CASE WHEN $1 = 'rejected' THEN $4 ELSE rejected_reason END, \
+         quarantine_reason = CASE WHEN $1 = 'quarantined' THEN $4 ELSE quarantine_reason END, \
+         updated_at = now() \
+         WHERE id = $5"
+    )
+    .bind(&status_str)
+    .bind(reviewer_id.to_string())
+    .bind(notes)
+    .bind(reason)
+    .bind(plugin_id.to_string())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn update_trust_tier(
+    pool: &AnyPool,
+    plugin_id: Uuid,
+    tier: TrustTier,
+) -> Result<(), sqlx::Error> {
+    let tier_str = tier.to_string();
+    sqlx::query(
+        "UPDATE marketplace_plugins SET trust_tier = $1, updated_at = now() WHERE id = $2"
+    )
+    .bind(&tier_str)
+    .bind(plugin_id.to_string())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn set_provenance_verified(
+    pool: &AnyPool,
+    plugin_id: Uuid,
+    verified: bool,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE marketplace_plugins SET provenance_verified = $1, updated_at = now() WHERE id = $2"
+    )
+    .bind(verified)
+    .bind(plugin_id.to_string())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn mark_security_scan(
+    pool: &AnyPool,
+    plugin_id: Uuid,
+    scan_result: &serde_json::Value,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE marketplace_plugins SET \
+         security_scan_result = $1, last_scanned_at = now(), updated_at = now() \
+         WHERE id = $2"
+    )
+    .bind(serde_json::to_string(scan_result).unwrap_or_default())
+    .bind(plugin_id.to_string())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn get_review_queue(
+    pool: &AnyPool,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<(String, String)>, sqlx::Error> {
+    sqlx::query_as::<_, (String, String)>(
+        "SELECT id, name FROM marketplace_plugins \
+         WHERE review_status IN ('submitted', 'scanning', 'review') \
+         ORDER BY created_at DESC LIMIT $1 OFFSET $2"
+    )
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(pool)
+    .await
+}
+
+pub async fn log_review(
+    pool: &AnyPool,
+    id: Uuid,
+    plugin_id: Uuid,
+    reviewer_id: Option<Uuid>,
+    previous_status: &str,
+    new_status: &str,
+    action: &str,
+    reason: Option<&str>,
+    notes: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO marketplace_reviews \
+         (id, plugin_id, reviewer_id, previous_status, new_status, action, reason, notes, metadata) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)"
+    )
+    .bind(id.to_string())
+    .bind(plugin_id.to_string())
+    .bind(reviewer_id.map(|u| u.to_string()))
+    .bind(previous_status)
+    .bind(new_status)
+    .bind(action)
+    .bind(reason)
+    .bind(notes)
+    .bind(serde_json::json!({"timestamp": chrono::Utc::now()}))
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn request_takedown(
+    pool: &AnyPool,
+    takedown_id: Uuid,
+    plugin_id: Uuid,
+    reported_by: Option<Uuid>,
+    reason: &str,
+    description: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO marketplace_takedowns \
+         (id, plugin_id, reported_by, reason, description, quarantine_status) \
+         VALUES ($1, $2, $3, $4, $5, 'pending')"
+    )
+    .bind(takedown_id.to_string())
+    .bind(plugin_id.to_string())
+    .bind(reported_by.map(|u| u.to_string()))
+    .bind(reason)
+    .bind(description)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn review_takedown(
+    pool: &AnyPool,
+    takedown_id: Uuid,
+    reviewer_id: Uuid,
+    status: &str,
+    notes: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    let plugin_result = sqlx::query_scalar::<_, String>(
+        "SELECT plugin_id FROM marketplace_takedowns WHERE id = $1"
+    )
+    .bind(takedown_id.to_string())
+    .fetch_optional(pool)
+    .await?;
+
+    if let Some(plugin_id_str) = plugin_result {
+        sqlx::query(
+            "UPDATE marketplace_takedowns SET \
+             quarantine_status = $1, reviewer_id = $2, review_notes = $3, reviewed_at = now() \
+             WHERE id = $4"
+        )
+        .bind(status)
+        .bind(reviewer_id.to_string())
+        .bind(notes)
+        .bind(takedown_id.to_string())
+        .execute(pool)
+        .await?;
+
+        // If permanent_takedown, update plugin status
+        if status == "permanent_takedown" {
+            sqlx::query(
+                "UPDATE marketplace_plugins SET \
+                 review_status = 'takedown', is_published = FALSE, \
+                 takedown_reason = $1, takedown_requested_by = $2, takedown_requested_at = now() \
+                 WHERE id = $3"
+            )
+            .bind("Takedown reviewed and approved")
+            .bind(reviewer_id.to_string())
+            .bind(&plugin_id_str)
+            .execute(pool)
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+pub async fn reinstate_plugin(
+    pool: &AnyPool,
+    takedown_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let plugin_result = sqlx::query_scalar::<_, String>(
+        "SELECT plugin_id FROM marketplace_takedowns WHERE id = $1"
+    )
+    .bind(takedown_id.to_string())
+    .fetch_optional(pool)
+    .await?;
+
+    if let Some(plugin_id_str) = plugin_result {
+        sqlx::query(
+            "UPDATE marketplace_takedowns SET \
+             quarantine_status = 'reinstated', reinstated_at = now() \
+             WHERE id = $1"
+        )
+        .bind(takedown_id.to_string())
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            "UPDATE marketplace_plugins SET \
+             review_status = 'approved', is_published = TRUE, \
+             takedown_reason = NULL, takedown_requested_by = NULL, takedown_requested_at = NULL, \
+             updated_at = now() \
+             WHERE id = $1"
+        )
+        .bind(&plugin_id_str)
+        .execute(pool)
+        .await?;
+    }
+    Ok(())
+}

@@ -14,6 +14,7 @@ npm run start
 
 - API base configuration
 - Auth bootstrap (login)
+- Experience profile bootstrap (full vs messaging mode)
 - Local chat prototype UI
 
 This package is intentionally minimal and acts as the foundation for full

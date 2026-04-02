@@ -40,7 +40,20 @@ interface Session {
 }
 
 export default function SettingsPage() {
-  const { plugins, enabledPlugins, installPlugin, uninstallPlugin, togglePlugin, session, setSession, activeThemeId, setActiveTheme } = useStore();
+  const {
+    plugins,
+    enabledPlugins,
+    installPlugin,
+    uninstallPlugin,
+    togglePlugin,
+    session,
+    setSession,
+    activeThemeId,
+    setActiveTheme,
+    experienceProfile,
+    loadExperienceProfile,
+    setExperienceMode,
+  } = useStore();
   const [urlInput, setUrlInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -167,6 +180,12 @@ export default function SettingsPage() {
     loadSessions();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session]);
+
+  useEffect(() => {
+    if (session) {
+      loadExperienceProfile();
+    }
+  }, [session, loadExperienceProfile]);
 
   const revokeSession = async (sessionId: string) => {
     try {
@@ -409,6 +428,38 @@ export default function SettingsPage() {
               </span>
             )}
           </div>
+        </div>
+      </section>
+
+      {/* ── Experience Mode ───────────────────────────── */}
+      <section className="mb-10">
+        <h2 className="text-base font-semibold mb-4 border-b border-bg-600 pb-2">Experience Mode</h2>
+        <p className="text-sm text-muted mb-3 max-w-2xl">
+          Use Full mode for the complete Nexus platform, or Messaging mode for a focused chat-first experience.
+        </p>
+        <div className="flex gap-2 max-w-md">
+          <button
+            onClick={() => setExperienceMode("full")}
+            className={clsx(
+              "flex-1 rounded-lg border py-2 text-sm font-medium transition-colors",
+              experienceProfile?.experienceMode === "full"
+                ? "border-accent-600 bg-accent-600/15 text-accent-300"
+                : "border-bg-600/50 bg-bg-800 text-muted hover:text-fg"
+            )}
+          >
+            Full
+          </button>
+          <button
+            onClick={() => setExperienceMode("messaging")}
+            className={clsx(
+              "flex-1 rounded-lg border py-2 text-sm font-medium transition-colors",
+              experienceProfile?.experienceMode === "messaging"
+                ? "border-accent-600 bg-accent-600/15 text-accent-300"
+                : "border-bg-600/50 bg-bg-800 text-muted hover:text-fg"
+            )}
+          >
+            Messaging
+          </button>
         </div>
       </section>
 

@@ -627,6 +627,18 @@ export interface MessageTtsRequest {
   createdAt: string;
 }
 
+export interface ExperienceProfile {
+  userId: string;
+  experienceMode: "full" | "messaging";
+  defaultSurface: string;
+  enabledModules: string[];
+  effectiveEnabledModules: string[];
+  compactNavigation: boolean;
+  minimalNotifications: boolean;
+  messagingMode: boolean;
+  updatedAt: string;
+}
+
 // ─── v1.8 Ecosystem & Onboarding ──────────────────────────────────────────────
 
 export interface ImportJob {
@@ -779,6 +791,11 @@ interface StoreState {
   setUpdateAvailable: (info: UpdateInfo | null) => void;
   sidebarCollapsed: boolean;
   setSidebarCollapsed: (v: boolean) => void;
+
+  // App experience profile (full vs messaging mode)
+  experienceProfile: ExperienceProfile | null;
+  loadExperienceProfile: () => Promise<void>;
+  setExperienceMode: (mode: "full" | "messaging") => Promise<void>;
 
   // Theme
   activeThemeId: string;
@@ -1163,6 +1180,26 @@ export const useStore = create<StoreState>((set, get) => ({
   setUpdateAvailable: (info) => set({ updateAvailable: info }),
   sidebarCollapsed: false,
   setSidebarCollapsed: (v) => set({ sidebarCollapsed: v }),
+
+  experienceProfile: null,
+  loadExperienceProfile: async () => {
+    try {
+      const profile = await invoke<ExperienceProfile>("get_experience_profile", {});
+      set({ experienceProfile: profile });
+    } catch (e) {
+      console.error("loadExperienceProfile error", e);
+    }
+  },
+  setExperienceMode: async (mode) => {
+    try {
+      const profile = await invoke<ExperienceProfile>("update_experience_profile", {
+        experienceMode: mode,
+      });
+      set({ experienceProfile: profile });
+    } catch (e) {
+      console.error("setExperienceMode error", e);
+    }
+  },
 
   // ─── Theme ────────────────────────────────────────────────────────────
   activeThemeId: localStorage.getItem("nexus:theme") ?? DEFAULT_THEME_ID,
