@@ -51,12 +51,24 @@ async fn forward_message(
     Path(message_id): Path<Uuid>,
     Json(body): Json<ForwardRequest>,
 ) -> NexusResult<Json<ForwardResponse>> {
+    metrics::counter!("nexus_forward_requests_total", "outcome" => "attempt").increment(1);
+
+    let unique_targets: HashSet<Uuid> = body.target_channel_ids.iter().copied().collect();
+    if unique_targets.len() != body.target_channel_ids.len() {
+        metrics::counter!("nexus_forward_requests_total", "outcome" => "invalid_duplicate_targets").increment(1);
+        return Err(NexusError::Validation {
+            message: "target_channel_ids must not contain duplicates".into(),
+        });
+    }
+
     if body.target_channel_ids.is_empty() {
+        metrics::counter!("nexus_forward_requests_total", "outcome" => "invalid_empty_targets").increment(1);
         return Err(NexusError::Validation {
             message: "target_channel_ids must contain at least one channel".into(),
         });
     }
     if body.target_channel_ids.len() > 10 {
+        metrics::counter!("nexus_forward_requests_total", "outcome" => "invalid_too_many_targets").increment(1);
         return Err(NexusError::Validation {
             message: "Cannot forward to more than 10 channels at once".into(),
         });
@@ -102,6 +114,7 @@ async fn forward_message(
             .await
             .map_err(NexusError::Database)?;
         if !is_member {
+            metrics::counter!("nexus_forward_requests_total", "outcome" => "forbidden_source_server").increment(1);
             return Err(NexusError::Forbidden);
         }
     } else {
@@ -114,6 +127,7 @@ async fn forward_message(
         .await
         .map_err(NexusError::Database)?;
         if !source_dm_membership.0 {
+            metrics::counter!("nexus_forward_requests_total", "outcome" => "forbidden_source_dm").increment(1);
             return Err(NexusError::Forbidden);
         }
     }
@@ -162,6 +176,7 @@ async fn forward_message(
     }
 
     if target_channels.len() != body.target_channel_ids.len() {
+        metrics::counter!("nexus_forward_requests_total", "outcome" => "not_found_target").increment(1);
         return Err(NexusError::NotFound {
             resource: "One or more target channels not found".into(),
         });
@@ -176,35 +191,39 @@ async fn forward_message(
             .collect::<HashSet<_>>();
 
         if !target_server_ids.is_subset(&member_server_ids) {
+            metrics::counter!("nexus_forward_requests_total", "outcome" => "forbidden_target_server").increment(1);
             return Err(NexusError::Forbidden);
         }
     }
 
-    for target_channel_id in &body.target_channel_ids {
-        let target_server_id = target_channels.get(target_channel_id).copied().flatten();
-        let new_id = snowflake::generate_id();
-        let now = Utc::now();
+    let now = Utc::now();
+    let now_str = now.to_rfc3339();
+    let rows_to_insert: Vec<(Uuid, Uuid)> = body
+        .target_channel_ids
+        .iter()
+        .map(|target_channel_id| (snowflake::generate_id(), *target_channel_id))
+        .collect();
 
-        sqlx::query(
-            r#"
-            INSERT INTO messages
-                (id, channel_id, author_id, content, created_at, updated_at,
-                 forwarded_from_message_id, forwarded_from_channel_id)
-            VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5::timestamptz, $5::timestamptz,
-                    $6::uuid, $7::uuid)
-            "#,
-        )
-        .bind(new_id.to_string())
-        .bind(target_channel_id.to_string())
-        .bind(auth.user_id.to_string())
-        .bind(&content)
-        .bind(now.to_rfc3339())
-        .bind(message_id.to_string())
-        .bind(original_channel_id.to_string())
+    let mut qb = sqlx::QueryBuilder::new(
+        "INSERT INTO messages (id, channel_id, author_id, content, created_at, updated_at, forwarded_from_message_id, forwarded_from_channel_id) ",
+    );
+    qb.push_values(rows_to_insert.iter(), |mut b, (new_id, target_channel_id)| {
+        b.push_bind(new_id.to_string())
+            .push_bind(target_channel_id.to_string())
+            .push_bind(auth.user_id.to_string())
+            .push_bind(&content)
+            .push_bind(&now_str)
+            .push_bind(&now_str)
+            .push_bind(message_id.to_string())
+            .push_bind(original_channel_id.to_string());
+    });
+    qb.build()
         .execute(&state.db.pool)
         .await
         .map_err(NexusError::Database)?;
 
+    for (new_id, target_channel_id) in rows_to_insert {
+        let target_server_id = target_channels.get(&target_channel_id).copied().flatten();
         created_ids.push(new_id);
 
         // Emit gateway event
@@ -220,7 +239,7 @@ async fn forward_message(
                 "created_at": now,
             }),
             server_id: target_server_id,
-            channel_id: Some(*target_channel_id),
+            channel_id: Some(target_channel_id),
             user_id: Some(auth.user_id),
         });
         // Also emit MESSAGE_CREATE so existing listeners pick it up
@@ -236,10 +255,13 @@ async fn forward_message(
                 "created_at": now,
             }),
             server_id: target_server_id,
-            channel_id: Some(*target_channel_id),
+            channel_id: Some(target_channel_id),
             user_id: Some(auth.user_id),
         });
     }
+
+    metrics::counter!("nexus_forward_requests_total", "outcome" => "ok").increment(1);
+    metrics::counter!("nexus_forward_messages_total").increment(created_ids.len() as u64);
 
     Ok(Json(ForwardResponse {
         forwarded_count: created_ids.len(),

@@ -22,6 +22,7 @@ use nexus_common::{
 use nexus_db::repository::{members, roles, servers};
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
+use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -150,11 +151,21 @@ async fn list_global_packs(
     .await
     .map_err(NexusError::Database)?;
 
+    let pack_ids: Vec<Uuid> = pack_rows
+        .iter()
+        .filter_map(|row| {
+            row.try_get::<String, _>("id")
+                .ok()
+                .and_then(|s| s.parse::<Uuid>().ok())
+        })
+        .collect();
+    let stickers_by_pack = fetch_stickers_for_packs(&state, &pack_ids).await?;
+
     let mut result = Vec::new();
     for row in &pack_rows {
         let pack_id_str: String = row.try_get("id").unwrap_or_default();
         let pack_id: Uuid = pack_id_str.parse().unwrap_or_default();
-        let stickers = fetch_pack_stickers(&state, pack_id).await?;
+        let stickers = stickers_by_pack.get(&pack_id).cloned().unwrap_or_default();
         result.push(StickerPack {
             id: pack_id,
             name: row.try_get("name").unwrap_or_default(),
@@ -390,23 +401,59 @@ async fn delete_sticker(
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-async fn fetch_pack_stickers(state: &AppState, pack_id: Uuid) -> NexusResult<Vec<Sticker>> {
-    let rows = sqlx::query(
+async fn fetch_stickers_for_packs(
+    state: &AppState,
+    pack_ids: &[Uuid],
+) -> NexusResult<HashMap<Uuid, Vec<Sticker>>> {
+    let mut out: HashMap<Uuid, Vec<Sticker>> = HashMap::new();
+    if pack_ids.is_empty() {
+        return Ok(out);
+    }
+
+    let mut qb = sqlx::QueryBuilder::new(
         r#"SELECT id::text AS id, pack_id::text AS pack_id, name, description,
                   asset_url, "type" AS sticker_type, created_at::text AS created_at
-           FROM stickers WHERE pack_id = $1::uuid ORDER BY name"#,
-    )
-    .bind(pack_id.to_string())
-    .fetch_all(&state.db.pool)
-    .await
-    .map_err(NexusError::Database)?;
+           FROM stickers WHERE pack_id IN ("#,
+    );
+    {
+        let mut separated = qb.separated(", ");
+        for pack_id in pack_ids {
+            separated.push_bind(pack_id.to_string());
+        }
+    }
+    qb.push(") ORDER BY name");
 
-    let stickers = rows.iter().filter_map(|r| {
-        let id: Uuid = r.try_get::<String, _>("id").unwrap_or_default().parse().ok()?;
-        let pid: Uuid = r.try_get::<String, _>("pack_id").unwrap_or_default().parse().ok()?;
-        let created_at = r.try_get::<String, _>("created_at").ok()
-            .as_deref().and_then(parse_pg_dt).unwrap_or_else(Utc::now);
-        Some(Sticker {
+    let rows = qb
+        .build()
+        .fetch_all(&state.db.pool)
+        .await
+        .map_err(NexusError::Database)?;
+
+    for r in rows {
+        let id: Uuid = match r
+            .try_get::<String, _>("id")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
+            Some(v) => v,
+            None => continue,
+        };
+        let pid: Uuid = match r
+            .try_get::<String, _>("pack_id")
+            .ok()
+            .and_then(|s| s.parse().ok())
+        {
+            Some(v) => v,
+            None => continue,
+        };
+        let created_at = r
+            .try_get::<String, _>("created_at")
+            .ok()
+            .as_deref()
+            .and_then(parse_pg_dt)
+            .unwrap_or_else(Utc::now);
+
+        out.entry(pid).or_default().push(Sticker {
             id,
             pack_id: pid,
             name: r.try_get("name").unwrap_or_default(),
@@ -414,10 +461,10 @@ async fn fetch_pack_stickers(state: &AppState, pack_id: Uuid) -> NexusResult<Vec
             asset_url: r.try_get("asset_url").unwrap_or_default(),
             sticker_type: r.try_get("sticker_type").unwrap_or_else(|_| "png".into()),
             created_at,
-        })
-    }).collect();
+        });
+    }
 
-    Ok(stickers)
+    Ok(out)
 }
 
 /// Find or create the default server sticker pack for `server_id`.

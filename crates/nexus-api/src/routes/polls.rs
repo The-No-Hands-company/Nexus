@@ -24,6 +24,7 @@ use nexus_common::{
 };
 use nexus_db::repository::{channels, members, roles, servers};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -356,7 +357,15 @@ async fn cast_vote(
 
     // Validate indices
     let num_options = poll.options.len() as i32;
-    for &idx in &body.option_indices {
+    let unique_indices: Vec<i32> = body
+        .option_indices
+        .iter()
+        .copied()
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    for &idx in &unique_indices {
         if idx < 0 || idx >= num_options {
             return Err(NexusError::Validation { message: format!(
                 "option_index {idx} is out of range (0..{num_options})"
@@ -365,29 +374,29 @@ async fn cast_vote(
     }
 
     // Enforce single-choice constraint
-    if !poll.allow_multiselect && body.option_indices.len() > 1 {
+    if !poll.allow_multiselect && unique_indices.len() > 1 {
         return Err(NexusError::Validation {
             message: "This poll does not allow multiple selections".into(),
         });
     }
 
-    // Insert votes — ignore duplicates (idempotent re-vote for same option)
-    for &idx in &body.option_indices {
-        sqlx::query(
-            r#"
-            INSERT INTO poll_votes (id, poll_id, user_id, option_index, voted_at)
-            VALUES ($1, $2, $3, $4, NOW())
-            ON CONFLICT (poll_id, user_id, option_index) DO NOTHING
-            "#,
-        )
-        .bind(snowflake::generate_id().to_string())
-        .bind(poll_id.to_string())
-        .bind(ctx.user_id.to_string())
-        .bind(idx)
+    // Insert votes in one query — ignore duplicates (idempotent re-vote for same option).
+    let now = Utc::now().to_rfc3339();
+    let mut qb = sqlx::QueryBuilder::new(
+        "INSERT INTO poll_votes (id, poll_id, user_id, option_index, voted_at) ",
+    );
+    qb.push_values(unique_indices.iter(), |mut b, idx| {
+        b.push_bind(snowflake::generate_id().to_string())
+            .push_bind(poll_id.to_string())
+            .push_bind(ctx.user_id.to_string())
+            .push_bind(*idx)
+            .push_bind(&now);
+    });
+    qb.push(" ON CONFLICT (poll_id, user_id, option_index) DO NOTHING");
+    qb.build()
         .execute(&state.db.pool)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
-    }
 
     let _ = state.gateway_tx.send(GatewayEvent {
         event_type: nexus_common::gateway_event::event_types::POLL_VOTE_ADD.into(),
@@ -395,7 +404,7 @@ async fn cast_vote(
             "poll_id": poll_id,
             "channel_id": channel_id,
             "user_id": ctx.user_id,
-            "option_indices": body.option_indices,
+            "option_indices": unique_indices,
         }),
         server_id: None, channel_id: None, user_id: None,
     });
