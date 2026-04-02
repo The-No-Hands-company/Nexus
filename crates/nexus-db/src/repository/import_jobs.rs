@@ -1,4 +1,4 @@
-//! Repository for data import jobs (Discord, Slack, Matrix).
+//! Repository for data portability/import jobs.
 
 use nexus_common::models::ecosystem::ImportJob;
 use sqlx::AnyPool;

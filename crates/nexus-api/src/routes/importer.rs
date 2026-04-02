@@ -7,6 +7,7 @@
 
 use axum::{
     extract::{Extension, Path, State},
+    http::HeaderMap,
     middleware,
     routing::{get, post},
     Json, Router,
@@ -19,7 +20,10 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{
+    middleware::{check_rate_limit_with_fallback, extract_client_ip, AuthContext},
+    AppState,
+};
 
 // ── Router ────────────────────────────────────────────────────────────────────
 
@@ -44,9 +48,18 @@ pub fn router() -> Router<Arc<AppState>> {
 
 #[derive(Debug, Deserialize)]
 struct CreateImportRequest {
-    /// discord | slack | matrix
-    source_platform: String,
-    /// Opaque JSON metadata (e.g. tokens, export path)
+    /// Nexus-native import source kind.
+    ///
+    /// Canonical values:
+    /// - `nexus_portability`
+    /// - `portable_export`
+    /// - `archive_bundle`
+    /// - `custom_plugin`
+    ///
+    /// Backward-compatible alias accepted on input: `source_platform`.
+    #[serde(alias = "source_platform")]
+    source_kind: String,
+    /// Opaque JSON metadata for portability/import plugins.
     metadata: Option<serde_json::Value>,
 }
 
@@ -61,6 +74,7 @@ struct BulkInviteRequest {
 async fn create_import(
     State(state): State<Arc<AppState>>,
     Extension(ctx): Extension<AuthContext>,
+    headers: HeaderMap,
     Path(server_id): Path<Uuid>,
     Json(body): Json<CreateImportRequest>,
 ) -> NexusResult<Json<ImportJob>> {
@@ -70,13 +84,22 @@ async fn create_import(
         .map_err(|e| NexusError::Internal(e.into()))?;
     if _member.is_none() { return Err(NexusError::Forbidden); }
 
-    let valid_platforms = ["discord", "slack", "matrix"];
-    if !valid_platforms.contains(&body.source_platform.as_str()) {
+    let source_kind = normalize_source_kind(&body.source_kind).ok_or_else(|| NexusError::Validation {
+        message: "source_kind must be one of: nexus_portability, portable_export, archive_bundle, custom_plugin".into(),
+    })?;
+
+    if source_kind == "custom_plugin" {
+        let has_plugin_key = metadata_has_plugin_hint(body.metadata.as_ref());
+        if !has_plugin_key {
+            return Err(NexusError::Validation {
+                message: "custom_plugin imports require metadata.plugin_id or metadata.plugin_slug".into(),
+            });
+        }
+    }
+
+    if source_kind.is_empty() {
         return Err(NexusError::Validation {
-            message: format!(
-                "source_platform must be one of: {}",
-                valid_platforms.join(", ")
-            ),
+            message: "source_kind is required".into(),
         });
     }
 
@@ -97,18 +120,46 @@ async fn create_import(
         });
     }
 
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:import_create:ip:{ip}:server:{server_id}"),
+        5,
+        3600,
+    )
+    .await?;
+
     let job = import_jobs::create_import_job(
         &state.db.pool,
         id,
         server_id,
         ctx.user_id,
-        &body.source_platform,
+        source_kind,
         &metadata,
     )
     .await
     .map_err(|e| NexusError::Internal(e.into()))?;
 
     Ok(Json(job))
+}
+
+fn normalize_source_kind(input: &str) -> Option<&'static str> {
+    match input.trim().to_ascii_lowercase().as_str() {
+        "nexus_portability" | "nexus" => Some("nexus_portability"),
+        "portable_export" | "portable" | "user_export" => Some("portable_export"),
+        "archive_bundle" | "archive" => Some("archive_bundle"),
+        "custom_plugin" | "plugin" => Some("custom_plugin"),
+        // Backward compatibility for old external-source labels.
+        "discord" | "slack" | "matrix" => Some("portable_export"),
+        _ => None,
+    }
+}
+
+fn metadata_has_plugin_hint(metadata: Option<&serde_json::Value>) -> bool {
+    let Some(value) = metadata else {
+        return false;
+    };
+    value.get("plugin_id").is_some() || value.get("plugin_slug").is_some()
 }
 
 async fn list_imports(
@@ -151,6 +202,7 @@ async fn get_import(
 async fn create_bulk_invite(
     State(state): State<Arc<AppState>>,
     Extension(ctx): Extension<AuthContext>,
+    headers: HeaderMap,
     Path(server_id): Path<Uuid>,
     Json(body): Json<BulkInviteRequest>,
 ) -> NexusResult<Json<BulkInvitation>> {
@@ -164,6 +216,15 @@ async fn create_bulk_invite(
             message: "emails must contain 1 to 500 entries".into(),
         });
     }
+
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:bulk_invite:ip:{ip}:server:{server_id}"),
+        10,
+        3600,
+    )
+    .await?;
 
     let id = Uuid::new_v4();
     let invite_code = format!("bulk-{}", Uuid::new_v4().simple());

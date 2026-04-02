@@ -24,6 +24,7 @@ pub mod scylla_outbox;
 pub mod threads;
 pub mod two_fa;
 pub mod users;
+pub mod user_experience;
 pub mod webhooks;
 
 // v1.5 Collaboration & Productivity

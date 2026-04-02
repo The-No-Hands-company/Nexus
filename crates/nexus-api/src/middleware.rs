@@ -7,8 +7,11 @@ use axum::{
     response::Response,
 };
 use nexus_common::error::NexusError;
+use std::collections::HashMap;
+use std::sync::OnceLock;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+use tokio::sync::Mutex;
 
 use crate::{auth, AppState};
 
@@ -306,15 +309,16 @@ pub async fn check_rate_limit(
         .arg(key)
         .query_async(&mut conn)
         .await
-        .unwrap_or(0);
+        .map_err(|e| NexusError::Internal(anyhow::anyhow!("redis INCR failed: {e}")))?;
 
     if count == 1 {
         // First hit — arm the expiry clock.
-        let _: Result<(), _> = redis::cmd("EXPIRE")
+        let _: () = redis::cmd("EXPIRE")
             .arg(key)
             .arg(window_secs as i64)
             .query_async(&mut conn)
-            .await;
+            .await
+            .map_err(|e| NexusError::Internal(anyhow::anyhow!("redis EXPIRE failed: {e}")))?;
     }
 
     if count > limit {
@@ -322,9 +326,96 @@ pub async fn check_rate_limit(
             .arg(key)
             .query_async(&mut conn)
             .await
-            .unwrap_or(window_secs as i64);
+            .map_err(|e| NexusError::Internal(anyhow::anyhow!("redis TTL failed: {e}")))?;
         let retry_after_ms = (ttl_secs.max(1) as u64) * 1000;
         return Err(NexusError::RateLimited { retry_after_ms });
+    }
+
+    Ok(())
+}
+
+static LOCAL_RATE_LIMITS: OnceLock<Mutex<HashMap<String, (u64, Instant)>>> = OnceLock::new();
+
+/// Rate limiter that prefers Redis (multi-node) and falls back to local memory.
+///
+/// Use this for public abuse-prone endpoints so limits remain active even when
+/// Redis is not configured (lite mode) or temporarily unavailable.
+pub async fn check_rate_limit_with_fallback(
+    redis: Option<&redis::aio::ConnectionManager>,
+    key: impl AsRef<str>,
+    limit: u64,
+    window_secs: u64,
+) -> Result<(), NexusError> {
+    if let Some(redis) = redis {
+        match check_rate_limit(redis, key.as_ref(), limit, window_secs).await {
+            Ok(()) => {
+                metrics::counter!(
+                    "nexus_rate_limit_decisions_total",
+                    "backend" => "redis",
+                    "outcome" => "allowed",
+                )
+                .increment(1);
+                return Ok(());
+            }
+            Err(NexusError::RateLimited { retry_after_ms }) => {
+                metrics::counter!(
+                    "nexus_rate_limit_decisions_total",
+                    "backend" => "redis",
+                    "outcome" => "blocked",
+                )
+                .increment(1);
+                return Err(NexusError::RateLimited { retry_after_ms });
+            }
+            Err(err) => {
+                tracing::warn!(error = %err, "redis rate limiter failed; falling back to local limiter");
+                metrics::counter!(
+                    "nexus_rate_limit_decisions_total",
+                    "backend" => "redis",
+                    "outcome" => "error",
+                )
+                .increment(1);
+            }
+        }
+    }
+
+    let res = check_rate_limit_local(key.as_ref(), limit, window_secs).await;
+    metrics::counter!(
+        "nexus_rate_limit_decisions_total",
+        "backend" => "local",
+        "outcome" => if res.is_ok() { "allowed" } else { "blocked" },
+    )
+    .increment(1);
+    res
+}
+
+async fn check_rate_limit_local(
+    key: &str,
+    limit: u64,
+    window_secs: u64,
+) -> Result<(), NexusError> {
+    let state = LOCAL_RATE_LIMITS.get_or_init(|| Mutex::new(HashMap::new()));
+    let now = Instant::now();
+    let window = Duration::from_secs(window_secs.max(1));
+
+    let mut guard = state.lock().await;
+    let entry = guard.entry(key.to_string()).or_insert((0, now + window));
+
+    if now >= entry.1 {
+        *entry = (1, now + window);
+    } else {
+        entry.0 = entry.0.saturating_add(1);
+    }
+
+    // Best-effort cleanup to avoid unbounded growth over time.
+    if guard.len() > 50_000 {
+        guard.retain(|_, (_, reset_at)| *reset_at > now);
+    }
+
+    if entry.0 > limit {
+        let retry_after_ms = entry.1.saturating_duration_since(now).as_millis() as u64;
+        return Err(NexusError::RateLimited {
+            retry_after_ms: retry_after_ms.max(1_000),
+        });
     }
 
     Ok(())

@@ -6,6 +6,7 @@
 
 use axum::{
     extract::State,
+    http::HeaderMap,
     routing::post,
     Json, Router,
 };
@@ -14,7 +15,11 @@ use nexus_db::repository::{password_reset, users};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::{auth, AppState};
+use crate::{
+    auth,
+    middleware::{check_rate_limit_with_fallback, extract_client_ip},
+    AppState,
+};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -41,12 +46,22 @@ struct GenericResponse {
 
 async fn forgot_password(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(body): Json<ForgotPasswordBody>,
 ) -> NexusResult<Json<GenericResponse>> {
     let generic_response = Json(GenericResponse {
         ok: true,
         message: "If an account exists for this email, a reset link has been sent.".into(),
     });
+
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:forgot_password:ip:{ip}"),
+        10,
+        300,
+    )
+    .await?;
 
     let email = body.email.trim();
     if email.is_empty() || email.len() > 255 {
@@ -95,8 +110,18 @@ async fn forgot_password(
 
 async fn reset_password(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(body): Json<ResetPasswordBody>,
 ) -> NexusResult<Json<GenericResponse>> {
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:reset_password:ip:{ip}"),
+        20,
+        300,
+    )
+    .await?;
+
     let token = body.token.trim();
     if token.is_empty() {
         return Err(NexusError::Validation {

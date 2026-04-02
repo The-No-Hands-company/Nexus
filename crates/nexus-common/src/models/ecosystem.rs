@@ -2,13 +2,16 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-// ── 19-01: Import & Migration ─────────────────────────────────────────────
+// ── 19-01: Data Portability & Migration ───────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImportJob {
     pub id: Uuid,
     pub server_id: Uuid,
     pub user_id: Uuid,
+    /// Canonical source kind used by the import pipeline.
+    ///
+    /// Stored in the legacy DB column name `source_platform` for compatibility.
     pub source_platform: String,
     pub status: String,
     pub total_items: i32,

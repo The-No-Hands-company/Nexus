@@ -100,10 +100,20 @@ async fn process_import_job(
     pool: &AnyPool,
     job: &ImportJob,
 ) -> Result<(i32, i32), (String, i32, i32)> {
-    let source = job.source_platform.to_ascii_lowercase();
-    if source != "discord" && source != "slack" && source != "matrix" {
+    let source = normalize_source_kind(&job.source_platform).ok_or_else(|| {
+        (
+            format!("unsupported import source kind: {}", job.source_platform),
+            0,
+            0,
+        )
+    })?;
+    if source != "nexus_portability"
+        && source != "portable_export"
+        && source != "archive_bundle"
+        && source != "custom_plugin"
+    {
         return Err((
-            format!("unsupported source platform: {}", job.source_platform),
+            format!("unsupported import source kind: {}", job.source_platform),
             0,
             0,
         ));
@@ -120,25 +130,48 @@ async fn process_import_job(
         ));
     }
 
-    let channel = match resolve_or_create_import_channel(pool, job.server_id, &source).await {
+    let fallback_channel = match resolve_or_create_import_channel(pool, job.server_id, &source).await {
         Ok(id) => id,
         Err(e) => {
             return Err((format!("failed to prepare import channel: {e}"), 0, total));
         }
     };
 
+    let mut channel_cache: std::collections::HashMap<String, Uuid> = std::collections::HashMap::new();
+
     let mut imported = 0i32;
-    for content in items {
-        let content = content.trim();
+    for item in items {
+        let content = item.content.trim();
         if content.is_empty() {
             continue;
         }
+
+        let target_channel = if let Some(name) = item.channel_name.as_deref() {
+            if let Some(cid) = channel_cache.get(name).copied() {
+                cid
+            } else {
+                let cid = match resolve_or_create_import_channel_named(pool, job.server_id, name).await {
+                    Ok(id) => id,
+                    Err(e) => {
+                        return Err((
+                            format!("failed to prepare channel '{name}' for import: {e}"),
+                            imported,
+                            total,
+                        ));
+                    }
+                };
+                channel_cache.insert(name.to_string(), cid);
+                cid
+            }
+        } else {
+            fallback_channel
+        };
 
         let message_id = snowflake::generate_id();
         match messages::create_message(
             pool,
             message_id,
-            channel,
+            target_channel,
             job.user_id,
             content,
             0,
@@ -200,23 +233,92 @@ async fn resolve_or_create_import_channel(
     Ok(created.id)
 }
 
-fn extract_messages(metadata: &serde_json::Value) -> Vec<String> {
+async fn resolve_or_create_import_channel_named(
+    pool: &AnyPool,
+    server_id: Uuid,
+    source_name: &str,
+) -> Result<Uuid, sqlx::Error> {
+    let mut normalized = source_name
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .collect::<String>();
+    while normalized.contains("--") {
+        normalized = normalized.replace("--", "-");
+    }
+    normalized = normalized.trim_matches('-').to_string();
+    if normalized.is_empty() {
+        normalized = "imported".to_string();
+    }
+    if normalized.len() > 64 {
+        normalized.truncate(64);
+    }
+
+    let target_name = format!("imported-{normalized}");
+
+    let existing = channels::list_server_channels(pool, server_id)
+        .await?
+        .into_iter()
+        .find(|c| {
+            c.name
+                .as_deref()
+                .map(|n| n.eq_ignore_ascii_case(&target_name))
+                .unwrap_or(false)
+        });
+
+    if let Some(ch) = existing {
+        return Ok(ch.id);
+    }
+
+    let created = channels::create_channel(
+        pool,
+        Uuid::new_v4(),
+        Some(server_id),
+        None,
+        "text",
+        Some(&target_name),
+        Some("Imported messages"),
+        0,
+    )
+    .await?;
+
+    Ok(created.id)
+}
+
+#[derive(Debug, Clone)]
+struct ImportedMessage {
+    channel_name: Option<String>,
+    content: String,
+}
+
+fn extract_messages(metadata: &serde_json::Value) -> Vec<ImportedMessage> {
     let mut out = Vec::new();
 
     if let Some(arr) = metadata.get("messages").and_then(|v| v.as_array()) {
         for item in arr {
-            if let Some(s) = extract_message_text(item) {
-                out.push(s);
+            if let Some(content) = extract_message_text(item) {
+                out.push(ImportedMessage {
+                    channel_name: None,
+                    content,
+                });
             }
         }
     }
 
     if let Some(channels) = metadata.get("channels").and_then(|v| v.as_array()) {
         for channel in channels {
+            let channel_name = channel
+                .get("name")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
             if let Some(msgs) = channel.get("messages").and_then(|v| v.as_array()) {
                 for item in msgs {
-                    if let Some(s) = extract_message_text(item) {
-                        out.push(s);
+                    if let Some(content) = extract_message_text(item) {
+                        out.push(ImportedMessage {
+                            channel_name: channel_name.clone(),
+                            content,
+                        });
                     }
                 }
             }
@@ -228,7 +330,10 @@ fn extract_messages(metadata: &serde_json::Value) -> Vec<String> {
             for line in text_dump.lines() {
                 let trimmed = line.trim();
                 if !trimmed.is_empty() {
-                    out.push(trimmed.to_string());
+                    out.push(ImportedMessage {
+                        channel_name: None,
+                        content: trimmed.to_string(),
+                    });
                 }
             }
         }
@@ -253,6 +358,18 @@ fn extract_message_text(value: &serde_json::Value) -> Option<String> {
     None
 }
 
+fn normalize_source_kind(input: &str) -> Option<&'static str> {
+    match input.trim().to_ascii_lowercase().as_str() {
+        "nexus_portability" | "nexus" => Some("nexus_portability"),
+        "portable_export" | "portable" | "user_export" => Some("portable_export"),
+        "archive_bundle" | "archive" => Some("archive_bundle"),
+        "custom_plugin" | "plugin" => Some("custom_plugin"),
+        // Legacy aliases retained for existing queued jobs.
+        "discord" | "slack" | "matrix" => Some("portable_export"),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,7 +385,8 @@ mod tests {
         });
 
         let out = extract_messages(&metadata);
-        assert_eq!(out, vec!["hello", "world", "raw"]);
+        assert_eq!(out.iter().map(|m| m.content.clone()).collect::<Vec<_>>(), vec!["hello", "world", "raw"]);
+        assert!(out.iter().all(|m| m.channel_name.is_none()));
     }
 
     #[test]
@@ -276,6 +394,7 @@ mod tests {
         let metadata = serde_json::json!({
             "channels": [
                 {
+                    "name": "general",
                     "messages": [
                         {"body": "first"},
                         {"content": "second"}
@@ -285,7 +404,9 @@ mod tests {
         });
 
         let out = extract_messages(&metadata);
-        assert_eq!(out, vec!["first", "second"]);
+        assert_eq!(out.iter().map(|m| m.content.clone()).collect::<Vec<_>>(), vec!["first", "second"]);
+        assert_eq!(out[0].channel_name.as_deref(), Some("general"));
+        assert_eq!(out[1].channel_name.as_deref(), Some("general"));
     }
 
     #[test]
@@ -295,6 +416,7 @@ mod tests {
         });
 
         let out = extract_messages(&metadata);
-        assert_eq!(out, vec!["line one", "line two"]);
+        assert_eq!(out.iter().map(|m| m.content.clone()).collect::<Vec<_>>(), vec!["line one", "line two"]);
+        assert!(out.iter().all(|m| m.channel_name.is_none()));
     }
 }

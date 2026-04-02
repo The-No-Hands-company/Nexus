@@ -121,6 +121,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::drawings::router())                        // in-chat drawing & annotation
         .merge(routes::voice_settings::router())                  // voice settings & music queue
         .merge(routes::media_gallery::router())                   // media gallery browsing + filters
+        .merge(routes::experience::router())                      // full vs messaging-first profile
         // v1.7 Accessibility & Inclusivity
         .merge(routes::accessibility::router())                   // accessibility settings
         .merge(routes::voice_captions::router())                  // voice channel live captions

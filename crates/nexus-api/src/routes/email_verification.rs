@@ -6,6 +6,7 @@
 
 use axum::{
     extract::{Extension, Query, State},
+    http::HeaderMap,
     middleware,
     routing::{get, post},
     Json, Router,
@@ -15,7 +16,10 @@ use nexus_db::repository::email_verification;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{
+    middleware::{check_rate_limit_with_fallback, extract_client_ip, AuthContext},
+    AppState,
+};
 
 pub fn router() -> Router<Arc<AppState>> {
     // Verify endpoint is public — the link comes from an email
@@ -47,8 +51,18 @@ struct VerifyResponse {
 /// Sets the `EMAIL_VERIFIED` flag and deletes the token row.
 async fn verify_email(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Query(params): Query<VerifyQuery>,
 ) -> NexusResult<Json<VerifyResponse>> {
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:verify_email:ip:{ip}"),
+        30,
+        300,
+    )
+    .await?;
+
     let user_id = email_verification::consume_token(&state.db.pool, &params.token)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?
@@ -83,7 +97,17 @@ struct ResendResponse {
 async fn resend_verification(
     Extension(auth_ctx): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
 ) -> NexusResult<Json<ResendResponse>> {
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:resend_verification:ip:{ip}"),
+        10,
+        300,
+    )
+    .await?;
+
     let user = nexus_db::repository::users::find_by_id(&state.db.pool, auth_ctx.user_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "User".into() })?;

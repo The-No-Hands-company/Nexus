@@ -20,6 +20,12 @@ type Message = {
   created_at?: string;
 };
 
+type ExperienceMode = "full" | "messaging";
+
+type ExperienceProfile = {
+  experience_mode?: ExperienceMode;
+};
+
 type GatewayEnvelope = {
   op: string;
   d?: unknown;
@@ -52,6 +58,8 @@ export default function App() {
   const [activeChannel, setActiveChannel] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [gatewayStatus, setGatewayStatus] = useState<"offline" | "connecting" | "online">("offline");
+  const [experienceMode, setExperienceMode] = useState<ExperienceMode>("full");
+  const [savingMode, setSavingMode] = useState(false);
   const activeChannelRef = useRef<string | null>(null);
 
   const authPath = mode === "login" ? "/auth/login" : "/auth/register";
@@ -73,6 +81,17 @@ export default function App() {
     if (!session) return;
     void loadServers(session, apiBase, setServers, setError);
   }, [session, apiBase]);
+
+  useEffect(() => {
+    if (!session) return;
+    void loadExperienceProfile(session, apiBase, setExperienceMode, setError);
+  }, [session, apiBase]);
+
+  useEffect(() => {
+    if (!activeServer && servers.length > 0) {
+      setActiveServer(servers[0].id);
+    }
+  }, [activeServer, servers]);
 
   useEffect(() => {
     if (!session || !activeServer) return;
@@ -246,6 +265,21 @@ export default function App() {
     }
   }
 
+  async function setMode(nextMode: ExperienceMode) {
+    if (!session || nextMode === experienceMode || savingMode) return;
+    const prev = experienceMode;
+    setExperienceMode(nextMode);
+    setSavingMode(true);
+    try {
+      await updateExperienceMode(session, apiBase, nextMode);
+    } catch (err) {
+      setExperienceMode(prev);
+      setError((err as Error).message);
+    } finally {
+      setSavingMode(false);
+    }
+  }
+
   if (!session) {
     return (
       <div className="app">
@@ -287,37 +321,43 @@ export default function App() {
   return (
     <div className="app">
       <div className="meta" style={{ marginBottom: 8 }}>
-        {statusText} · Gateway: {gatewayStatus}
+        {statusText} · Gateway: {gatewayStatus} · Mode: {experienceMode}
+      </div>
+      <div className="mode-switch" style={{ marginBottom: 8 }}>
+        <button type="button" disabled={savingMode || experienceMode === "full"} onClick={() => setMode("full")}>Full Experience</button>
+        <button type="button" disabled={savingMode || experienceMode === "messaging"} onClick={() => setMode("messaging")}>Messaging Mode</button>
       </div>
       {error ? <div className="error" style={{ marginBottom: 8 }}>{error}</div> : null}
-      <div className="workspace">
-        <section className="panel col">
-          <h3>Servers</h3>
-          {servers.map((s) => (
-            <button
-              key={s.id}
-              className="list-item"
-              onClick={() => {
-                setActiveServer(s.id);
-                setActiveChannel(null);
-                setChannels([]);
-                setMessages([]);
-              }}
-            >
-              {s.name}
-            </button>
-          ))}
-        </section>
+      <div className={`workspace ${experienceMode === "messaging" ? "messaging" : ""}`}>
+        {experienceMode === "full" ? (
+          <section className="panel col">
+            <h3>Servers</h3>
+            {servers.map((s) => (
+              <button
+                key={s.id}
+                className="list-item"
+                onClick={() => {
+                  setActiveServer(s.id);
+                  setActiveChannel(null);
+                  setChannels([]);
+                  setMessages([]);
+                }}
+              >
+                {s.name}
+              </button>
+            ))}
+          </section>
+        ) : null}
 
         <section className="panel col">
-          <h3>Channels</h3>
+          <h3>{experienceMode === "messaging" ? "Conversations" : "Channels"}</h3>
           {channels.map((c) => (
             <button
               key={c.id}
               className="list-item"
               onClick={() => setActiveChannel(c.id)}
             >
-              # {c.name}
+              {experienceMode === "messaging" ? c.name : `# ${c.name}`}
             </button>
           ))}
         </section>
@@ -411,5 +451,40 @@ async function loadMessages(
     setMessages(Array.isArray(body) ? body : []);
   } catch (err) {
     setError((err as Error).message);
+  }
+}
+
+async function loadExperienceProfile(
+  session: Session,
+  apiBase: string,
+  setMode: (v: ExperienceMode) => void,
+  setError: (v: string | null) => void
+) {
+  try {
+    const res = await fetch(`${apiBase}/users/@me/experience-profile`, {
+      headers: authHeaders(session),
+    });
+    if (!res.ok) throw new Error(`Failed loading experience profile (${res.status})`);
+    const body = (await res.json()) as ExperienceProfile;
+    if (body.experience_mode === "messaging" || body.experience_mode === "full") {
+      setMode(body.experience_mode);
+    }
+  } catch (err) {
+    setError((err as Error).message);
+  }
+}
+
+async function updateExperienceMode(
+  session: Session,
+  apiBase: string,
+  mode: ExperienceMode
+) {
+  const res = await fetch(`${apiBase}/users/@me/experience-profile`, {
+    method: "PUT",
+    headers: authHeaders(session),
+    body: JSON.stringify({ experience_mode: mode }),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed updating experience mode (${res.status})`);
   }
 }

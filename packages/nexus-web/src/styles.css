@@ -73,6 +73,18 @@ button {
   height: calc(100vh - 40px);
 }
 
+.workspace.messaging-mode {
+  grid-template-columns: 260px 1fr;
+}
+
+.workspace.messaging-mode .servers-hidden {
+  display: none;
+}
+
+.workspace.messaging {
+  grid-template-columns: 280px 1fr;
+}
+
 .col {
   padding: 12px;
   overflow: auto;
@@ -100,6 +112,11 @@ button {
 }
 
 .row {
+  display: flex;
+  gap: 8px;
+}
+
+.mode-switch {
   display: flex;
   gap: 8px;
 }
