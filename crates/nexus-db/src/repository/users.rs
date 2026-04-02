@@ -1,6 +1,7 @@
 //! User repository — CRUD operations for user accounts.
 
 use nexus_common::models::user::User;
+use std::collections::HashMap;
 
 use uuid::Uuid;
 
@@ -35,6 +36,32 @@ pub async fn find_by_id(pool: &sqlx::AnyPool, id: Uuid) -> Result<Option<User>, 
         .bind(id.to_string())
         .fetch_optional(pool)
         .await
+}
+
+/// Find users by IDs and return a map keyed by user id.
+pub async fn find_by_ids_map(
+    pool: &sqlx::AnyPool,
+    ids: &[Uuid],
+) -> Result<HashMap<Uuid, User>, sqlx::Error> {
+    let mut out = HashMap::new();
+    if ids.is_empty() {
+        return Ok(out);
+    }
+
+    let mut qb = sqlx::QueryBuilder::new(format!("SELECT {USER_COLS} FROM users WHERE id IN ("));
+    {
+        let mut separated = qb.separated(", ");
+        for id in ids {
+            separated.push_bind(id.to_string());
+        }
+    }
+    qb.push(")");
+
+    let rows = qb.build_query_as::<User>().fetch_all(pool).await?;
+    for user in rows {
+        out.insert(user.id, user);
+    }
+    Ok(out)
 }
 
 /// Find a user by username (case-insensitive).

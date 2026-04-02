@@ -262,7 +262,9 @@ async fn receive_transaction(
     // ── 7. Real-time dispatch to local members of federated rooms ─────────────
     // For each message-type PDU that arrived, notify any local users who have
     // joined the originating room so their clients update in real time.
-    for pdu in &pdus {
+        // First pass: collect all unique room IDs from message PDUs
+        let mut message_rooms: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for pdu in &pdus {
         let event_type = pdu.get("type").and_then(Value::as_str).unwrap_or("");
         if !matches!(event_type, "nexus.message.create" | "m.room.message") {
             continue;
@@ -271,23 +273,52 @@ async fn receive_transaction(
             Some(r) => r.to_owned(),
             None => continue,
         };
+            message_rooms.insert(room_id);
+        }
+
+        // Batch load all room members in one query (eliminates N queries)
+        let mut room_members: std::collections::HashMap<String, Vec<uuid::Uuid>> = std::collections::HashMap::new();
+        if !message_rooms.is_empty() {
+            let room_ids: Vec<&str> = message_rooms.iter().map(|s| s.as_str()).collect();
+            let mut qb = sqlx::QueryBuilder::new(
+                "SELECT room_id, user_id FROM federated_room_members WHERE room_id IN (",
+            );
+            {
+                let mut separated = qb.separated(", ");
+                for room_id in &room_ids {
+                    separated.push_bind(*room_id);
+                }
+            }
+            qb.push(")");
+
+            if let Ok(rows) = qb.build().fetch_all(&state.db.pool).await {
+                for row in rows {
+                    use sqlx::Row as _;
+                    if let (Ok(rid), Ok(uid_str)) = (row.try_get::<String, _>("room_id"), row.try_get::<String, _>("user_id")) {
+                        if let Ok(uid) = uuid::Uuid::parse_str(&uid_str) {
+                            room_members.entry(rid).or_insert_with(Vec::new).push(uid);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Second pass: dispatch events using pre-loaded members
+        for pdu in &pdus {
+            let event_type = pdu.get("type").and_then(Value::as_str).unwrap_or("");
+            if !matches!(event_type, "nexus.message.create" | "m.room.message") {
+                continue;
+            }
+            let room_id = match pdu.get("room_id").and_then(Value::as_str) {
+                Some(r) => r.to_owned(),
+                None => continue,
+            };
         let sender = pdu.get("sender").and_then(Value::as_str).unwrap_or("unknown").to_owned();
         let content = pdu.get("content").cloned().unwrap_or_else(|| json!({}));
         let event_id = pdu.get("event_id").and_then(Value::as_str).unwrap_or("").to_owned();
         let ts = pdu.get("origin_server_ts").and_then(Value::as_i64).unwrap_or(0);
 
-        let member_ids: Vec<uuid::Uuid> = sqlx::query(
-            "SELECT user_id FROM federated_room_members WHERE room_id = $1",
-        )
-        .bind(&room_id)
-        .fetch_all(&state.db.pool)
-        .await
-        .unwrap_or_default()
-        .iter()
-        .filter_map(|r| r.try_get::<String, _>("user_id").ok())
-        .filter_map(|s| uuid::Uuid::parse_str(&s).ok())
-        .collect();
-
+            let member_ids = room_members.get(&room_id).cloned().unwrap_or_default();
         for member_id in member_ids {
             let _ = state.gateway_tx.send(GatewayEvent {
                 event_type: "FEDERATED_MESSAGE_CREATE".to_owned(),

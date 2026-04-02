@@ -17,6 +17,8 @@ use chrono::{DateTime, Utc};
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_common::snowflake;
 use serde::{Deserialize, Serialize};
+use sqlx::Row;
+use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -194,10 +196,78 @@ async fn list_bookmarks(
     .map_err(|e| NexusError::Internal(e.into()))?;
 
     let mut bookmarks = Vec::with_capacity(rows.len());
+    let mut message_ids = Vec::with_capacity(rows.len());
     for row in rows {
-        let mut bm = Bookmark::try_from(row)?;
-        bm.message = hydrate_message(&state, bm.message_id).await;
+        let bm = Bookmark::try_from(row)?;
+        message_ids.push(bm.message_id);
         bookmarks.push(bm);
+    }
+
+    let mut preview_by_message_id: HashMap<Uuid, BookmarkedMessagePreview> = HashMap::new();
+    if !message_ids.is_empty() {
+        let mut qb = sqlx::QueryBuilder::new(
+            "SELECT m.id::text AS id, m.content AS content, m.author_id::text AS author_id, \
+                    COALESCE(u.username, '') AS username, m.channel_id::text AS channel_id, m.created_at::text AS created_at \
+             FROM messages m \
+             LEFT JOIN users u ON u.id = m.author_id \
+             WHERE m.deleted_at IS NULL AND m.id IN (",
+        );
+        {
+            let mut separated = qb.separated(", ");
+            for message_id in &message_ids {
+                separated.push_bind(message_id.to_string());
+            }
+        }
+        qb.push(")");
+
+        let rows = qb
+            .build()
+            .fetch_all(&state.db.pool)
+            .await
+            .map_err(|e| NexusError::Internal(e.into()))?;
+
+        for row in rows {
+            let id = match row.try_get::<String, _>("id").ok().and_then(|s| s.parse::<Uuid>().ok()) {
+                Some(v) => v,
+                None => continue,
+            };
+            let author_id = match row
+                .try_get::<String, _>("author_id")
+                .ok()
+                .and_then(|s| s.parse::<Uuid>().ok())
+            {
+                Some(v) => v,
+                None => continue,
+            };
+            let channel_id = match row
+                .try_get::<String, _>("channel_id")
+                .ok()
+                .and_then(|s| s.parse::<Uuid>().ok())
+            {
+                Some(v) => v,
+                None => continue,
+            };
+
+            let created_at = row
+                .try_get::<String, _>("created_at")
+                .ok()
+                .and_then(|s| parse_dt(&s).ok())
+                .unwrap_or_else(Utc::now);
+
+            let preview = BookmarkedMessagePreview {
+                id,
+                content: row.try_get::<String, _>("content").unwrap_or_default(),
+                author_id,
+                author_username: row.try_get::<String, _>("username").unwrap_or_default(),
+                channel_id,
+                created_at,
+            };
+            preview_by_message_id.insert(id, preview);
+        }
+    }
+
+    for bm in &mut bookmarks {
+        bm.message = preview_by_message_id.get(&bm.message_id).cloned();
     }
 
     Ok(Json(bookmarks))

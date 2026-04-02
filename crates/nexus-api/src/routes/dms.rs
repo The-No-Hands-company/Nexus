@@ -17,6 +17,8 @@ use nexus_common::{
 };
 use nexus_db::{repository::channels, select_cols::CHANNEL_COLS_C};
 use serde::Deserialize;
+use sqlx::Row;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -69,36 +71,80 @@ async fn list_dm_channels(
         .fetch_all(&state.db.pool)
         .await?;
 
-    let mut results = Vec::with_capacity(dms.len());
-    for dm in &dms {
-        let participants: Vec<(String,)> = sqlx::query_as(
-            "SELECT user_id::text FROM dm_participants WHERE channel_id = $1::uuid",
-        )
-        .bind(dm.id.to_string())
-        .fetch_all(&state.db.pool)
-        .await?;
+    let dm_ids: Vec<Uuid> = dms.iter().map(|dm| dm.id).collect();
+    let mut participants_by_channel: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
+    let mut unique_user_ids: HashSet<Uuid> = HashSet::new();
 
-        let participant_ids: Vec<Uuid> = participants
-            .into_iter()
-            .filter_map(|p| p.0.parse().ok())
-            .collect();
-
-        let mut users = Vec::new();
-        for &uid in &participant_ids {
-            if uid == auth.user_id {
-                continue;
-            }
-            if let Some(user) =
-                nexus_db::repository::users::find_by_id(&state.db.pool, uid).await?
-            {
-                users.push(serde_json::json!({
-                    "id": user.id,
-                    "username": user.username,
-                    "display_name": user.display_name,
-                    "avatar": user.avatar,
-                }));
+    if !dm_ids.is_empty() {
+        let mut qb = sqlx::QueryBuilder::new(
+            "SELECT channel_id::text AS channel_id, user_id::text AS user_id FROM dm_participants WHERE channel_id IN (",
+        );
+        {
+            let mut separated = qb.separated(", ");
+            for channel_id in &dm_ids {
+                separated.push_bind(channel_id.to_string());
             }
         }
+        qb.push(")");
+
+        let rows = qb
+            .build()
+            .fetch_all(&state.db.pool)
+            .await
+            .map_err(NexusError::Database)?;
+
+        for row in rows {
+            let channel_id = match row.try_get::<String, _>("channel_id") {
+                Ok(v) => match v.parse::<Uuid>() {
+                    Ok(id) => id,
+                    Err(_) => continue,
+                },
+                Err(_) => continue,
+            };
+            let user_id = match row.try_get::<String, _>("user_id") {
+                Ok(v) => match v.parse::<Uuid>() {
+                    Ok(id) => id,
+                    Err(_) => continue,
+                },
+                Err(_) => continue,
+            };
+
+            participants_by_channel
+                .entry(channel_id)
+                .or_default()
+                .push(user_id);
+            if user_id != auth.user_id {
+                unique_user_ids.insert(user_id);
+            }
+        }
+    }
+
+    let user_map = nexus_db::repository::users::find_by_ids_map(
+        &state.db.pool,
+        &unique_user_ids.into_iter().collect::<Vec<_>>(),
+    )
+    .await?;
+
+    let mut results = Vec::with_capacity(dms.len());
+    for dm in &dms {
+        let users = participants_by_channel
+            .get(&dm.id)
+            .map(|participant_ids| {
+                participant_ids
+                    .iter()
+                    .filter(|uid| **uid != auth.user_id)
+                    .filter_map(|uid| user_map.get(uid))
+                    .map(|user| {
+                        serde_json::json!({
+                            "id": user.id,
+                            "username": user.username,
+                            "display_name": user.display_name,
+                            "avatar": user.avatar,
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
 
         results.push(serde_json::json!({
             "id": dm.id,

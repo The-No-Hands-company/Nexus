@@ -33,6 +33,7 @@ use nexus_common::{
 };
 use nexus_db::repository::{relationships, users};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -127,6 +128,20 @@ async fn list_relationships(
 ) -> NexusResult<Json<Vec<RelationshipResponse>>> {
     let rows = relationships::list_for_user(&state.db.pool, auth.user_id).await?;
 
+    let other_ids: Vec<Uuid> = rows
+        .iter()
+        .map(|rel| {
+            if rel.requester_id == auth.user_id {
+                rel.addressee_id
+            } else {
+                rel.requester_id
+            }
+        })
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let user_map = users::find_by_ids_map(&state.db.pool, &other_ids).await?;
+
     let mut result = Vec::with_capacity(rows.len());
     for rel in rows {
         let other_id = if rel.requester_id == auth.user_id {
@@ -146,7 +161,7 @@ async fn list_relationships(
             RelationshipStatus::Blocked => "blocked",
         };
 
-        if let Some(other) = users::find_by_id(&state.db.pool, other_id).await? {
+        if let Some(other) = user_map.get(&other_id) {
             result.push(RelationshipResponse {
                 id: other.id,
                 direction,
@@ -154,8 +169,8 @@ async fn list_relationships(
                 user: UserBrief {
                     id: other.id,
                     username: qualified_username(&other.username, other.server_name.as_deref()),
-                    display_name: other.display_name,
-                    avatar: other.avatar,
+                    display_name: other.display_name.clone(),
+                    avatar: other.avatar.clone(),
                 },
             });
         }
