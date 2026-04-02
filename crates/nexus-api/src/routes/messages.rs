@@ -382,7 +382,7 @@ async fn get_messages(
     let limit = params.limit.unwrap_or(50).min(100).max(1);
     let strategy = scylla_read_strategy(&state);
     if strategy != ScyllaReadStrategy::Off && params.before.is_none() && params.after.is_none() {
-        match list_messages_from_scylla(&state, channel_id, limit).await {
+        match list_messages_from_scylla(&state, channel_id, auth.user_id, limit).await {
             Ok(rows) => {
                 if !rows.is_empty() {
                     metrics::counter!(
@@ -475,7 +475,7 @@ async fn get_message(
 
     let strategy = scylla_read_strategy(&state);
     if strategy != ScyllaReadStrategy::Off {
-        match get_message_from_scylla(&state, channel_id, message_id).await {
+        match get_message_from_scylla(&state, channel_id, message_id, auth.user_id).await {
             Ok(Some(msg)) => {
                 metrics::counter!(
                     "nexus_scylla_read_total",
@@ -1273,6 +1273,7 @@ async fn get_user_reactions(
 async fn list_messages_from_scylla(
     state: &AppState,
     channel_id: Uuid,
+    user_id: Uuid,
     limit: i64,
 ) -> Result<Vec<serde_json::Value>, String> {
     let session = connect_scylla(state).await?;
@@ -1307,6 +1308,7 @@ async fn list_messages_from_scylla(
         let reaction_counts = reactions::get_reaction_counts(&state.db.pool, parsed_message_id)
             .await
             .unwrap_or_default();
+        let my_reactions = get_user_reactions(state, parsed_message_id, user_id, &reaction_counts).await;
 
         let message_json = serde_json::json!({
             "id": parsed_message_id,
@@ -1326,7 +1328,11 @@ async fn list_messages_from_scylla(
             "reference": serde_json::Value::Null,
             "thread_id": serde_json::Value::Null,
             "reactions": reaction_counts.iter().map(|rc| {
-                serde_json::json!({ "emoji": rc.emoji, "count": rc.count, "me": false })
+                serde_json::json!({
+                    "emoji": rc.emoji,
+                    "count": rc.count,
+                    "me": my_reactions.contains(&rc.emoji),
+                })
             }).collect::<Vec<_>>(),
             "created_at": chrono::DateTime::from_timestamp(created_at_epoch, 0).unwrap_or_else(Utc::now),
         });
@@ -1341,6 +1347,7 @@ async fn get_message_from_scylla(
     state: &AppState,
     channel_id: Uuid,
     message_id: Uuid,
+    user_id: Uuid,
 ) -> Result<Option<serde_json::Value>, String> {
     let session = connect_scylla(state).await?;
 
@@ -1392,6 +1399,7 @@ async fn get_message_from_scylla(
     let reaction_counts = reactions::get_reaction_counts(&state.db.pool, message_id)
         .await
         .unwrap_or_default();
+    let my_reactions = get_user_reactions(state, message_id, user_id, &reaction_counts).await;
 
     Ok(Some(serde_json::json!({
         "id": message_id,
@@ -1411,7 +1419,11 @@ async fn get_message_from_scylla(
         "reference": serde_json::Value::Null,
         "thread_id": serde_json::Value::Null,
         "reactions": reaction_counts.iter().map(|rc| {
-            serde_json::json!({ "emoji": rc.emoji, "count": rc.count, "me": false })
+            serde_json::json!({
+                "emoji": rc.emoji,
+                "count": rc.count,
+                "me": my_reactions.contains(&rc.emoji),
+            })
         }).collect::<Vec<_>>(),
         "created_at": chrono::DateTime::from_timestamp(created_at_epoch, 0).unwrap_or_else(Utc::now),
     })))
