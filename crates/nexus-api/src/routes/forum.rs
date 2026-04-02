@@ -16,7 +16,7 @@
 use axum::{
     extract::{Extension, Path, Query, State},
     middleware,
-    routing::{delete, get, post},
+    routing::{get, post},
     Json, Router,
 };
 use chrono::{DateTime, Utc};
@@ -573,6 +573,7 @@ async fn update_tag(
         }
     }
 
+    #[allow(dead_code)]
     #[derive(sqlx::FromRow)]
     struct TagRow {
         id: String,
@@ -648,6 +649,7 @@ async fn fetch_channel_tags(
     pool: &sqlx::AnyPool,
     channel_id: Uuid,
 ) -> NexusResult<Vec<ForumTag>> {
+    #[allow(dead_code)]
     #[derive(sqlx::FromRow)]
     struct TagRow {
         id: String,

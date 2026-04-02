@@ -17,7 +17,8 @@ struct RawMessage {
     pub content: String,
     pub created_at: String,
     pub edited_at: Option<String>,
-    pub attachments: Option<serde_json::Value>,
+    #[serde(rename = "attachments")]
+    pub _attachments: Option<serde_json::Value>,
 }
 
 /// Message shape expected by the TypeScript frontend (camelCase).

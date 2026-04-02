@@ -9,7 +9,7 @@
 use axum::{
     extract::{Extension, Multipart, Path, State},
     middleware,
-    routing::{delete, get, patch, post},
+    routing::{get, patch},
     Json, Router,
 };
 use chrono::{DateTime, Utc};

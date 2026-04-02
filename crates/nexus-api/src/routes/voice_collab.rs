@@ -61,6 +61,7 @@ pub fn router() -> Router<Arc<AppState>> {
 
 // ── Request / Query ────────────────────────────────────────────────────────
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct LimitQuery { limit: Option<i64> }
 
@@ -77,7 +78,8 @@ struct CreateVirtualBgReq {
     name: String,
     bg_type: String,
     url: Option<String>,
-    config: Option<serde_json::Value>,
+    #[serde(rename = "config")]
+    _config: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -866,7 +866,7 @@ async fn search_federated_users(
 
     let users: Vec<Value> = rows.iter().map(|r| json!({
         "type":         "local",
-        "user_id":      r.try_get::<String, _>("id").map(|id| format!("@{}:{}", r.try_get::<String, _>("username").unwrap_or_default(), state.server_name)).unwrap_or_default(),
+        "user_id":      r.try_get::<String, _>("id").map(|_id| format!("@{}:{}", r.try_get::<String, _>("username").unwrap_or_default(), state.server_name)).unwrap_or_default(),
         "username":     r.try_get::<String, _>("username").unwrap_or_default(),
         "display_name": r.try_get::<Option<String>, _>("display_name").unwrap_or(None),
         "avatar":       r.try_get::<Option<String>, _>("avatar").unwrap_or(None),

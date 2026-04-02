@@ -168,18 +168,6 @@ fn parse_enum<T>(
     f(&s).ok_or_else(|| sqlx::Error::Decode(format!("unknown enum variant: {s}").into()))
 }
 
-fn opt_enum<T>(
-    row: &AnyRow,
-    col: &str,
-    f: impl Fn(&str) -> Option<T>,
-) -> Result<Option<T>, sqlx::Error> {
-    let s: Option<String> = row.try_get(col)?;
-    s.map(|v| {
-        f(&v).ok_or_else(|| sqlx::Error::Decode(format!("unknown enum variant: {v}").into()))
-    })
-    .transpose()
-}
-
 // ── User ──────────────────────────────────────────────────────────────────────
 
 impl<'r> sqlx::FromRow<'r, AnyRow> for User {

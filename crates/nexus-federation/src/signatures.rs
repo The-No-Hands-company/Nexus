@@ -33,8 +33,8 @@ use crate::{
     keys::{verify_signature, ServerKeyPair},
 };
 
-// Maximum allowed clock skew between servers (30 seconds).
-const MAX_SKEW_SECS: i64 = 30;
+// Reserved for future timestamp skew validation in inbound federation auth.
+const _MAX_SKEW_SECS: i64 = 30;
 
 // ─── Signing ─────────────────────────────────────────────────────────────────
 
@@ -180,14 +180,14 @@ fn parse_auth_header(header: &str) -> Result<ParsedAuth, FederationError> {
 
     Ok(ParsedAuth {
         origin: origin.ok_or_else(|| FederationError::MalformedAuthHeader("missing 'origin'".into()))?,
-        key_id: key.ok_or_else(|| FederationError::MalformedAuthHeader("missing 'key'".into()))?,
+        _key_id: key.ok_or_else(|| FederationError::MalformedAuthHeader("missing 'key'".into()))?,
         sig: sig.ok_or_else(|| FederationError::MalformedAuthHeader("missing 'sig'".into()))?,
     })
 }
 
 struct ParsedAuth {
     origin: String,
-    key_id: String,
+    _key_id: String,
     sig: String,
 }
 

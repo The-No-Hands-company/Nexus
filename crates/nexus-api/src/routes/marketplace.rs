@@ -625,7 +625,7 @@ async fn submit_plugin_for_review(
 
 async fn get_review_queue(
     State(state): State<Arc<AppState>>,
-    Extension(mut ctx): Extension<AuthContext>,
+    Extension(ctx): Extension<AuthContext>,
     Query(limit): Query<Option<i64>>,
 ) -> NexusResult<Json<serde_json::Value>> {
     // Load user flags and check permissions
@@ -649,7 +649,7 @@ async fn get_review_queue(
 
 async fn approve_plugin(
     State(state): State<Arc<AppState>>,
-    Extension(mut ctx): Extension<AuthContext>,
+    Extension(ctx): Extension<AuthContext>,
     Path(plugin_id): Path<Uuid>,
     Json(body): Json<ApprovePluginRequest>,
 ) -> NexusResult<Json<serde_json::Value>> {
@@ -701,7 +701,7 @@ async fn approve_plugin(
 
 async fn reject_plugin(
     State(state): State<Arc<AppState>>,
-    Extension(mut ctx): Extension<AuthContext>,
+    Extension(ctx): Extension<AuthContext>,
     Path(plugin_id): Path<Uuid>,
     Json(body): Json<RejectPluginRequest>,
 ) -> NexusResult<Json<serde_json::Value>> {
@@ -744,7 +744,7 @@ async fn reject_plugin(
 
 async fn quarantine_plugin(
     State(state): State<Arc<AppState>>,
-    Extension(mut ctx): Extension<AuthContext>,
+    Extension(ctx): Extension<AuthContext>,
     Path(plugin_id): Path<Uuid>,
     Json(body): Json<QuarantinePluginRequest>,
 ) -> NexusResult<Json<serde_json::Value>> {
@@ -787,7 +787,7 @@ async fn quarantine_plugin(
 
 async fn request_takedown_admin(
     State(state): State<Arc<AppState>>,
-    Extension(mut ctx): Extension<AuthContext>,
+    Extension(ctx): Extension<AuthContext>,
     Path(plugin_id): Path<Uuid>,
     Json(body): Json<TakedownRequest>,
 ) -> NexusResult<Json<serde_json::Value>> {
@@ -826,7 +826,7 @@ async fn request_takedown_admin(
 
 async fn review_takedown(
     State(state): State<Arc<AppState>>,
-    Extension(mut ctx): Extension<AuthContext>,
+    Extension(ctx): Extension<AuthContext>,
     Path(takedown_id): Path<Uuid>,
     Json(body): Json<ReviewTakedownRequest>,
 ) -> NexusResult<Json<serde_json::Value>> {
@@ -854,7 +854,7 @@ async fn review_takedown(
 
 async fn reinstate_plugin_admin(
     State(state): State<Arc<AppState>>,
-    Extension(mut ctx): Extension<AuthContext>,
+    Extension(ctx): Extension<AuthContext>,
     Path(takedown_id): Path<Uuid>,
 ) -> NexusResult<Json<serde_json::Value>> {
     // Load user flags and check permissions
@@ -934,7 +934,7 @@ async fn apply_for_creator(
 
 async fn get_vetting_queue(
     State(state): State<Arc<AppState>>,
-    Extension(mut ctx): Extension<AuthContext>,
+    Extension(ctx): Extension<AuthContext>,
     Query(limit): Query<Option<i64>>,
 ) -> NexusResult<Json<serde_json::Value>> {
     // Load flags and check permissions
@@ -958,7 +958,7 @@ async fn get_vetting_queue(
 
 async fn approve_creator(
     State(state): State<Arc<AppState>>,
-    Extension(mut ctx): Extension<AuthContext>,
+    Extension(ctx): Extension<AuthContext>,
     Path(user_id): Path<Uuid>,
     Json(body): Json<ApproveCreatorRequest>,
 ) -> NexusResult<Json<serde_json::Value>> {
@@ -995,7 +995,7 @@ async fn approve_creator(
 
 async fn reject_creator(
     State(state): State<Arc<AppState>>,
-    Extension(mut ctx): Extension<AuthContext>,
+    Extension(ctx): Extension<AuthContext>,
     Path(user_id): Path<Uuid>,
     Json(body): Json<RejectCreatorRequest>,
 ) -> NexusResult<Json<serde_json::Value>> {
@@ -1017,7 +1017,7 @@ async fn reject_creator(
 
 async fn get_dashboard_stats(
     State(state): State<Arc<AppState>>,
-    Extension(mut ctx): Extension<AuthContext>,
+    Extension(ctx): Extension<AuthContext>,
 ) -> NexusResult<Json<DashboardStats>> {
     // Load flags and check permissions
     ctx.load_flags(&state.db.pool)
@@ -1128,6 +1128,29 @@ async fn upsert_creator_monetization(
         }
     }
 
+    if body.price_cents.unwrap_or(0) > 0 {
+        let has_payment_link = body
+            .payment_link
+            .as_ref()
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false);
+
+        if !has_payment_link {
+            return Err(NexusError::Validation {
+                message: "payment_link is required for paid plugins".into(),
+            });
+        }
+    }
+
+    if let Some(link) = body.payment_link.as_deref() {
+        let is_http = link.starts_with("http://") || link.starts_with("https://");
+        if !is_http {
+            return Err(NexusError::Validation {
+                message: "payment_link must start with http:// or https://".into(),
+            });
+        }
+    }
+
     if marketplace::get_monetization_by_plugin(&state.db.pool, plugin_id)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?
@@ -1169,6 +1192,18 @@ async fn create_purchase_intent(
         })?;
 
     if monetization.is_monetized {
+        let has_payment_link = monetization
+            .payment_link
+            .as_ref()
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false);
+
+        if !has_payment_link {
+            return Err(NexusError::Validation {
+                message: "paid plugin is missing payment_link configuration".into(),
+            });
+        }
+
         marketplace::increment_purchase_count(&state.db.pool, plugin_id)
             .await
             .map_err(|e| NexusError::Internal(e.into()))?;
@@ -1195,7 +1230,7 @@ async fn create_purchase_intent(
 
 async fn trigger_security_scan(
     State(state): State<Arc<AppState>>,
-    Extension(mut ctx): Extension<AuthContext>,
+    Extension(ctx): Extension<AuthContext>,
     Path(plugin_id): Path<Uuid>,
 ) -> NexusResult<Json<SecurityScanResponse>> {
     // Load flags and check permissions

@@ -48,7 +48,7 @@ fn generate_invite_code() -> String {
     let mut rng = rand::rng();
     (0..8)
         .map(|_| {
-            let idx = rng.gen_range(0..36u8);
+            let idx = rng.random_range(0..36u8);
             (if idx < 10 { b'0' + idx } else { b'a' + idx - 10 }) as char
         })
         .collect()

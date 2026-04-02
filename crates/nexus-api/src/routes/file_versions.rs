@@ -10,7 +10,7 @@
 use axum::{
     extract::{Extension, Path, State},
     middleware,
-    routing::{get, put},
+    routing::get,
     Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};

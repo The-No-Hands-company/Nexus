@@ -51,7 +51,8 @@ pub fn router() -> Router<Arc<AppState>> {
 #[derive(Deserialize)]
 struct PaginationQuery {
     limit: Option<u32>,
-    since: Option<String>,
+    #[serde(rename = "since")]
+    _since: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -59,7 +60,8 @@ struct SearchQuery {
     q: Option<String>,
     server: Option<String>,
     limit: Option<u32>,
-    since: Option<String>,
+    #[serde(rename = "since")]
+    _since: Option<String>,
 }
 
 #[derive(Deserialize)]

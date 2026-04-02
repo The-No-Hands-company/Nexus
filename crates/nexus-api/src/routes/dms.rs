@@ -6,7 +6,7 @@
 use axum::{
     extract::{Extension, Path, State},
     middleware,
-    routing::{delete, get, post, put},
+    routing::{get, post, put},
     Json, Router,
 };
 use nexus_common::{
@@ -16,7 +16,7 @@ use nexus_common::{
     gateway_event::GatewayEvent,
 };
 use nexus_db::{repository::channels, select_cols::CHANNEL_COLS_C};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 

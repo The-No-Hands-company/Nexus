@@ -503,7 +503,8 @@ async fn get_event(
 
 #[derive(Deserialize)]
 struct StateQuery {
-    at: Option<String>,
+    #[serde(rename = "at")]
+    _at: Option<String>,
 }
 
 /// `GET /_nexus/federation/v1/state/{roomId}`

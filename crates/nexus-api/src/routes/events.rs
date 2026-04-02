@@ -10,7 +10,7 @@
 use axum::{
     extract::{Extension, Path, Query, State},
     middleware,
-    routing::{delete, get, patch, post, put},
+    routing::{get, put},
     Json, Router,
 };
 use chrono::{DateTime, Utc};

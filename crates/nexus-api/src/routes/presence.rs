@@ -9,7 +9,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use chrono::{DateTime, Utc};
+
 use nexus_common::{
     error::{NexusError, NexusResult},
     models::rich::UpdatePresenceRequest,

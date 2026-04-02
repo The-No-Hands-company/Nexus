@@ -190,7 +190,6 @@ async fn handle_voice_connection(socket: WebSocket, state: Arc<VoiceServerState>
     let session_id = Uuid::new_v4().to_string();
     let mut authenticated = false;
     let mut user_id: Option<Uuid> = None;
-    let mut username = String::new();
     let mut current_channel: Option<Uuid> = None;
     let mut peer_id: Option<Uuid> = None;
 
@@ -233,7 +232,6 @@ async fn handle_voice_connection(socket: WebSocket, state: Arc<VoiceServerState>
                                 };
                                 authenticated = true;
                                 user_id = Some(uid);
-                                username = claims.username.clone();
 
                                 let ready = VoiceSignal::Ready {
                                     session_id: session_id.clone(),

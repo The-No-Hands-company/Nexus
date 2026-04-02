@@ -17,7 +17,7 @@ use std::sync::Arc;
 use axum::{
     extract::{Path, Query, State},
     middleware,
-    routing::{delete, get, post, put},
+    routing::{get, post},
     Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};

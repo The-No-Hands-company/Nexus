@@ -104,6 +104,7 @@ struct ReminderRequest {
     remind_at: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Serialize)]
 struct TaskBoard {
     open: Vec<nexus_common::models::collaboration::Task>,
