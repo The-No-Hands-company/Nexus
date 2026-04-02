@@ -587,6 +587,29 @@ pub async fn upsert_creator_attestation(
     Ok(())
 }
 
+pub async fn update_creator_verification_materials(
+    pool: &AnyPool,
+    user_id: Uuid,
+    domain: Option<String>,
+    signing_key_fingerprint: Option<String>,
+    signing_key_type: Option<String>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE creator_vetting SET \
+         domain = $1, domain_verified = FALSE, \
+         signing_key_fingerprint = $2, signing_key_type = $3, \
+         status = 'pending', rejection_reason = NULL, updated_at = now() \
+         WHERE user_id = $4"
+    )
+    .bind(domain)
+    .bind(signing_key_fingerprint)
+    .bind(signing_key_type)
+    .bind(user_id.to_string())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 pub async fn approve_creator_vetting(
     pool: &AnyPool,
     user_id: Uuid,

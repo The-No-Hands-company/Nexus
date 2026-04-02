@@ -14,7 +14,7 @@
 use axum::{
     extract::{Extension, Path, Query, State},
     middleware,
-    routing::{get, post},
+    routing::{get, patch, post},
     Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
@@ -91,6 +91,10 @@ pub fn router() -> Router<Arc<AppState>> {
         .route(
             "/marketplace/creator/vetting",
             get(get_creator_vetting_status).post(apply_for_creator),
+        )
+        .route(
+            "/marketplace/creator/vetting/materials",
+            patch(update_creator_verification_materials),
         )
         .route(
             "/marketplace/creator/plugins/:plugin_id/monetization",
@@ -201,6 +205,13 @@ struct ReviewTakedownRequest {
 #[derive(Debug, Deserialize)]
 struct ApplyForCreatorRequest {
     rights_attestation: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpdateCreatorVerificationMaterialsRequest {
+    domain: Option<String>,
+    signing_key_fingerprint: Option<String>,
+    signing_key_type: Option<String>, // "pgp", "ssh", or "minisign"
 }
 
 #[derive(Debug, Deserialize)]
@@ -929,6 +940,64 @@ async fn apply_for_creator(
         "vetting_id": vetting.id,
         "status": "pending",
         "message": "Application submitted for review"
+    })))
+}
+
+async fn update_creator_verification_materials(
+    State(state): State<Arc<AppState>>,
+    Extension(ctx): Extension<AuthContext>,
+    Json(body): Json<UpdateCreatorVerificationMaterialsRequest>,
+) -> NexusResult<Json<serde_json::Value>> {
+    // Ensure vetting record exists first.
+    if marketplace::get_creator_vetting(&state.db.pool, ctx.user_id)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?
+        .is_none()
+    {
+        let _ = marketplace::create_creator_vetting(&state.db.pool, Uuid::new_v4(), ctx.user_id)
+            .await
+            .map_err(|e| NexusError::Internal(e.into()))?;
+    }
+
+    if let Some(domain) = body.domain.as_deref() {
+        let trimmed = domain.trim();
+        if trimmed.is_empty() || trimmed.len() > 255 || trimmed.contains(' ') {
+            return Err(NexusError::Validation {
+                message: "domain must be a non-empty host/domain string".into(),
+            });
+        }
+    }
+
+    if let Some(key_type) = body.signing_key_type.as_deref() {
+        match key_type {
+            "pgp" | "ssh" | "minisign" => {}
+            _ => {
+                return Err(NexusError::Validation {
+                    message: "signing_key_type must be one of: pgp, ssh, minisign".into(),
+                });
+            }
+        }
+    }
+
+    if body.signing_key_fingerprint.is_some() && body.signing_key_type.is_none() {
+        return Err(NexusError::Validation {
+            message: "signing_key_type is required when signing_key_fingerprint is provided".into(),
+        });
+    }
+
+    marketplace::update_creator_verification_materials(
+        &state.db.pool,
+        ctx.user_id,
+        body.domain.map(|s| s.trim().to_string()),
+        body.signing_key_fingerprint.map(|s| s.trim().to_string()),
+        body.signing_key_type,
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
+
+    Ok(Json(serde_json::json!({
+        "updated": true,
+        "status": "pending"
     })))
 }
 
