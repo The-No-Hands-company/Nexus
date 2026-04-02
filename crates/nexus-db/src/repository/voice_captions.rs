@@ -32,6 +32,21 @@ pub async fn create_caption(
         .await
 }
 
+/// Retrieve a caption by ID.
+pub async fn find_by_id(
+    pool: &AnyPool,
+    id: Uuid,
+) -> Result<Option<VoiceCaption>, sqlx::Error> {
+    let q = format!(
+        "SELECT {VOICE_CAPTION_COLS} FROM voice_captions \
+         WHERE id = $1"
+    );
+    sqlx::query_as::<_, VoiceCaption>(&q)
+        .bind(id.to_string())
+        .fetch_optional(pool)
+        .await
+}
+
 /// Finalise an interim caption (set is_final = true, update text, set ended_at).
 pub async fn finalise_caption(
     pool: &AnyPool,

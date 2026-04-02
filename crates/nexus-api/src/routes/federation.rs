@@ -514,11 +514,53 @@ async fn get_room_state(
     Path(room_id): Path<String>,
     Query(_query): Query<StateQuery>,
 ) -> impl IntoResponse {
-    if let Err(e) = extract_federation_origin(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response();
-    }
+    let origin = match extract_federation_origin(&headers) {
+        Ok(o) => o,
+        Err(e) => return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response(),
+    };
 
     let pool = &state.db.pool;
+
+    // Check if this room exists and if the origin server has access
+    let room_row = sqlx::query(
+        "SELECT join_rule, participating_servers FROM federated_rooms WHERE room_id = $1",
+    )
+    .bind(&room_id)
+    .fetch_optional(pool)
+    .await
+    .unwrap_or(None);
+
+    match room_row {
+        None => {
+            // Room not found locally
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "Room not found" })),
+            )
+                .into_response();
+        }
+        Some(row) => {
+            let join_rule = row
+                .try_get::<String, _>("join_rule")
+                .unwrap_or_else(|_| "public".to_string());
+
+            // For private/invite rooms, deny state access for now
+            // (can be enhanced later with participating_servers list when using typed DB)
+            if join_rule != "public" {
+                tracing::warn!(
+                    origin = %origin,
+                    room_id = %room_id,
+                    join_rule = %join_rule,
+                    "Denied room state request: origin not in participating servers"
+                );
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(json!({ "error": "Not authorized to view this room's state" })),
+                )
+                    .into_response();
+            }
+        }
+    }
 
     let rows = sqlx::query(
         "SELECT event_id, event_type, sender, origin_server, content, signatures, origin_server_ts \
@@ -559,11 +601,31 @@ async fn make_join(
     headers: HeaderMap,
     Path((room_id, user_id)): Path<(String, String)>,
 ) -> impl IntoResponse {
-    if let Err(e) = extract_federation_origin(&headers) {
-        return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response();
-    }
+        let origin = match extract_federation_origin(&headers) {
+            Ok(o) => o,
+            Err(e) => return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response(),
+        };
 
-    let server_name = &state.server_name;
+        let pool = &state.db.pool;
+
+        // Check if room exists and validate join_rule
+        let room_row = sqlx::query("SELECT join_rule FROM federated_rooms WHERE room_id = $1")
+            .bind(&room_id)
+            .fetch_optional(pool)
+            .await
+            .unwrap_or(None);
+
+        if let Some(row) = room_row {
+            let join_rule = row.try_get::<String, _>("join_rule").unwrap_or_else(|_| "public".to_string());
+            if join_rule != "public" {
+                tracing::warn!(origin = %origin, room_id = %room_id, user_id = %user_id, join_rule = %join_rule, "Denied join: not public");
+                return (StatusCode::FORBIDDEN, Json(json!({"error": format!("Room has join_rule: {}", join_rule)}))).into_response();
+            }
+        } else {
+            return (StatusCode::NOT_FOUND, Json(json!({"error": "Room not found"}))).into_response();
+        }
+
+        let server_name = &state.server_name;
 
     let template = json!({
         "room_version": "nexus.v1",

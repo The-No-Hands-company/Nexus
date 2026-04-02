@@ -12,6 +12,7 @@ use axum::{
     Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
+use nexus_db::repository::{channels, members};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -108,7 +109,16 @@ async fn search_server_messages(
     Path(server_id): Path<Uuid>,
     Query(params): Query<SearchParams>,
 ) -> NexusResult<Json<SearchResult>> {
-    let _ = auth; // auth ensures user is logged in; permission check omitted for brevity
+    // Verify user is a member of the server before allowing search
+    if !members::is_member(&state.db.pool, auth.user_id, server_id).await? {
+        tracing::warn!(
+            user_id = %auth.user_id,
+            server_id = %server_id,
+            "Denied message search: user is not a member of the server"
+        );
+            return Err(NexusError::Forbidden);
+    }
+
     let limit = params.limit.unwrap_or(20).min(50);
     let offset = params.offset.unwrap_or(0);
 
@@ -150,7 +160,33 @@ async fn search_channel_messages(
     Path(channel_id): Path<Uuid>,
     Query(params): Query<SearchParams>,
 ) -> NexusResult<Json<SearchResult>> {
-    let _ = auth;
+    // Load the channel to get its server context
+    let channel = channels::find_by_id(&state.db.pool, channel_id)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?
+        .ok_or(NexusError::NotFound {
+            resource: format!("channel {channel_id}"),
+        })?;
+
+    // Verify access: user must be a member of the server (for server channels)
+    if let Some(server_id) = channel.server_id {
+        if !members::is_member(&state.db.pool, auth.user_id, server_id).await? {
+            tracing::warn!(
+                user_id = %auth.user_id,
+                channel_id = %channel_id,
+                server_id = %server_id,
+                "Denied channel message search: user is not a member of the server"
+            );
+            return Err(NexusError::Forbidden);
+        }
+    } else {
+        // For DM channels, verify user is a participant (would require separate check)
+        // For now, return not supported — can be extended later if needed
+        return Err(NexusError::Validation {
+            message: "Search within DM channels is not yet supported".into(),
+        });
+    }
+
     let limit = params.limit.unwrap_or(20).min(50);
     let offset = params.offset.unwrap_or(0);
 
@@ -181,3 +217,4 @@ async fn search_channel_messages(
         hits,
     }))
 }
+

@@ -74,6 +74,7 @@ async fn submit_caption(
 
 async fn finalise_caption(
     State(state): State<Arc<AppState>>,
+    Extension(ctx): Extension<AuthContext>,
     Path(id): Path<Uuid>,
     Json(body): Json<FinaliseCaptionRequest>,
 ) -> NexusResult<Json<nexus_common::models::accessibility::VoiceCaption>> {
@@ -81,6 +82,25 @@ async fn finalise_caption(
         return Err(NexusError::Validation {
             message: "Caption text must be 1-5000 characters".into(),
         });
+    }
+
+    // Fetch the existing caption to verify ownership
+    let caption = voice_captions::find_by_id(&state.db.pool, id)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?
+        .ok_or(NexusError::NotFound {
+            resource: format!("caption {id}"),
+        })?;
+
+    // Only the original speaker can finalize their caption
+    if caption.speaker_id.to_string() != ctx.user_id.to_string() {
+        tracing::warn!(
+            user_id = %ctx.user_id,
+            caption_id = %id,
+            speaker_id = %caption.speaker_id,
+            "Denied caption finalization: user is not the caption author"
+        );
+        return Err(NexusError::Forbidden);
     }
 
     voice_captions::finalise_caption(&state.db.pool, id, &body.text)
