@@ -13,5 +13,6 @@ pub mod permissions;
 pub mod snowflake;
 pub mod validation;
 pub mod module_gating;
+pub mod security_scanning;
 /// Manual `sqlx::FromRow<'_, AnyRow>` impls for all model types (AnyPool compat).
 pub mod any_row;

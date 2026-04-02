@@ -21,7 +21,7 @@ use nexus_common::error::{NexusError, NexusResult};
 use nexus_common::models::ecosystem::{MarketplacePlugin, PluginInstall, PluginReview, ReviewStatus, TrustTier};
 use nexus_db::repository::{marketplace, members};
 use nexus_common::models::Member;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -62,6 +62,10 @@ pub fn router() -> Router<Arc<AppState>> {
         .route(
             "/marketplace/admin/plugins/:plugin_id/quarantine",
             post(quarantine_plugin),
+        )
+        .route(
+            "/marketplace/admin/plugins/:plugin_id/security-scan",
+            post(trigger_security_scan),
         )
         .route(
             "/marketplace/admin/plugins/:plugin_id/takedown",
@@ -214,6 +218,16 @@ struct DashboardStats {
     todays_approvals: i64,
     todays_rejections: i64,
     pending_takedowns: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct SecurityScanResponse {
+    scan_id: String,
+    plugin_id: Uuid,
+    passed: bool,
+    threat_level: String,
+    issues_count: usize,
+    scanner: String,
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -485,9 +499,18 @@ async fn submit_plugin_for_review(
         return Err(NexusError::Forbidden);
     }
 
+    // Submit for initial scanning
     marketplace::submit_for_review(&state.db.pool, plugin_id)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
+
+    // TODO: Spawn background security scan task
+    // This would typically:
+    // 1. Call marketplace::update_review_status(..., ReviewStatus::Scanning, ...)
+    // 2. Invoke security scanner (MockMalwareScanner or real ClamAV)
+    // 3. Record scan_result and update status to Review
+    // 4. If critical issues found, move to Quarantined
+    // Example: state.scanner.scan_manifest(plugin_id, &plugin.manifest_url, plugin.source_url.as_deref())
 
     Ok(Json(serde_json::json!({ "submitted": true })))
 }
@@ -924,6 +947,78 @@ async fn get_dashboard_stats(
         todays_approvals,
         todays_rejections,
         pending_takedowns,
+    }))
+}
+
+// ── Security Scanning Handlers ────────────────────────────────────────────────────
+
+async fn trigger_security_scan(
+    State(state): State<Arc<AppState>>,
+    Extension(mut ctx): Extension<AuthContext>,
+    Path(plugin_id): Path<Uuid>,
+) -> NexusResult<Json<SecurityScanResponse>> {
+    // Load flags and check permissions
+    ctx.load_flags(&state.db.pool)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    
+    if !ctx.can_review_plugins().await {
+        return Err(NexusError::Forbidden);
+    }
+
+    let plugin = marketplace::get_plugin(&state.db.pool, plugin_id)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?
+        .ok_or_else(|| NexusError::NotFound {
+            resource: "marketplace_plugin".into(),
+        })?;
+
+    // TODO: Integrate real security scanner (ClamAV, VirusTotal, custom impl)
+    // For now, use mock scanner for testing
+    use nexus_common::security_scanning::{SecurityScanner, MockMalwareScanner};
+    
+    let scanner = MockMalwareScanner::new();
+    let scan_result = scanner
+        .scan_manifest(plugin_id, &plugin.manifest_url, plugin.source_url.as_deref())
+        .await
+        .map_err(|e| NexusError::Internal(e))?;
+
+    // Store scan result
+    marketplace::mark_security_scan(
+        &state.db.pool,
+        plugin_id,
+        &serde_json::json!({
+            "scan_id": scan_result.id,
+            "scanner": scan_result.scanner,
+            "passed": scan_result.passed,
+            "threat_level": scan_result.threat_level,
+            "issues": scan_result.issues,
+        }),
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
+
+    // If critical threats detected, auto-quarantine
+    if scan_result.threat_level == "critical" && !scan_result.issues.is_empty() {
+        marketplace::update_review_status(
+            &state.db.pool,
+            plugin_id,
+            ReviewStatus::Quarantined,
+            ctx.user_id,
+            Some("Automatic quarantine: Critical security threats detected"),
+            None,
+        )
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    }
+
+    Ok(Json(SecurityScanResponse {
+        scan_id: scan_result.id,
+        plugin_id,
+        passed: scan_result.passed,
+        threat_level: scan_result.threat_level,
+        issues_count: scan_result.issues.len(),
+        scanner: scan_result.scanner,
     }))
 }
 }
