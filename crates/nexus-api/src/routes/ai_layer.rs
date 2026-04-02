@@ -11,7 +11,7 @@ use axum::{
 };
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_common::models::ai_intelligence::*;
-use nexus_db::repository::{ai_intelligence, members};
+use nexus_db::repository::{ai_intelligence, channels, members};
 use nexus_common::models::Member;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -91,6 +91,8 @@ async fn list_ai_suggestions(
     Path(channel_id): Path<Uuid>,
     Query(q): Query<LimitQuery>,
 ) -> NexusResult<Json<Vec<AiSuggestion>>> {
+    ensure_channel_server_membership(&state, ctx.user_id, channel_id).await?;
+
     let rows = ai_intelligence::list_ai_suggestions(
         &state.db.pool, ctx.user_id, channel_id, q.limit.unwrap_or(50),
     ).await.map_err(|e| NexusError::Internal(e.into()))?;
@@ -103,20 +105,44 @@ async fn create_ai_suggestion(
     Path(channel_id): Path<Uuid>,
     Json(body): Json<CreateAiSuggestionReq>,
 ) -> NexusResult<Json<AiSuggestion>> {
+    let server_id = ensure_channel_server_membership(&state, ctx.user_id, channel_id).await?;
+    ensure_ai_consent_enabled(&state, ctx.user_id, server_id, "ai_suggestions").await?;
+    let model_name = body.model_name.as_deref().unwrap_or("default");
+
     let row = ai_intelligence::create_ai_suggestion(
         &state.db.pool, Uuid::new_v4(), ctx.user_id, channel_id,
         &body.suggestion_type, &body.content,
         &body.context_ids.unwrap_or(serde_json::json!([])),
-        &body.model_name.unwrap_or_else(|| "default".into()),
+        model_name,
     ).await.map_err(|e| NexusError::Internal(e.into()))?;
+
+    let _ = ai_intelligence::create_ai_audit_entry(
+        &state.db.pool,
+        Uuid::new_v4(),
+        server_id,
+        "ai_suggestions",
+        "created",
+        Some(ctx.user_id),
+        &serde_json::json!({
+            "channel_id": channel_id,
+            "suggestion_id": row.id,
+            "suggestion_type": &body.suggestion_type,
+        }),
+        Some(model_name),
+        None,
+    )
+    .await;
+
     Ok(Json(row))
 }
 
 async fn get_thread_summary(
     State(state): State<Arc<AppState>>,
-    Extension(_ctx): Extension<AuthContext>,
+    Extension(ctx): Extension<AuthContext>,
     Path(channel_id): Path<Uuid>,
 ) -> NexusResult<Json<Option<ThreadSummary>>> {
+    ensure_channel_server_membership(&state, ctx.user_id, channel_id).await?;
+
     // channel_id is used as thread_id for lookup
     let row = ai_intelligence::get_thread_summary(&state.db.pool, channel_id)
         .await.map_err(|e| NexusError::Internal(e.into()))?;
@@ -125,16 +151,40 @@ async fn get_thread_summary(
 
 async fn upsert_thread_summary(
     State(state): State<Arc<AppState>>,
-    Extension(_ctx): Extension<AuthContext>,
+    Extension(ctx): Extension<AuthContext>,
     Path(channel_id): Path<Uuid>,
     Json(body): Json<UpsertThreadSummaryReq>,
 ) -> NexusResult<Json<ThreadSummary>> {
+    let server_id = ensure_channel_server_membership(&state, ctx.user_id, channel_id).await?;
+    ensure_ai_consent_enabled(&state, ctx.user_id, server_id, "thread_summaries").await?;
+    let model_name = body.model_name.as_deref().unwrap_or("default");
+    let model_version = body.model_version.as_deref().unwrap_or("1.0");
+
     let row = ai_intelligence::upsert_thread_summary(
         &state.db.pool, Uuid::new_v4(), body.thread_id, channel_id,
         &body.summary, body.message_count.unwrap_or(0),
-        &body.model_name.unwrap_or_else(|| "default".into()),
-        &body.model_version.unwrap_or_else(|| "1.0".into()),
+        model_name,
+        model_version,
     ).await.map_err(|e| NexusError::Internal(e.into()))?;
+
+    let _ = ai_intelligence::create_ai_audit_entry(
+        &state.db.pool,
+        Uuid::new_v4(),
+        server_id,
+        "thread_summaries",
+        "upserted",
+        Some(ctx.user_id),
+        &serde_json::json!({
+            "channel_id": channel_id,
+            "thread_id": body.thread_id,
+            "summary_id": row.id,
+            "message_count": body.message_count.unwrap_or(0),
+        }),
+        Some(model_name),
+        Some(model_version),
+    )
+    .await;
+
     Ok(Json(row))
 }
 
@@ -170,10 +220,12 @@ async fn list_raid_detections(
 
 async fn list_voice_transcripts(
     State(state): State<Arc<AppState>>,
-    Extension(_ctx): Extension<AuthContext>,
+    Extension(ctx): Extension<AuthContext>,
     Path(channel_id): Path<Uuid>,
     Query(q): Query<LimitQuery>,
 ) -> NexusResult<Json<Vec<VoiceTranscript>>> {
+    ensure_channel_server_membership(&state, ctx.user_id, channel_id).await?;
+
     let rows = ai_intelligence::list_voice_transcripts(&state.db.pool, channel_id, q.limit.unwrap_or(100))
         .await.map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(rows))
@@ -214,4 +266,62 @@ async fn list_ai_audit_log(
     let rows = ai_intelligence::list_ai_audit_log(&state.db.pool, server_id, q.limit.unwrap_or(200))
         .await.map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(rows))
+}
+
+async fn ensure_channel_server_membership(
+    state: &AppState,
+    user_id: Uuid,
+    channel_id: Uuid,
+) -> NexusResult<Uuid> {
+    let channel = channels::find_by_id(&state.db.pool, channel_id)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?
+        .ok_or_else(|| NexusError::NotFound {
+            resource: "channel".into(),
+        })?;
+
+    let server_id = channel.server_id.ok_or(NexusError::Forbidden)?;
+
+    let member: Option<Member> = members::find_member(&state.db.pool, user_id, server_id)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    if member.is_none() {
+        return Err(NexusError::Forbidden);
+    }
+
+    Ok(server_id)
+}
+
+async fn ensure_ai_consent_enabled(
+    state: &AppState,
+    user_id: Uuid,
+    server_id: Uuid,
+    feature: &str,
+) -> NexusResult<()> {
+    let consents = ai_intelligence::list_ai_consent(&state.db.pool, user_id, server_id)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+
+    let enabled = consents
+        .iter()
+        .any(|c| c.feature.eq_ignore_ascii_case(feature) && c.enabled);
+
+    if enabled {
+        return Ok(());
+    }
+
+    let _ = ai_intelligence::create_ai_audit_entry(
+        &state.db.pool,
+        Uuid::new_v4(),
+        server_id,
+        feature,
+        "denied_consent_required",
+        Some(user_id),
+        &serde_json::json!({ "reason": "ai_consent_not_enabled" }),
+        None,
+        None,
+    )
+    .await;
+
+    Err(NexusError::Forbidden)
 }
