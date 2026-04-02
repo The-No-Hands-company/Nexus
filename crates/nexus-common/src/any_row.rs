@@ -34,7 +34,8 @@ use crate::models::{
         MessageTranslation, MessageTtsRequest, UserAccessibilitySettings, VoiceCaption,
     },
     ecosystem::{
-        BulkInvitation, ImportJob, MarketplacePlugin, OnboardingProgress,
+        BulkInvitation, CreatorVetting, IdentityLevel, ImportJob,
+        MarketplaceMonetization, MarketplacePlugin, OnboardingProgress,
         PluginInstall, PluginReview, ServerAnalyticsSnapshot, ServerTemplate,
     },
     scalability::{
@@ -1094,6 +1095,62 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for PluginInstall {
             version: row.try_get("version")?,
             is_enabled: row.try_get("is_enabled").unwrap_or(true),
             created_at: dt(row, "created_at")?,
+        })
+    }
+}
+
+// ── CreatorVetting ───────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for CreatorVetting {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(CreatorVetting {
+            id: uuid(row, "id")?,
+            user_id: uuid(row, "user_id")?,
+            identity_level: parse_enum(row, "identity_level", |s| match s {
+                "unverified" => Some(IdentityLevel::Unverified),
+                "email_verified" => Some(IdentityLevel::EmailVerified),
+                "domain_verified" => Some(IdentityLevel::DomainVerified),
+                "signature_verified" => Some(IdentityLevel::SignatureVerified),
+                _ => None,
+            })?,
+            domain: row.try_get("domain").unwrap_or(None),
+            domain_verified: row.try_get("domain_verified").unwrap_or(false),
+            signing_key_fingerprint: row.try_get("signing_key_fingerprint").unwrap_or(None),
+            signing_key_type: row.try_get("signing_key_type").unwrap_or(None),
+            rights_attestation: row.try_get("rights_attestation").unwrap_or(None),
+            two_factor_enabled: row.try_get("two_factor_enabled").unwrap_or(false),
+            ip_whitelist: row
+                .try_get::<Option<String>, _>("ip_whitelist")
+                .ok()
+                .flatten()
+                .and_then(|s| serde_json::from_str(&s).ok()),
+            status: row.try_get("status")?,
+            approved_by: opt_uuid(row, "approved_by")?,
+            approved_at: opt_dt(row, "approved_at")?,
+            rejection_reason: row.try_get("rejection_reason").unwrap_or(None),
+            created_at: dt(row, "created_at")?,
+            updated_at: dt(row, "updated_at")?,
+        })
+    }
+}
+
+// ── MarketplaceMonetization ──────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for MarketplaceMonetization {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(MarketplaceMonetization {
+            id: uuid(row, "id")?,
+            plugin_id: uuid(row, "plugin_id")?,
+            creator_id: uuid(row, "creator_id")?,
+            is_monetized: row.try_get("is_monetized").unwrap_or(false),
+            price_cents: row.try_get("price_cents").unwrap_or(None),
+            currency: row.try_get("currency")?,
+            payment_link: row.try_get("payment_link").unwrap_or(None),
+            purchase_count: row
+                .try_get::<i64, _>("purchase_count")
+                .or_else(|_| row.try_get::<i32, _>("purchase_count").map(|v| v as i64))?,
+            created_at: dt(row, "created_at")?,
+            updated_at: dt(row, "updated_at")?,
         })
     }
 }

@@ -18,7 +18,10 @@ use axum::{
     Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
-use nexus_common::models::ecosystem::{MarketplacePlugin, PluginInstall, PluginReview, ReviewStatus, TrustTier};
+use nexus_common::models::ecosystem::{
+    MarketplaceMonetization, MarketplacePlugin, PluginInstall, PluginReview, ReviewStatus,
+    TrustTier,
+};
 use nexus_common::security_scanning::{MockMalwareScanner, SecurityScanner};
 use nexus_db::repository::{marketplace, members};
 use nexus_common::models::Member;
@@ -47,6 +50,10 @@ pub fn router() -> Router<Arc<AppState>> {
         .route(
             "/marketplace/plugins/:plugin_id/submit-review",
             post(submit_plugin_for_review),
+        )
+        .route(
+            "/marketplace/plugins/:plugin_id/purchase-intent",
+            post(create_purchase_intent),
         )
         .route(
             "/marketplace/admin/review-queue",
@@ -84,6 +91,10 @@ pub fn router() -> Router<Arc<AppState>> {
         .route(
             "/marketplace/creator/vetting",
             get(get_creator_vetting_status).post(apply_for_creator),
+        )
+        .route(
+            "/marketplace/creator/plugins/:plugin_id/monetization",
+            get(get_creator_monetization).post(upsert_creator_monetization),
         )
         .route(
             "/marketplace/admin/creators/vetting-queue",
@@ -193,6 +204,12 @@ struct ApplyForCreatorRequest {
 }
 
 #[derive(Debug, Deserialize)]
+struct UpsertMonetizationRequest {
+    price_cents: Option<i32>,
+    payment_link: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct ApproveCreatorRequest {
     identity_level: String, // "email_verified", "domain_verified", "signature_verified"
 }
@@ -229,6 +246,16 @@ struct SecurityScanResponse {
     threat_level: String,
     issues_count: usize,
     scanner: String,
+}
+
+#[derive(Debug, Serialize)]
+struct PurchaseIntentResponse {
+    plugin_id: Uuid,
+    is_monetized: bool,
+    price_cents: Option<i32>,
+    currency: Option<String>,
+    payment_link: Option<String>,
+    purchase_count: i64,
 }
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
@@ -774,6 +801,11 @@ async fn request_takedown_admin(
     }
     
     let takedown_id = Uuid::new_v4();
+    let evidence_json = body
+        .evidence_urls
+        .as_ref()
+        .map(|urls| serde_json::to_value(urls).unwrap_or(serde_json::Value::Array(vec![])));
+
     marketplace::request_takedown(
         &state.db.pool,
         takedown_id,
@@ -781,6 +813,7 @@ async fn request_takedown_admin(
         Some(ctx.user_id),
         &body.reason,
         &body.description,
+        evidence_json.as_ref(),
     )
     .await
     .map_err(|e| NexusError::Internal(e.into()))?;
@@ -887,6 +920,10 @@ async fn apply_for_creator(
             message: "Creator account already approved".into(),
         });
     }
+
+    marketplace::upsert_creator_attestation(&state.db.pool, ctx.user_id, &body.rights_attestation)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
 
     Ok(Json(serde_json::json!({
         "vetting_id": vetting.id,
@@ -1040,6 +1077,120 @@ async fn get_dashboard_stats(
     }))
 }
 
+async fn get_creator_monetization(
+    State(state): State<Arc<AppState>>,
+    Extension(ctx): Extension<AuthContext>,
+    Path(plugin_id): Path<Uuid>,
+) -> NexusResult<Json<MarketplaceMonetization>> {
+    let plugin = marketplace::get_plugin(&state.db.pool, plugin_id)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?
+        .ok_or_else(|| NexusError::NotFound {
+            resource: "marketplace_plugin".into(),
+        })?;
+
+    if plugin.author_id != Some(ctx.user_id) {
+        return Err(NexusError::Forbidden);
+    }
+
+    let monetization = marketplace::get_monetization_by_plugin(&state.db.pool, plugin_id)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?
+        .ok_or_else(|| NexusError::NotFound {
+            resource: "marketplace_monetization".into(),
+        })?;
+
+    Ok(Json(monetization))
+}
+
+async fn upsert_creator_monetization(
+    State(state): State<Arc<AppState>>,
+    Extension(ctx): Extension<AuthContext>,
+    Path(plugin_id): Path<Uuid>,
+    Json(body): Json<UpsertMonetizationRequest>,
+) -> NexusResult<Json<MarketplaceMonetization>> {
+    let plugin = marketplace::get_plugin(&state.db.pool, plugin_id)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?
+        .ok_or_else(|| NexusError::NotFound {
+            resource: "marketplace_plugin".into(),
+        })?;
+
+    if plugin.author_id != Some(ctx.user_id) {
+        return Err(NexusError::Forbidden);
+    }
+
+    if let Some(price) = body.price_cents {
+        if price < 0 {
+            return Err(NexusError::Validation {
+                message: "price_cents must be >= 0".into(),
+            });
+        }
+    }
+
+    if marketplace::get_monetization_by_plugin(&state.db.pool, plugin_id)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?
+        .is_none()
+    {
+        marketplace::create_monetization_record(&state.db.pool, Uuid::new_v4(), plugin_id, ctx.user_id)
+            .await
+            .map_err(|e| NexusError::Internal(e.into()))?;
+    }
+
+    marketplace::update_monetization_price(
+        &state.db.pool,
+        plugin_id,
+        body.price_cents,
+        body.payment_link,
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
+
+    let monetization = marketplace::get_monetization_by_plugin(&state.db.pool, plugin_id)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?
+        .ok_or_else(|| NexusError::NotFound {
+            resource: "marketplace_monetization".into(),
+        })?;
+
+    Ok(Json(monetization))
+}
+
+async fn create_purchase_intent(
+    State(state): State<Arc<AppState>>,
+    Path(plugin_id): Path<Uuid>,
+) -> NexusResult<Json<PurchaseIntentResponse>> {
+    let monetization = marketplace::get_monetization_by_plugin(&state.db.pool, plugin_id)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?
+        .ok_or_else(|| NexusError::NotFound {
+            resource: "marketplace_monetization".into(),
+        })?;
+
+    if monetization.is_monetized {
+        marketplace::increment_purchase_count(&state.db.pool, plugin_id)
+            .await
+            .map_err(|e| NexusError::Internal(e.into()))?;
+    }
+
+    let refreshed = marketplace::get_monetization_by_plugin(&state.db.pool, plugin_id)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?
+        .ok_or_else(|| NexusError::NotFound {
+            resource: "marketplace_monetization".into(),
+        })?;
+
+    Ok(Json(PurchaseIntentResponse {
+        plugin_id,
+        is_monetized: refreshed.is_monetized,
+        price_cents: refreshed.price_cents,
+        currency: Some(refreshed.currency),
+        payment_link: refreshed.payment_link,
+        purchase_count: refreshed.purchase_count,
+    }))
+}
+
 // ── Security Scanning Handlers ────────────────────────────────────────────────────
 
 async fn trigger_security_scan(
@@ -1078,7 +1229,7 @@ async fn trigger_security_scan(
     let scan_result = scanner
         .scan_manifest(plugin_id, &plugin.manifest_url, plugin.source_url.as_deref())
         .await
-        .map_err(|e| NexusError::Internal(e))?;
+        .map_err(|e| NexusError::Internal(anyhow::Error::msg(e)))?;
 
     // Store scan result
     marketplace::mark_security_scan(
@@ -1128,5 +1279,4 @@ async fn trigger_security_scan(
         issues_count: scan_result.issues.len(),
         scanner: scan_result.scanner,
     }))
-}
 }

@@ -1,7 +1,6 @@
 //! Repository for the plugin marketplace.
 
-use nexus_common::models::ecosystem::{MarketplacePlugin, PluginInstall, PluginReview, CreatorVetting, MarketplaceMonetization};
-use nexus_common::models::user_flags;
+use nexus_common::models::ecosystem::{MarketplacePlugin, PluginInstall, PluginReview};
 use sqlx::AnyPool;
 use uuid::Uuid;
 
@@ -274,8 +273,7 @@ pub async fn toggle_plugin_install(
 // ── Store Governance ──────────────────────────────────────────────────────────
 
 use nexus_common::models::ecosystem::{
-    ReviewStatus, TrustTier, IdentityLevel, MarketplacePluginGovernance,
-    MarketplaceReview, CreatorVetting, MarketplaceMonetization, MarketplaceTakedown,
+    CreatorVetting, MarketplaceMonetization, ReviewStatus, TrustTier,
 };
 
 pub async fn submit_for_review(
@@ -407,7 +405,7 @@ pub async fn log_review(
     .bind(action)
     .bind(reason)
     .bind(notes)
-    .bind(serde_json::json!({"timestamp": chrono::Utc::now()}))
+    .bind(serde_json::to_string(&serde_json::json!({"timestamp": chrono::Utc::now()})).unwrap_or_default())
     .execute(pool)
     .await?;
     Ok(())
@@ -420,17 +418,19 @@ pub async fn request_takedown(
     reported_by: Option<Uuid>,
     reason: &str,
     description: &str,
+    evidence_urls: Option<&serde_json::Value>,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "INSERT INTO marketplace_takedowns \
-         (id, plugin_id, reported_by, reason, description, quarantine_status) \
-         VALUES ($1, $2, $3, $4, $5, 'pending')"
+         (id, plugin_id, reported_by, reason, description, evidence_urls, quarantine_status) \
+         VALUES ($1, $2, $3, $4, $5, $6, 'pending')"
     )
     .bind(takedown_id.to_string())
     .bind(plugin_id.to_string())
     .bind(reported_by.map(|u| u.to_string()))
     .bind(reason)
     .bind(description)
+    .bind(evidence_urls.map(|v| serde_json::to_string(v).unwrap_or_default()))
     .execute(pool)
     .await?;
     Ok(())
@@ -570,6 +570,23 @@ pub async fn update_creator_identity_level(
     Ok(())
 }
 
+pub async fn upsert_creator_attestation(
+    pool: &AnyPool,
+    user_id: Uuid,
+    rights_attestation: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE creator_vetting SET \
+         rights_attestation = $1, status = 'pending', rejection_reason = NULL, updated_at = now() \
+         WHERE user_id = $2"
+    )
+    .bind(rights_attestation)
+    .bind(user_id.to_string())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 pub async fn approve_creator_vetting(
     pool: &AnyPool,
     user_id: Uuid,
@@ -654,6 +671,20 @@ pub async fn create_monetization_record(
     .bind(false)
     .bind("USD")
     .fetch_one(pool)
+    .await
+}
+
+pub async fn get_monetization_by_plugin(
+    pool: &AnyPool,
+    plugin_id: Uuid,
+) -> Result<Option<MarketplaceMonetization>, sqlx::Error> {
+    sqlx::query_as::<_, MarketplaceMonetization>(
+        "SELECT id, plugin_id, creator_id, is_monetized, price_cents, currency, \
+         payment_link, purchase_count, created_at, updated_at \
+         FROM marketplace_monetization WHERE plugin_id = $1"
+    )
+    .bind(plugin_id.to_string())
+    .fetch_optional(pool)
     .await
 }
 

@@ -87,7 +87,6 @@ pub struct AuthContext {
     pub email_verified: bool,
     /// User account flags (staff, admin, creator, etc.)
     /// Lazily loaded on demand by helpers
-    #[serde(skip)]
     pub flags: std::sync::Arc<tokio::sync::Mutex<Option<i64>>>,
 }
 
@@ -456,17 +455,18 @@ async fn check_rate_limit_local(
     let window = Duration::from_secs(window_secs.max(1));
 
     let mut guard = state.lock().await;
+
+    // Best-effort cleanup to avoid unbounded growth over time.
+    if guard.len() > 50_000 {
+        guard.retain(|_, (_, reset_at)| *reset_at > now);
+    }
+
     let entry = guard.entry(key.to_string()).or_insert((0, now + window));
 
     if now >= entry.1 {
         *entry = (1, now + window);
     } else {
         entry.0 = entry.0.saturating_add(1);
-    }
-
-    // Best-effort cleanup to avoid unbounded growth over time.
-    if guard.len() > 50_000 {
-        guard.retain(|_, (_, reset_at)| *reset_at > now);
     }
 
     if entry.0 > limit {
