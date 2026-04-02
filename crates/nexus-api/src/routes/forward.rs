@@ -18,9 +18,10 @@ use nexus_common::{
     gateway_event::{event_types, GatewayEvent},
     snowflake,
 };
-use nexus_db::repository::{channels, members};
+use nexus_db::repository::members;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -73,9 +74,11 @@ async fn forward_message(
 
     let original_channel_id: Uuid = orig_row
         .try_get::<String, _>("channel_id")
-        .unwrap_or_default()
+        .map_err(NexusError::Database)?
         .parse()
-        .unwrap_or_default();
+        .map_err(|_| NexusError::Validation {
+            message: "stored message channel_id is invalid".into(),
+        })?;
     let content: String = orig_row
         .try_get::<Option<String>, _>("content")
         .unwrap_or(None)
@@ -83,19 +86,62 @@ async fn forward_message(
 
     let mut created_ids = Vec::new();
 
-    for target_channel_id in &body.target_channel_ids {
-        // Verify target channel exists
-        let channel = channels::find_by_id(&state.db.pool, *target_channel_id)
-            .await?
-            .ok_or(NexusError::NotFound { resource: "Target channel".into() })?;
-
-        // Verify the user has SEND_MESSAGES in the target channel
-        if let Some(server_id) = channel.server_id {
-            let _ = members::find_member(&state.db.pool, auth.user_id, server_id)
-                .await?
-                .ok_or(NexusError::Forbidden)?;
+    // Batch load target channels to avoid per-target lookups.
+    let mut qb = sqlx::QueryBuilder::new(
+        "SELECT id::text AS id, server_id::text AS server_id FROM channels WHERE id IN (",
+    );
+    {
+        let mut separated = qb.separated(", ");
+        for target_channel_id in &body.target_channel_ids {
+            separated.push_bind(target_channel_id.to_string());
         }
+    }
+    qb.push(")");
 
+    let target_rows = qb
+        .build()
+        .fetch_all(&state.db.pool)
+        .await
+        .map_err(NexusError::Database)?;
+
+    let mut target_channels: HashMap<Uuid, Option<Uuid>> = HashMap::new();
+    for row in target_rows {
+        let channel_id = row
+            .try_get::<String, _>("id")
+            .map_err(NexusError::Database)?
+            .parse::<Uuid>()
+            .map_err(|_| NexusError::Validation {
+                message: "invalid channel id in channels table".into(),
+            })?;
+
+        let server_id = row
+            .try_get::<Option<String>, _>("server_id")
+            .map_err(NexusError::Database)?
+            .map(|s| {
+                s.parse::<Uuid>().map_err(|_| NexusError::Validation {
+                    message: "invalid server id in channels table".into(),
+                })
+            })
+            .transpose()?;
+
+        target_channels.insert(channel_id, server_id);
+    }
+
+    if target_channels.len() != body.target_channel_ids.len() {
+        return Err(NexusError::NotFound {
+            resource: "One or more target channels not found".into(),
+        });
+    }
+
+    let server_ids: HashSet<Uuid> = target_channels.values().filter_map(|sid| *sid).collect();
+    for server_id in server_ids {
+        let _ = members::find_member(&state.db.pool, auth.user_id, server_id)
+            .await?
+            .ok_or(NexusError::Forbidden)?;
+    }
+
+    for target_channel_id in &body.target_channel_ids {
+        let target_server_id = target_channels.get(target_channel_id).copied().flatten();
         let new_id = snowflake::generate_id();
         let now = Utc::now();
 
@@ -133,7 +179,7 @@ async fn forward_message(
                 "forwarded_from_channel_id": original_channel_id,
                 "created_at": now,
             }),
-            server_id: channel.server_id,
+            server_id: target_server_id,
             channel_id: Some(*target_channel_id),
             user_id: Some(auth.user_id),
         });
@@ -149,7 +195,7 @@ async fn forward_message(
                 "forwarded_from_channel_id": original_channel_id,
                 "created_at": now,
             }),
-            server_id: channel.server_id,
+            server_id: target_server_id,
             channel_id: Some(*target_channel_id),
             user_id: Some(auth.user_id),
         });

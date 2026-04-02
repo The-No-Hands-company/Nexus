@@ -16,6 +16,10 @@ pub mod select_cols;
 pub mod storage;
 
 use anyhow::Result;
+use sqlx::migrate::Migrator;
+
+const POSTGRES_MIGRATION_LOCK_ID: i64 = 569_260_301;
+const LEGACY_RATCHET_MIGRATION_VERSION: i64 = 20260218000008;
 
 /// Which backing store is in use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -138,13 +142,108 @@ impl Database {
         tracing::info!("Running database migrations…");
         match self.backend {
             DbBackend::Postgres => {
-                sqlx::migrate!("./migrations").run(&self.pool).await?;
+                self.migrate_postgres().await?;
             }
             DbBackend::Sqlite => {
                 sqlx::migrate!("./migrations-lite").run(&self.pool).await?;
             }
         }
         tracing::info!("Migrations complete");
+        Ok(())
+    }
+
+    async fn migrate_postgres(&self) -> Result<()> {
+        static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
+
+        // Guard migrations with a process-shared advisory lock so multiple nodes
+        // starting together do not race inserts into `_sqlx_migrations`.
+        sqlx::query("SELECT pg_advisory_lock(?)")
+            .bind(POSTGRES_MIGRATION_LOCK_ID)
+            .execute(&self.pool)
+            .await?;
+
+        let migrate_result: Result<()> = async {
+            self.reconcile_legacy_migration_checksum(&MIGRATOR).await?;
+            MIGRATOR.run(&self.pool).await?;
+            Ok(())
+        }
+        .await;
+
+        if let Err(err) = sqlx::query("SELECT pg_advisory_unlock(?)")
+            .bind(POSTGRES_MIGRATION_LOCK_ID)
+            .execute(&self.pool)
+            .await
+        {
+            tracing::warn!(error = %err, "failed to release postgres migration advisory lock");
+        }
+
+        migrate_result?;
+        Ok(())
+    }
+
+    async fn reconcile_legacy_migration_checksum(&self, migrator: &Migrator) -> Result<()> {
+        let Some(expected_checksum) = migrator
+            .iter()
+            .find(|migration| migration.version == LEGACY_RATCHET_MIGRATION_VERSION)
+            .map(|migration| migration.checksum.to_vec())
+        else {
+            return Ok(());
+        };
+
+        let applied = sqlx::query_as::<_, (bool, Vec<u8>)>(
+            "SELECT success, checksum FROM _sqlx_migrations WHERE version = ?",
+        )
+        .bind(LEGACY_RATCHET_MIGRATION_VERSION)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some((success, stored_checksum)) = applied else {
+            return Ok(());
+        };
+
+        if !success || stored_checksum == expected_checksum {
+            return Ok(());
+        }
+
+        let has_ratchet_column = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS (\
+                SELECT 1 FROM information_schema.columns\
+                WHERE table_name = 'encrypted_messages'\
+                  AND column_name = 'sender_ratchet_step'\
+            )",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        let has_ratchet_index = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS (\
+                SELECT 1 FROM pg_indexes\
+                WHERE schemaname = ANY (current_schemas(false))\
+                  AND indexname = 'idx_enc_msg_ratchet'\
+            )",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+
+        if !(has_ratchet_column && has_ratchet_index) {
+            tracing::warn!(
+                version = LEGACY_RATCHET_MIGRATION_VERSION,
+                "legacy migration checksum differs and schema markers are incomplete; leaving row untouched"
+            );
+            return Ok(());
+        }
+
+        sqlx::query("UPDATE _sqlx_migrations SET checksum = ? WHERE version = ?")
+            .bind(expected_checksum)
+            .bind(LEGACY_RATCHET_MIGRATION_VERSION)
+            .execute(&self.pool)
+            .await?;
+
+        tracing::warn!(
+            version = LEGACY_RATCHET_MIGRATION_VERSION,
+            "reconciled legacy migration checksum to unblock startup on upgraded deployments"
+        );
+
         Ok(())
     }
 }
