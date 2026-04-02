@@ -171,14 +171,17 @@ async fn create_scheduled(
     Path(channel_id): Path<Uuid>,
     Json(body): Json<CreateScheduledRequest>,
 ) -> NexusResult<Json<ScheduledMessage>> {
+    metrics::counter!("nexus_scheduled_messages_requests_total", "route" => "create").increment(1);
     ensure_channel_access(&state, ctx.user_id, channel_id).await?;
 
     if body.scheduled_at <= Utc::now() {
+        metrics::counter!("nexus_scheduled_messages_requests_total", "route" => "create", "outcome" => "invalid_time").increment(1);
         return Err(NexusError::Validation {
             message: "scheduled_at must be in the future".into(),
         });
     }
     if body.content.trim().is_empty() {
+        metrics::counter!("nexus_scheduled_messages_requests_total", "route" => "create", "outcome" => "invalid_content").increment(1);
         return Err(NexusError::Validation { message: "Message content cannot be empty".into() });
     }
 
@@ -210,6 +213,8 @@ async fn create_scheduled(
     .await
     .map_err(|e| NexusError::Internal(e.into()))?;
 
+    metrics::counter!("nexus_scheduled_messages_requests_total", "route" => "create", "outcome" => "ok").increment(1);
+
     Ok(Json(ScheduledMessage::try_from(row)?))
 }
 
@@ -219,6 +224,7 @@ async fn list_scheduled(
     Extension(ctx): Extension<AuthContext>,
     Path(channel_id): Path<Uuid>,
 ) -> NexusResult<Json<Vec<ScheduledMessage>>> {
+    metrics::counter!("nexus_scheduled_messages_requests_total", "route" => "list").increment(1);
     ensure_channel_access(&state, ctx.user_id, channel_id).await?;
 
     // Users can see their own scheduled messages only
@@ -239,6 +245,7 @@ async fn list_scheduled(
     .map_err(|e| NexusError::Internal(e.into()))?;
 
     let messages: Result<Vec<_>, _> = rows.into_iter().map(ScheduledMessage::try_from).collect();
+    metrics::counter!("nexus_scheduled_messages_requests_total", "route" => "list", "outcome" => "ok").increment(1);
     Ok(Json(messages?))
 }
 
@@ -249,10 +256,12 @@ async fn update_scheduled(
     Path((channel_id, sm_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<UpdateScheduledRequest>,
 ) -> NexusResult<Json<ScheduledMessage>> {
+    metrics::counter!("nexus_scheduled_messages_requests_total", "route" => "update").increment(1);
     ensure_channel_access(&state, ctx.user_id, channel_id).await?;
 
     if let Some(scheduled_at) = body.scheduled_at {
         if scheduled_at <= Utc::now() {
+            metrics::counter!("nexus_scheduled_messages_requests_total", "route" => "update", "outcome" => "invalid_time").increment(1);
             return Err(NexusError::Validation {
                 message: "scheduled_at must be in the future".into(),
             });
@@ -278,7 +287,10 @@ async fn update_scheduled(
 
     let current = match existing {
         Some(r) => ScheduledMessage::try_from(r)?,
-        None => return Err(NexusError::NotFound { resource: "Scheduled message".into() }),
+        None => {
+            metrics::counter!("nexus_scheduled_messages_requests_total", "route" => "update", "outcome" => "not_found").increment(1);
+            return Err(NexusError::NotFound { resource: "Scheduled message".into() });
+        }
     };
 
     let new_content = body.content.as_deref().unwrap_or(&current.content);
@@ -308,6 +320,8 @@ async fn update_scheduled(
     .await
     .map_err(|e| NexusError::Internal(e.into()))?;
 
+    metrics::counter!("nexus_scheduled_messages_requests_total", "route" => "update", "outcome" => "ok").increment(1);
+
     Ok(Json(ScheduledMessage::try_from(row)?))
 }
 
@@ -317,6 +331,7 @@ async fn cancel_scheduled(
     Extension(ctx): Extension<AuthContext>,
     Path((channel_id, sm_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<serde_json::Value>> {
+    metrics::counter!("nexus_scheduled_messages_requests_total", "route" => "cancel").increment(1);
     ensure_channel_access(&state, ctx.user_id, channel_id).await?;
 
     let result = sqlx::query(
@@ -334,8 +349,11 @@ async fn cancel_scheduled(
     .map_err(|e| NexusError::Internal(e.into()))?;
 
     if result.rows_affected() == 0 {
+        metrics::counter!("nexus_scheduled_messages_requests_total", "route" => "cancel", "outcome" => "not_found").increment(1);
         return Err(NexusError::NotFound { resource: "Scheduled message".into() });
     }
+
+    metrics::counter!("nexus_scheduled_messages_requests_total", "route" => "cancel", "outcome" => "ok").increment(1);
 
     Ok(Json(serde_json::json!({ "ok": true })))
 }

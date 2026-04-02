@@ -119,6 +119,7 @@ async fn create_thread(
     Path(channel_id): Path<Uuid>,
     Json(body): Json<CreateThreadRequest>,
 ) -> NexusResult<Json<Thread>> {
+    metrics::counter!("nexus_threads_requests_total", "route" => "create").increment(1);
     validate_request(&body)?;
 
     // Verify parent channel exists and user can access it.
@@ -127,6 +128,7 @@ async fn create_thread(
     // Validate auto-archive value
     let auto_archive = body.auto_archive_minutes.unwrap_or(1440);
     if ![60, 1440, 4320, 10080].contains(&auto_archive) {
+        metrics::counter!("nexus_threads_requests_total", "route" => "create", "outcome" => "invalid_auto_archive").increment(1);
         return Err(NexusError::Validation {
             message: "auto_archive_minutes must be 60, 1440, 4320, or 10080".into(),
         });
@@ -176,6 +178,8 @@ async fn create_thread(
         user_id: Some(auth.user_id),
     });
 
+    metrics::counter!("nexus_threads_requests_total", "route" => "create", "outcome" => "ok").increment(1);
+
     Ok(Json(thread))
 }
 
@@ -194,11 +198,13 @@ async fn list_active_threads(
     Path(channel_id): Path<Uuid>,
     Query(params): Query<ListThreadsParams>,
 ) -> NexusResult<Json<Vec<Thread>>> {
+    metrics::counter!("nexus_threads_requests_total", "route" => "list_active").increment(1);
     let _channel = ensure_channel_access(&state, auth.user_id, channel_id).await?;
     let limit = params.limit.unwrap_or(50).min(100);
 
     let rows = threads::list_active(&state.db.pool, channel_id, limit).await?;
     let list: Vec<Thread> = rows.into_iter().map(thread_response).collect();
+    metrics::counter!("nexus_threads_requests_total", "route" => "list_active", "outcome" => "ok").increment(1);
     Ok(Json(list))
 }
 
@@ -218,11 +224,13 @@ async fn list_archived_threads(
     Path(channel_id): Path<Uuid>,
     Query(params): Query<ArchivedParams>,
 ) -> NexusResult<Json<Vec<Thread>>> {
+    metrics::counter!("nexus_threads_requests_total", "route" => "list_archived").increment(1);
     let _channel = ensure_channel_access(&state, auth.user_id, channel_id).await?;
     let limit = params.limit.unwrap_or(25).min(100);
 
     let rows = threads::list_archived(&state.db.pool, channel_id, limit, params.before).await?;
     let list: Vec<Thread> = rows.into_iter().map(thread_response).collect();
+    metrics::counter!("nexus_threads_requests_total", "route" => "list_archived", "outcome" => "ok").increment(1);
     Ok(Json(list))
 }
 
@@ -235,6 +243,7 @@ async fn get_thread(
     State(state): State<Arc<AppState>>,
     Path((channel_id, thread_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<Thread>> {
+    metrics::counter!("nexus_threads_requests_total", "route" => "get").increment(1);
     let _channel = ensure_channel_access(&state, auth.user_id, channel_id).await?;
 
     let row = threads::find_by_id(&state.db.pool, thread_id)
@@ -243,10 +252,13 @@ async fn get_thread(
             resource: "Thread".into(),
         })?;
     if row.parent_channel_id != Some(channel_id) {
+        metrics::counter!("nexus_threads_requests_total", "route" => "get", "outcome" => "not_found_mismatch").increment(1);
         return Err(NexusError::NotFound {
             resource: "Thread".into(),
         });
     }
+
+    metrics::counter!("nexus_threads_requests_total", "route" => "get", "outcome" => "ok").increment(1);
 
     Ok(Json(thread_response(row)))
 }
@@ -261,6 +273,7 @@ async fn update_thread(
     Path((channel_id, thread_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<UpdateThreadRequest>,
 ) -> NexusResult<Json<Thread>> {
+    metrics::counter!("nexus_threads_requests_total", "route" => "update").increment(1);
     validate_request(&body)?;
 
     let _channel = ensure_channel_access(&state, auth.user_id, channel_id).await?;
@@ -272,12 +285,14 @@ async fn update_thread(
             resource: "Thread".into(),
         })?;
     if existing.parent_channel_id != Some(channel_id) {
+        metrics::counter!("nexus_threads_requests_total", "route" => "update", "outcome" => "not_found_mismatch").increment(1);
         return Err(NexusError::NotFound {
             resource: "Thread".into(),
         });
     }
 
     if existing.owner_id != auth.user_id {
+        metrics::counter!("nexus_threads_requests_total", "route" => "update", "outcome" => "forbidden_not_owner").increment(1);
         return Err(NexusError::MissingPermission {
             permission: "MANAGE_THREADS".into(),
         });
@@ -305,6 +320,8 @@ async fn update_thread(
         user_id: Some(auth.user_id),
     });
 
+    metrics::counter!("nexus_threads_requests_total", "route" => "update", "outcome" => "ok").increment(1);
+
     Ok(Json(thread))
 }
 
@@ -317,6 +334,7 @@ async fn join_thread(
     State(state): State<Arc<AppState>>,
     Path((channel_id, thread_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<serde_json::Value>> {
+    metrics::counter!("nexus_threads_requests_total", "route" => "join").increment(1);
     let _channel = ensure_channel_access(&state, auth.user_id, channel_id).await?;
     let thread = threads::find_by_id(&state.db.pool, thread_id)
         .await?
@@ -324,12 +342,14 @@ async fn join_thread(
             resource: "Thread".into(),
         })?;
     if thread.parent_channel_id != Some(channel_id) {
+        metrics::counter!("nexus_threads_requests_total", "route" => "join", "outcome" => "not_found_mismatch").increment(1);
         return Err(NexusError::NotFound {
             resource: "Thread".into(),
         });
     }
 
     threads::add_member(&state.db.pool, thread_id, auth.user_id).await?;
+    metrics::counter!("nexus_threads_requests_total", "route" => "join", "outcome" => "ok").increment(1);
     Ok(Json(serde_json::json!({ "joined": true })))
 }
 
@@ -338,6 +358,7 @@ async fn leave_thread(
     State(state): State<Arc<AppState>>,
     Path((channel_id, thread_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<serde_json::Value>> {
+    metrics::counter!("nexus_threads_requests_total", "route" => "leave").increment(1);
     let _channel = ensure_channel_access(&state, auth.user_id, channel_id).await?;
     let thread = threads::find_by_id(&state.db.pool, thread_id)
         .await?
@@ -345,12 +366,14 @@ async fn leave_thread(
             resource: "Thread".into(),
         })?;
     if thread.parent_channel_id != Some(channel_id) {
+        metrics::counter!("nexus_threads_requests_total", "route" => "leave", "outcome" => "not_found_mismatch").increment(1);
         return Err(NexusError::NotFound {
             resource: "Thread".into(),
         });
     }
 
     let removed = threads::remove_member(&state.db.pool, thread_id, auth.user_id).await?;
+    metrics::counter!("nexus_threads_requests_total", "route" => "leave", "outcome" => "ok").increment(1);
     Ok(Json(serde_json::json!({ "left": removed })))
 }
 
@@ -359,6 +382,7 @@ async fn list_thread_members(
     State(state): State<Arc<AppState>>,
     Path((channel_id, thread_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<Vec<Uuid>>> {
+    metrics::counter!("nexus_threads_requests_total", "route" => "list_members").increment(1);
     let _channel = ensure_channel_access(&state, auth.user_id, channel_id).await?;
     let thread = threads::find_by_id(&state.db.pool, thread_id)
         .await?
@@ -366,12 +390,14 @@ async fn list_thread_members(
             resource: "Thread".into(),
         })?;
     if thread.parent_channel_id != Some(channel_id) {
+        metrics::counter!("nexus_threads_requests_total", "route" => "list_members", "outcome" => "not_found_mismatch").increment(1);
         return Err(NexusError::NotFound {
             resource: "Thread".into(),
         });
     }
 
     let members = threads::list_members(&state.db.pool, thread_id).await?;
+    metrics::counter!("nexus_threads_requests_total", "route" => "list_members", "outcome" => "ok").increment(1);
     Ok(Json(members))
 }
 
