@@ -1291,6 +1291,7 @@ async fn list_messages_from_scylla(
         .map_err(|e| e.to_string())?;
 
     let mut result = Vec::new();
+    let mut hydrated_count: usize = 0;
     for row in rows
         .rows::<(String, String, String, String, i64)>()
         .map_err(|e| e.to_string())?
@@ -1314,6 +1315,9 @@ async fn list_messages_from_scylla(
             .await
             .ok()
             .flatten();
+        if sql_meta.is_some() {
+            hydrated_count += 1;
+        }
 
         let (message_type, edited, edited_at, pinned, embeds, attachments, mentions, mention_roles, mention_everyone, reference, thread_id) =
             if let Some(m) = sql_meta {
@@ -1381,6 +1385,13 @@ async fn list_messages_from_scylla(
 
         result.push(message_json);
     }
+
+    metrics::gauge!("nexus_scylla_metadata_hydration_ratio")
+        .set(if result.is_empty() {
+            0.0
+        } else {
+            hydrated_count as f64 / result.len() as f64
+        });
 
     Ok(result)
 }
