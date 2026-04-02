@@ -62,9 +62,12 @@ async fn forward_message(
         });
     }
 
-    // Fetch the original message
+    // Fetch the original message with channel/server context.
     let orig_row = sqlx::query(
-        "SELECT channel_id::text AS channel_id, content FROM messages WHERE id = $1::uuid",
+        "SELECT m.channel_id::text AS channel_id, m.content AS content, c.server_id::text AS server_id \
+         FROM messages m \
+         INNER JOIN channels c ON c.id = m.channel_id \
+         WHERE m.id = $1::uuid",
     )
     .bind(message_id.to_string())
     .fetch_optional(&state.db.pool)
@@ -83,6 +86,37 @@ async fn forward_message(
         .try_get::<Option<String>, _>("content")
         .unwrap_or(None)
         .unwrap_or_default();
+    let original_server_id = orig_row
+        .try_get::<Option<String>, _>("server_id")
+        .map_err(NexusError::Database)?
+        .map(|s| {
+            s.parse::<Uuid>().map_err(|_| NexusError::Validation {
+                message: "stored channel server_id is invalid".into(),
+            })
+        })
+        .transpose()?;
+
+    // Authorization guard: user must be able to view the source message channel.
+    if let Some(server_id) = original_server_id {
+        let is_member = members::is_member(&state.db.pool, auth.user_id, server_id)
+            .await
+            .map_err(NexusError::Database)?;
+        if !is_member {
+            return Err(NexusError::Forbidden);
+        }
+    } else {
+        let source_dm_membership: (bool,) = sqlx::query_as(
+            "SELECT EXISTS(SELECT 1 FROM dm_participants WHERE channel_id = $1::uuid AND user_id = $2::uuid)",
+        )
+        .bind(original_channel_id.to_string())
+        .bind(auth.user_id.to_string())
+        .fetch_one(&state.db.pool)
+        .await
+        .map_err(NexusError::Database)?;
+        if !source_dm_membership.0 {
+            return Err(NexusError::Forbidden);
+        }
+    }
 
     let mut created_ids = Vec::new();
 
@@ -133,11 +167,17 @@ async fn forward_message(
         });
     }
 
-    let server_ids: HashSet<Uuid> = target_channels.values().filter_map(|sid| *sid).collect();
-    for server_id in server_ids {
-        let _ = members::find_member(&state.db.pool, auth.user_id, server_id)
-            .await?
-            .ok_or(NexusError::Forbidden)?;
+    let target_server_ids: HashSet<Uuid> = target_channels.values().filter_map(|sid| *sid).collect();
+    if !target_server_ids.is_empty() {
+        let member_server_ids = members::list_server_ids_for_user(&state.db.pool, auth.user_id)
+            .await
+            .map_err(NexusError::Database)?
+            .into_iter()
+            .collect::<HashSet<_>>();
+
+        if !target_server_ids.is_subset(&member_server_ids) {
+            return Err(NexusError::Forbidden);
+        }
     }
 
     for target_channel_id in &body.target_channel_ids {
