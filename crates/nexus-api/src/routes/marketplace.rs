@@ -19,6 +19,7 @@ use axum::{
 };
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_common::models::ecosystem::{MarketplacePlugin, PluginInstall, PluginReview, ReviewStatus, TrustTier};
+use nexus_common::security_scanning::{MockMalwareScanner, SecurityScanner};
 use nexus_db::repository::{marketplace, members};
 use nexus_common::models::Member;
 use serde::{Deserialize, Serialize};
@@ -193,7 +194,7 @@ struct ApplyForCreatorRequest {
 
 #[derive(Debug, Deserialize)]
 struct ApproveCreatorRequest {
-    identity_level: String, // "email_verified", "domain_verified", "legal_verified"
+    identity_level: String, // "email_verified", "domain_verified", "signature_verified"
 }
 
 #[derive(Debug, Deserialize)]
@@ -504,13 +505,93 @@ async fn submit_plugin_for_review(
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
 
-    // TODO: Spawn background security scan task
-    // This would typically:
-    // 1. Call marketplace::update_review_status(..., ReviewStatus::Scanning, ...)
-    // 2. Invoke security scanner (MockMalwareScanner or real ClamAV)
-    // 3. Record scan_result and update status to Review
-    // 4. If critical issues found, move to Quarantined
-    // Example: state.scanner.scan_manifest(plugin_id, &plugin.manifest_url, plugin.source_url.as_deref())
+    // Kick off asynchronous scanning immediately to reduce time-to-review.
+    let pool = state.db.pool.clone();
+    let manifest_url = plugin.manifest_url.clone();
+    let source_url = plugin.source_url.clone();
+    let actor_id = ctx.user_id;
+
+    tokio::spawn(async move {
+        if let Err(error) = marketplace::update_review_status(
+            &pool,
+            plugin_id,
+            ReviewStatus::Scanning,
+            actor_id,
+            None,
+            Some("Automated security scan started"),
+        )
+        .await
+        {
+            tracing::warn!(%plugin_id, ?error, "failed to transition plugin to scanning");
+            return;
+        }
+
+        let scanner = MockMalwareScanner::new();
+        match scanner
+            .scan_manifest(plugin_id, &manifest_url, source_url.as_deref())
+            .await
+        {
+            Ok(scan_result) => {
+                let scan_payload = serde_json::json!({
+                    "scan_id": scan_result.id,
+                    "scanner": scan_result.scanner,
+                    "passed": scan_result.passed,
+                    "threat_level": scan_result.threat_level,
+                    "issues": scan_result.issues,
+                });
+
+                if let Err(error) = marketplace::mark_security_scan(&pool, plugin_id, &scan_payload).await {
+                    tracing::warn!(%plugin_id, ?error, "failed to persist scan result");
+                }
+
+                let is_critical = scan_result.threat_level == "critical" && !scan_result.issues.is_empty();
+                let next_status = if is_critical {
+                    ReviewStatus::Quarantined
+                } else {
+                    ReviewStatus::Review
+                };
+                let reason = if is_critical {
+                    Some("Automatic quarantine: Critical security threats detected")
+                } else {
+                    None
+                };
+                let notes = if is_critical {
+                    Some("Automated scan quarantined plugin")
+                } else {
+                    Some("Automated scan passed; queued for manual review")
+                };
+
+                if let Err(error) = marketplace::update_review_status(
+                    &pool,
+                    plugin_id,
+                    next_status,
+                    actor_id,
+                    reason,
+                    notes,
+                )
+                .await
+                {
+                    tracing::warn!(%plugin_id, ?error, "failed to transition plugin after automated scan");
+                }
+            }
+            Err(error) => {
+                tracing::warn!(%plugin_id, error = %error, "automated scan failed; requiring manual review");
+
+                if let Err(update_error) = marketplace::update_review_status(
+                    &pool,
+                    plugin_id,
+                    ReviewStatus::Review,
+                    actor_id,
+                    None,
+                    Some("Automated scan failed; manual security review required"),
+                )
+                .await
+                {
+                    tracing::warn!(%plugin_id, ?update_error, "failed to transition plugin to manual review fallback");
+                }
+            }
+        }
+    });
 
     Ok(Json(serde_json::json!({ "submitted": true })))
 }
@@ -853,8 +934,17 @@ async fn approve_creator(
         return Err(NexusError::Forbidden);
     }
 
+    let identity_level = match body.identity_level.as_str() {
+        "email_verified" | "domain_verified" | "signature_verified" => body.identity_level.as_str(),
+        _ => {
+            return Err(NexusError::Validation {
+                message: "identity_level must be one of: email_verified, domain_verified, signature_verified".into(),
+            });
+        }
+    };
+
     // Update identity level
-    marketplace::update_creator_identity_level(&state.db.pool, user_id, &body.identity_level)
+    marketplace::update_creator_identity_level(&state.db.pool, user_id, identity_level)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
 
@@ -973,9 +1063,16 @@ async fn trigger_security_scan(
             resource: "marketplace_plugin".into(),
         })?;
 
-    // TODO: Integrate real security scanner (ClamAV, VirusTotal, custom impl)
-    // For now, use mock scanner for testing
-    use nexus_common::security_scanning::{SecurityScanner, MockMalwareScanner};
+    marketplace::update_review_status(
+        &state.db.pool,
+        plugin_id,
+        ReviewStatus::Scanning,
+        ctx.user_id,
+        None,
+        Some("Manual security scan started"),
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
     
     let scanner = MockMalwareScanner::new();
     let scan_result = scanner
@@ -998,7 +1095,7 @@ async fn trigger_security_scan(
     .await
     .map_err(|e| NexusError::Internal(e.into()))?;
 
-    // If critical threats detected, auto-quarantine
+    // If critical threats detected, auto-quarantine; otherwise move to manual review.
     if scan_result.threat_level == "critical" && !scan_result.issues.is_empty() {
         marketplace::update_review_status(
             &state.db.pool,
@@ -1007,6 +1104,17 @@ async fn trigger_security_scan(
             ctx.user_id,
             Some("Automatic quarantine: Critical security threats detected"),
             None,
+        )
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    } else {
+        marketplace::update_review_status(
+            &state.db.pool,
+            plugin_id,
+            ReviewStatus::Review,
+            ctx.user_id,
+            None,
+            Some("Scan complete; queued for manual review"),
         )
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;

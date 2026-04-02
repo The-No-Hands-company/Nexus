@@ -523,8 +523,9 @@ pub async fn get_creator_vetting(
     user_id: Uuid,
 ) -> Result<Option<CreatorVetting>, sqlx::Error> {
     sqlx::query_as::<_, CreatorVetting>(
-        "SELECT id, user_id, identity_level, identity_documents, domain, domain_verified, \
-         legal_name, legal_entity_id, rights_attestation, two_factor_enabled, ip_whitelist, \
+        "SELECT id, user_id, identity_level, domain, domain_verified, \
+         signing_key_fingerprint, signing_key_type, rights_attestation, \
+         two_factor_enabled, ip_whitelist, \
          status, approved_by, approved_at, rejection_reason, created_at, updated_at \
          FROM creator_vetting WHERE user_id = $1"
     )
@@ -541,8 +542,9 @@ pub async fn create_creator_vetting(
     sqlx::query_as::<_, CreatorVetting>(
         "INSERT INTO creator_vetting (id, user_id, identity_level, status) \
          VALUES ($1, $2, $3, $4) \
-         RETURNING id, user_id, identity_level, identity_documents, domain, domain_verified, \
-         legal_name, legal_entity_id, rights_attestation, two_factor_enabled, ip_whitelist, \
+         RETURNING id, user_id, identity_level, domain, domain_verified, \
+         signing_key_fingerprint, signing_key_type, rights_attestation, \
+         two_factor_enabled, ip_whitelist, \
          status, approved_by, approved_at, rejection_reason, created_at, updated_at"
     )
     .bind(id.to_string())
@@ -641,18 +643,16 @@ pub async fn create_monetization_record(
     
     sqlx::query_as::<_, MarketplaceMonetization>(
         "INSERT INTO marketplace_monetization \
-         (id, plugin_id, creator_id, is_monetized, currency, revenue_share_pct) \
-         VALUES ($1, $2, $3, $4, $5, $6) \
+         (id, plugin_id, creator_id, is_monetized, currency) \
+         VALUES ($1, $2, $3, $4, $5) \
          RETURNING id, plugin_id, creator_id, is_monetized, price_cents, currency, \
-         revenue_share_pct, total_sales_cents, creator_earnings_cents, platform_earnings_cents, \
-         payout_address, last_payout_at, created_at, updated_at"
+         payment_link, purchase_count, created_at, updated_at"
     )
     .bind(id.to_string())
     .bind(plugin_id.to_string())
     .bind(creator_id.to_string())
     .bind(false)
     .bind("USD")
-    .bind(70.0)
     .fetch_one(pool)
     .await
 }
@@ -661,56 +661,36 @@ pub async fn update_monetization_price(
     pool: &AnyPool,
     plugin_id: Uuid,
     price_cents: Option<i32>,
+    payment_link: Option<String>,
 ) -> Result<(), sqlx::Error> {
-    let is_monetized = price_cents.is_some() && price_cents.unwrap() > 0;
+    let is_monetized = price_cents.map(|p| p > 0).unwrap_or(false);
     sqlx::query(
         "UPDATE marketplace_monetization SET \
-         price_cents = $1, is_monetized = $2, updated_at = now() \
-         WHERE plugin_id = $3"
+         price_cents = $1, is_monetized = $2, payment_link = $3, updated_at = now() \
+         WHERE plugin_id = $4"
     )
     .bind(price_cents)
     .bind(is_monetized)
+    .bind(payment_link)
     .bind(plugin_id.to_string())
     .execute(pool)
     .await?;
     Ok(())
 }
 
-pub async fn record_sale(
+/// Increment the install/purchase count for a paid plugin.
+/// TNHC does not process or record financial transactions.
+pub async fn increment_purchase_count(
     pool: &AnyPool,
     plugin_id: Uuid,
-    amount_cents: i64,
 ) -> Result<(), sqlx::Error> {
-    let creator_share = (amount_cents as f64 * 0.70) as i64;
-    let platform_share = amount_cents - creator_share;
-    
     sqlx::query(
         "UPDATE marketplace_monetization SET \
-         total_sales_cents = total_sales_cents + $1, \
-         creator_earnings_cents = creator_earnings_cents + $2, \
-         platform_earnings_cents = platform_earnings_cents + $3, \
-         updated_at = now() \
-         WHERE plugin_id = $4"
+         purchase_count = purchase_count + 1, updated_at = now() \
+         WHERE plugin_id = $1"
     )
-    .bind(amount_cents)
-    .bind(creator_share)
-    .bind(platform_share)
     .bind(plugin_id.to_string())
     .execute(pool)
     .await?;
     Ok(())
-}
-
-pub async fn get_creator_earnings_summary(
-    pool: &AnyPool,
-    creator_id: Uuid,
-) -> Result<Option<(i64, i64, i64)>, sqlx::Error> {
-    // Returns (total_sales, creator_earnings, platform_earnings)
-    sqlx::query_as::<_, (i64, i64, i64)>(
-        "SELECT total_sales_cents, creator_earnings_cents, platform_earnings_cents \
-         FROM marketplace_monetization WHERE creator_id = $1"
-    )
-    .bind(creator_id.to_string())
-    .fetch_optional(pool)
-    .await
 }

@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS marketplace_plugins_updated (
     -- Governance fields
     review_status TEXT DEFAULT 'draft' CHECK(review_status IN ('draft','submitted','scanning','review','approved','rejected','quarantined','takedown','archived')),
     trust_tier TEXT DEFAULT 'unlisted' CHECK(trust_tier IN ('unlisted','reviewed','verified')),
-    creator_identity_level TEXT DEFAULT 'unverified' CHECK(creator_identity_level IN ('unverified','email_verified','domain_verified','legal_verified')),
+    creator_identity_level TEXT DEFAULT 'unverified' CHECK(creator_identity_level IN ('unverified','email_verified','domain_verified','signature_verified')),
     provenance_verified BOOLEAN DEFAULT 0,
     rights_attestation TEXT,
     security_scan_result TEXT, -- JSON
@@ -73,16 +73,15 @@ CREATE TABLE IF NOT EXISTS marketplace_reviews (
 
 CREATE INDEX idx_marketplace_reviews_plugin ON marketplace_reviews(plugin_id, created_at DESC);
 
--- Creator vetting
+-- Creator vetting — privacy by design: no personal data stored
 CREATE TABLE IF NOT EXISTS creator_vetting (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
-    identity_level TEXT NOT NULL DEFAULT 'unverified' CHECK(identity_level IN ('unverified','email_verified','domain_verified','legal_verified')),
-    identity_documents TEXT, -- JSON, encrypted
+    identity_level TEXT NOT NULL DEFAULT 'unverified' CHECK(identity_level IN ('unverified','email_verified','domain_verified','signature_verified')),
     domain TEXT,
     domain_verified BOOLEAN DEFAULT 0,
-    legal_name TEXT, -- Encrypted
-    legal_entity_id TEXT, -- Encrypted
+    signing_key_fingerprint TEXT, -- Public key fingerprint only; creator publishes their own key
+    signing_key_type TEXT,        -- 'pgp', 'ssh', or 'minisign'
     rights_attestation TEXT,
     two_factor_enabled BOOLEAN DEFAULT 0,
     ip_whitelist TEXT, -- JSON
@@ -96,7 +95,7 @@ CREATE TABLE IF NOT EXISTS creator_vetting (
 
 CREATE INDEX idx_creator_vetting_user ON creator_vetting(user_id, status);
 
--- Monetization tracking
+-- Monetization metadata — TNHC is payments-neutral; never processes or stores transactions
 CREATE TABLE IF NOT EXISTS marketplace_monetization (
     id TEXT PRIMARY KEY,
     plugin_id TEXT NOT NULL UNIQUE REFERENCES marketplace_plugins(id) ON DELETE CASCADE,
@@ -104,12 +103,8 @@ CREATE TABLE IF NOT EXISTS marketplace_monetization (
     is_monetized BOOLEAN DEFAULT 0,
     price_cents INTEGER,
     currency TEXT DEFAULT 'USD',
-    revenue_share_pct REAL DEFAULT 70,
-    total_sales_cents INTEGER DEFAULT 0,
-    creator_earnings_cents INTEGER DEFAULT 0,
-    platform_earnings_cents INTEGER DEFAULT 0,
-    payout_address TEXT, -- Encrypted
-    last_payout_at DATETIME,
+    payment_link TEXT,       -- Creator's external payment URL; TNHC redirects, never touches money
+    purchase_count INTEGER DEFAULT 0,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

@@ -21,12 +21,13 @@ CREATE TYPE trust_tier AS ENUM (
     'verified'         -- Creator identity verified + content passes strict scanning
 );
 
--- Identity verification level
+-- Identity verification level (cryptographic, no personal data stored)
 CREATE TYPE identity_level AS ENUM (
-    'unverified',      -- Email-only; no identity checks
-    'email_verified',  -- Email ownership verified
-    'domain_verified', -- Organization domain verified (optional)
-    'legal_verified'   -- Legal entity / individual identity verified
+    'unverified',         -- Account created; no verification
+    'email_verified',     -- Email ownership confirmed
+    'domain_verified',    -- Organization domain verified via DNS TXT record
+    'signature_verified'  -- Controls a public cryptographic key (PGP/SSH/minisign)
+                          -- Key is publicly published; TNHC stores only the fingerprint
 );
 
 -- Extend marketplace_plugins with governance fields
@@ -74,19 +75,19 @@ CREATE TABLE IF NOT EXISTS marketplace_reviews (
 CREATE INDEX IF NOT EXISTS idx_marketplace_reviews_plugin
     ON marketplace_reviews(plugin_id, created_at DESC);
 
--- Table for creator vetting workflow
+-- Table for creator vetting workflow — privacy by design: no personal data stored
 CREATE TABLE IF NOT EXISTS creator_vetting (
     id UUID PRIMARY KEY,
     user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
     identity_level identity_level NOT NULL DEFAULT 'unverified',
-    identity_documents JSONB, -- Encrypted proof of identity
-    domain TEXT, -- Optional: organization domain
-    domain_verified BOOLEAN DEFAULT FALSE,
-    legal_name TEXT, -- Encrypted
-    legal_entity_id TEXT, -- Tax ID, business registration, etc. (encrypted)
-    rights_attestation TEXT, -- Creator confirms they own/have rights to publish content
+    domain TEXT,              -- Optional: organization domain for DNS verification
+    domain_verified BOOLEAN DEFAULT FALSE, -- Set after TNHC confirms DNS TXT record
+    signing_key_fingerprint TEXT, -- Public key fingerprint only (not the key itself)
+                                   -- Creator publishes their own key; we just index it
+    signing_key_type TEXT,    -- 'pgp', 'ssh', or 'minisign'
+    rights_attestation TEXT,  -- Creator confirms they own rights to publish; boolean flag
     two_factor_enabled BOOLEAN DEFAULT FALSE,
-    ip_whitelist JSONB, -- Optional: restrict publishing from specific IPs
+    ip_whitelist JSONB,       -- Optional creator-opted IP restrictions; security feature
     status VARCHAR(50) DEFAULT 'pending', -- pending, approved, rejected, suspended
     approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
     approved_at TIMESTAMPTZ,
@@ -98,20 +99,19 @@ CREATE TABLE IF NOT EXISTS creator_vetting (
 CREATE INDEX IF NOT EXISTS idx_creator_vetting_user
     ON creator_vetting(user_id, status);
 
--- Table for monetization tracking
+-- Table for monetization metadata — TNHC is payments-neutral: we never process
+-- or store payment data. Creators set their own pricing and payment links.
+-- TNHC facilitates download gating but never touches money.
 CREATE TABLE IF NOT EXISTS marketplace_monetization (
     id UUID PRIMARY KEY,
     plugin_id UUID NOT NULL UNIQUE REFERENCES marketplace_plugins(id) ON DELETE CASCADE,
     creator_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     is_monetized BOOLEAN DEFAULT FALSE,
-    price_cents INTEGER, -- NULL for free; >0 for paid
+    price_cents INTEGER,     -- NULL for free; >0 for paid (display only)
     currency VARCHAR(3) DEFAULT 'USD',
-    revenue_share_pct DECIMAL(5,2) DEFAULT 70, -- Creator gets 70%, platform 30%
-    total_sales_cents BIGINT DEFAULT 0,
-    creator_earnings_cents BIGINT DEFAULT 0,
-    platform_earnings_cents BIGINT DEFAULT 0,
-    payout_address TEXT, -- Encrypted; payment method (email, bank acct, etc.)
-    last_payout_at TIMESTAMPTZ,
+    payment_link TEXT,       -- Creator's external payment URL (e.g., Stripe, Ko-fi)
+                             -- TNHC redirects here; never processes or stores transactions
+    purchase_count BIGINT DEFAULT 0, -- Non-financial counter; incremented on each install
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

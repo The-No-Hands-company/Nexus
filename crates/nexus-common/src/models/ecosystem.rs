@@ -185,7 +185,9 @@ pub enum IdentityLevel {
     Unverified,
     EmailVerified,
     DomainVerified,
-    LegalVerified,
+    /// Controls a public cryptographic key (PGP/SSH/minisign).
+    /// TNHC stores only the public fingerprint; no personal data.
+    SignatureVerified,
 }
 
 impl std::fmt::Display for IdentityLevel {
@@ -194,7 +196,7 @@ impl std::fmt::Display for IdentityLevel {
             IdentityLevel::Unverified => write!(f, "unverified"),
             IdentityLevel::EmailVerified => write!(f, "email_verified"),
             IdentityLevel::DomainVerified => write!(f, "domain_verified"),
-            IdentityLevel::LegalVerified => write!(f, "legal_verified"),
+            IdentityLevel::SignatureVerified => write!(f, "signature_verified"),
         }
     }
 }
@@ -233,16 +235,19 @@ pub struct MarketplaceReview {
     pub created_at: DateTime<Utc>,
 }
 
+/// Creator vetting record — privacy by design: no personal or financial data stored.
+/// Identity is established through cryptographic attestation, not document collection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreatorVetting {
     pub id: Uuid,
     pub user_id: Uuid,
     pub identity_level: IdentityLevel,
-    pub identity_documents: Option<serde_json::Value>, // Encrypted in DB
     pub domain: Option<String>,
     pub domain_verified: bool,
-    pub legal_name: Option<String>, // Encrypted in DB
-    pub legal_entity_id: Option<String>, // Encrypted in DB
+    /// Public key fingerprint only — creator publishes their own key publicly.
+    /// TNHC stores the fingerprint so users can verify plugin signatures independently.
+    pub signing_key_fingerprint: Option<String>,
+    pub signing_key_type: Option<String>, // "pgp", "ssh", or "minisign"
     pub rights_attestation: Option<String>,
     pub two_factor_enabled: bool,
     pub ip_whitelist: Option<serde_json::Value>,
@@ -254,6 +259,9 @@ pub struct CreatorVetting {
     pub updated_at: DateTime<Utc>,
 }
 
+/// Monetization metadata — TNHC is payments-neutral.
+/// We gate download access by price, but never process or record transactions.
+/// Creators provide their own payment link; TNHC redirects and tracks install count only.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MarketplaceMonetization {
     pub id: Uuid,
@@ -262,12 +270,10 @@ pub struct MarketplaceMonetization {
     pub is_monetized: bool,
     pub price_cents: Option<i32>,
     pub currency: String,
-    pub revenue_share_pct: f32,
-    pub total_sales_cents: i64,
-    pub creator_earnings_cents: i64,
-    pub platform_earnings_cents: i64,
-    pub payout_address: Option<String>, // Encrypted in DB
-    pub last_payout_at: Option<DateTime<Utc>>,
+    /// Creator-provided payment URL (e.g. Stripe checkout, Ko-fi, Gumroad).
+    /// TNHC redirects to this URL; no financial data ever touches TNHC servers.
+    pub payment_link: Option<String>,
+    pub purchase_count: i64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
