@@ -172,7 +172,7 @@ async fn create_dm(
             });
         }
 
-        nexus_db::repository::users::find_by_id(&state.db.pool, recipient_id)
+        let recipient = nexus_db::repository::users::find_by_id(&state.db.pool, recipient_id)
             .await?
             .ok_or(NexusError::NotFound { resource: "User".into() })?;
 
@@ -180,11 +180,6 @@ async fn create_dm(
         let dm =
             channels::find_or_create_dm(&state.db.pool, dm_id, auth.user_id, recipient_id)
                 .await?;
-
-        let recipient =
-            nexus_db::repository::users::find_by_id(&state.db.pool, recipient_id)
-                .await?
-                .ok_or(NexusError::NotFound { resource: "User".into() })?;
 
         Ok(Json(serde_json::json!({
             "id": dm.id,
@@ -198,19 +193,46 @@ async fn create_dm(
             "last_message_id": dm.last_message_id,
         })))
     } else if let Some(recipient_ids) = body.recipient_ids {
-        if recipient_ids.len() < 2 {
+        let unique_recipient_ids: Vec<Uuid> = recipient_ids
+            .iter()
+            .copied()
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+
+        if unique_recipient_ids.len() != recipient_ids.len() {
+            return Err(NexusError::Validation {
+                message: "recipient_ids must not contain duplicates".into(),
+            });
+        }
+
+        if unique_recipient_ids.len() < 2 {
             return Err(NexusError::Validation {
                 message: "Group DM requires at least 2 other users".into(),
             });
         }
-        if recipient_ids.len() > 9 {
+        if unique_recipient_ids.len() > 9 {
             return Err(NexusError::Validation {
                 message: "Group DM can have at most 10 participants".into(),
             });
         }
-        if recipient_ids.contains(&auth.user_id) {
+        if unique_recipient_ids.contains(&auth.user_id) {
             return Err(NexusError::Validation {
                 message: "Do not include yourself in recipient_ids".into(),
+            });
+        }
+
+        let mut all_participants = unique_recipient_ids.clone();
+        all_participants.push(auth.user_id);
+
+        let participants_map = nexus_db::repository::users::find_by_ids_map(
+            &state.db.pool,
+            &all_participants,
+        )
+        .await?;
+        if participants_map.len() != all_participants.len() {
+            return Err(NexusError::NotFound {
+                resource: "One or more users".into(),
             });
         }
 
@@ -229,33 +251,35 @@ async fn create_dm(
         )
         .await?;
 
-        let mut all_participants = recipient_ids.clone();
-        all_participants.push(auth.user_id);
-
-        for &uid in &all_participants {
-            sqlx::query(
-                "INSERT INTO dm_participants (channel_id, user_id) \
-                 VALUES ($1::uuid, $2::uuid) ON CONFLICT DO NOTHING",
-            )
-            .bind(channel_id.to_string())
-            .bind(uid.to_string())
-            .execute(&state.db.pool)
-            .await?;
+        let mut qb = sqlx::QueryBuilder::new(
+            "INSERT INTO dm_participants (channel_id, user_id) VALUES ",
+        );
+        {
+            let mut separated = qb.separated(", ");
+            for uid in &all_participants {
+                separated
+                    .push("(")
+                    .push_bind(channel_id.to_string())
+                    .push(", ")
+                    .push_bind(uid.to_string())
+                    .push(")");
+            }
         }
+        qb.push(" ON CONFLICT DO NOTHING");
+        qb.build().execute(&state.db.pool).await?;
 
-        let mut users = Vec::new();
-        for &uid in &all_participants {
-            if let Some(user) =
-                nexus_db::repository::users::find_by_id(&state.db.pool, uid).await?
-            {
-                users.push(serde_json::json!({
+        let users = all_participants
+            .iter()
+            .filter_map(|uid| participants_map.get(uid))
+            .map(|user| {
+                serde_json::json!({
                     "id": user.id,
                     "username": user.username,
                     "display_name": user.display_name,
                     "avatar": user.avatar,
-                }));
-            }
-        }
+                })
+            })
+            .collect::<Vec<_>>();
 
         Ok(Json(serde_json::json!({
             "id": channel.id,
@@ -301,26 +325,27 @@ async fn get_dm_channel(
     .fetch_all(&state.db.pool)
     .await?;
 
-    let mut users = Vec::new();
-    for (uid_str,) in &participants {
-        let uid: Uuid = match uid_str.parse() {
-            Ok(u) => u,
-            Err(_) => continue,
-        };
-        if uid == auth.user_id {
-            continue;
-        }
-        if let Some(user) =
-            nexus_db::repository::users::find_by_id(&state.db.pool, uid).await?
-        {
-            users.push(serde_json::json!({
+    let other_ids: Vec<Uuid> = participants
+        .iter()
+        .filter_map(|(uid_str,)| uid_str.parse::<Uuid>().ok())
+        .filter(|uid| *uid != auth.user_id)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    let users_map = nexus_db::repository::users::find_by_ids_map(&state.db.pool, &other_ids).await?;
+    let users = other_ids
+        .iter()
+        .filter_map(|uid| users_map.get(uid))
+        .map(|user| {
+            serde_json::json!({
                 "id": user.id,
                 "username": user.username,
                 "display_name": user.display_name,
                 "avatar": user.avatar,
-            }));
-        }
-    }
+            })
+        })
+        .collect::<Vec<_>>();
 
     Ok(Json(serde_json::json!({
         "id": channel.id,
