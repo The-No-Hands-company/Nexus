@@ -64,6 +64,13 @@ follow the pattern `SECTION__KEY` (double underscore as separator).
 | `SEARCH__URL` | `http://localhost:7700` | MeiliSearch base URL |
 | `SEARCH__KEY` | *(required)* | MeiliSearch master key |
 
+## Features
+
+| Variable | Default | Description |
+|---|---|---|
+| `FEATURES__REQUIRE_EMAIL_VERIFICATION` | `true` | Require verified email before protected API access |
+| `FEATURES__ENABLE_AI_GENERATION_WRITES` | `false` | Enables AI generation write endpoints (suggestions/thread summaries) |
+
 ## Federation
 
 | Variable | Default | Description |
