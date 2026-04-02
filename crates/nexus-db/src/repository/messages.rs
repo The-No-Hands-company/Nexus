@@ -5,6 +5,7 @@
 
 use chrono::{DateTime, Utc};
 use sqlx::Row;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::select_cols::{MESSAGE_COLS, MESSAGE_COLS_M};
@@ -116,6 +117,38 @@ pub async fn find_by_id(pool: &sqlx::AnyPool, id: Uuid) -> Result<Option<Message
         .bind(id.to_string())
         .fetch_optional(pool)
         .await
+}
+
+/// Batch-load messages by ID.
+///
+/// Returns a map keyed by message ID for quick lookups in API assembly code.
+pub async fn find_by_ids_map(
+    pool: &sqlx::AnyPool,
+    ids: &[Uuid],
+) -> Result<HashMap<Uuid, MessageRow>, sqlx::Error> {
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let id_strings: Vec<String> = ids.iter().map(|id| id.to_string()).collect();
+    let mut qb = sqlx::QueryBuilder::<sqlx::Any>::new("SELECT ");
+    qb.push(MESSAGE_COLS);
+    qb.push(" FROM messages WHERE id IN (");
+
+    {
+        let mut separated = qb.separated(", ");
+        for id in &id_strings {
+            separated.push_bind(id);
+        }
+    }
+    qb.push(")");
+
+    let rows = qb
+        .build_query_as::<MessageRow>()
+        .fetch_all(pool)
+        .await?;
+
+    Ok(rows.into_iter().map(|row| (row.id, row)).collect())
 }
 
 /// List messages in a channel with cursor-based pagination.

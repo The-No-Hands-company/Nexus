@@ -1290,8 +1290,7 @@ async fn list_messages_from_scylla(
         .into_rows_result()
         .map_err(|e| e.to_string())?;
 
-    let mut result = Vec::new();
-    let mut hydrated_count: usize = 0;
+    let mut scylla_rows = Vec::new();
     for row in rows
         .rows::<(String, String, String, String, i64)>()
         .map_err(|e| e.to_string())?
@@ -1306,15 +1305,37 @@ async fn list_messages_from_scylla(
             continue;
         };
 
-        let reaction_counts = reactions::get_reaction_counts(&state.db.pool, parsed_message_id)
-            .await
-            .unwrap_or_default();
-        let my_reactions = get_user_reactions(state, parsed_message_id, user_id, &reaction_counts).await;
+        scylla_rows.push((
+            parsed_message_id,
+            parsed_author_id,
+            author_username,
+            content,
+            created_at_epoch,
+        ));
+    }
 
-        let sql_meta = messages::find_by_id(&state.db.pool, parsed_message_id)
-            .await
-            .ok()
-            .flatten();
+    let message_ids: Vec<Uuid> = scylla_rows.iter().map(|(id, _, _, _, _)| *id).collect();
+    let sql_meta_map = messages::find_by_ids_map(&state.db.pool, &message_ids)
+        .await
+        .unwrap_or_default();
+    let reaction_counts_map = reactions::get_reaction_counts_for_messages(&state.db.pool, &message_ids)
+        .await
+        .unwrap_or_default();
+    let my_reactions_map = reactions::get_user_reaction_emojis_for_messages(
+        &state.db.pool,
+        user_id,
+        &message_ids,
+    )
+    .await
+    .unwrap_or_default();
+
+    let mut result = Vec::with_capacity(scylla_rows.len());
+    let mut hydrated_count: usize = 0;
+    for (parsed_message_id, parsed_author_id, author_username, content, created_at_epoch) in scylla_rows {
+        let reaction_counts = reaction_counts_map.get(&parsed_message_id);
+        let my_reactions = my_reactions_map.get(&parsed_message_id);
+
+        let sql_meta = sql_meta_map.get(&parsed_message_id);
         if sql_meta.is_some() {
             hydrated_count += 1;
         }
@@ -1326,10 +1347,10 @@ async fn list_messages_from_scylla(
                     m.edited,
                     m.edited_at,
                     m.pinned,
-                    serde_json::to_value(m.embeds).unwrap_or_else(|_| serde_json::json!([])),
-                    serde_json::to_value(m.attachments).unwrap_or_else(|_| serde_json::json!([])),
-                    serde_json::to_value(m.mentions).unwrap_or_else(|_| serde_json::json!([])),
-                    serde_json::to_value(m.mention_roles).unwrap_or_else(|_| serde_json::json!([])),
+                    serde_json::to_value(m.embeds.clone()).unwrap_or_else(|_| serde_json::json!([])),
+                    serde_json::to_value(m.attachments.clone()).unwrap_or_else(|_| serde_json::json!([])),
+                    serde_json::to_value(m.mentions.clone()).unwrap_or_else(|_| serde_json::json!([])),
+                    serde_json::to_value(m.mention_roles.clone()).unwrap_or_else(|_| serde_json::json!([])),
                     m.mention_everyone,
                     match (m.reference_message_id, m.reference_channel_id) {
                         (Some(mid), Some(cid)) => Some(serde_json::json!({
@@ -1373,11 +1394,11 @@ async fn list_messages_from_scylla(
             "mention_everyone": mention_everyone,
             "reference": reference,
             "thread_id": thread_id,
-            "reactions": reaction_counts.iter().map(|rc| {
+            "reactions": reaction_counts.into_iter().flatten().map(|rc| {
                 serde_json::json!({
                     "emoji": rc.emoji,
                     "count": rc.count,
-                    "me": my_reactions.contains(&rc.emoji),
+                    "me": my_reactions.map(|set| set.contains(&rc.emoji)).unwrap_or(false),
                 })
             }).collect::<Vec<_>>(),
             "created_at": chrono::DateTime::from_timestamp(created_at_epoch, 0).unwrap_or_else(Utc::now),

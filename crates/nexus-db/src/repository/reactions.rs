@@ -2,6 +2,7 @@
 
 use chrono::{DateTime, Utc};
 use sqlx::Row;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 /// A reaction row from the database.
@@ -117,6 +118,79 @@ pub async fn get_reaction_counts(
     .bind(message_id.to_string())
     .fetch_all(pool)
     .await
+}
+
+/// Batch-get reaction counts for many messages.
+pub async fn get_reaction_counts_for_messages(
+    pool: &sqlx::AnyPool,
+    message_ids: &[Uuid],
+) -> Result<HashMap<Uuid, Vec<ReactionCount>>, sqlx::Error> {
+    if message_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let id_strings: Vec<String> = message_ids.iter().map(|id| id.to_string()).collect();
+    let mut qb = sqlx::QueryBuilder::<sqlx::Any>::new(
+        "SELECT message_id, emoji, COUNT(*) as count FROM reactions WHERE message_id IN (",
+    );
+    {
+        let mut separated = qb.separated(", ");
+        for id in &id_strings {
+            separated.push_bind(id);
+        }
+    }
+    qb.push(") GROUP BY message_id, emoji ORDER BY MIN(created_at) ASC");
+
+    let rows = qb
+        .build_query_as::<(String, String, i64)>()
+        .fetch_all(pool)
+        .await?;
+
+    let mut out: HashMap<Uuid, Vec<ReactionCount>> = HashMap::new();
+    for (message_id, emoji, count) in rows {
+        if let Ok(mid) = message_id.parse::<Uuid>() {
+            out.entry(mid).or_default().push(ReactionCount { emoji, count });
+        }
+    }
+    Ok(out)
+}
+
+/// Batch-get which emojis a user has reacted with per message.
+pub async fn get_user_reaction_emojis_for_messages(
+    pool: &sqlx::AnyPool,
+    user_id: Uuid,
+    message_ids: &[Uuid],
+) -> Result<HashMap<Uuid, HashSet<String>>, sqlx::Error> {
+    if message_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let id_strings: Vec<String> = message_ids.iter().map(|id| id.to_string()).collect();
+    let mut qb = sqlx::QueryBuilder::<sqlx::Any>::new(
+        "SELECT message_id, emoji FROM reactions WHERE user_id = ",
+    );
+    qb.push_bind(user_id.to_string());
+    qb.push(" AND message_id IN (");
+    {
+        let mut separated = qb.separated(", ");
+        for id in &id_strings {
+            separated.push_bind(id);
+        }
+    }
+    qb.push(")");
+
+    let rows = qb
+        .build_query_as::<(String, String)>()
+        .fetch_all(pool)
+        .await?;
+
+    let mut out: HashMap<Uuid, HashSet<String>> = HashMap::new();
+    for (message_id, emoji) in rows {
+        if let Ok(mid) = message_id.parse::<Uuid>() {
+            out.entry(mid).or_default().insert(emoji);
+        }
+    }
+    Ok(out)
 }
 
 /// Check if a specific user has reacted with a specific emoji.
