@@ -1,7 +1,8 @@
 //! Message model — the core content unit.
 //!
-//! Messages in Nexus are stored in ScyllaDB for write-heavy performance
-//! and replicated to MeiliSearch for full-text search.
+//! Messages in Nexus are persisted in SQL (PostgreSQL/SQLite by deployment mode),
+//! mirrored to search, and can be replicated through the Scylla outbox bridge
+//! for high-scale read/write routing.
 //! Messages support rich formatting, embeds, attachments, reactions, and threads.
 
 use chrono::{DateTime, Utc};

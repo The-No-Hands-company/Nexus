@@ -73,13 +73,13 @@ Built for performance, privacy, and developer happiness:
 | **Gateway** | WebSocket (Tokio + Tungstenite) | Real-time events, typing indicators, presence |
 | **Voice** | WebRTC SFU | Low-latency voice/video, screen share, no GC pauses |
 | **Database** | PostgreSQL | Users, servers, channels, roles — battle-tested relational data |
-| **Messages** | ScyllaDB | Write-heavy, time-series, partitioned by channel |
+| **Messages** | PostgreSQL (+ Scylla outbox bridge) | SQL is source of truth; Scylla replication path enabled for scale-out |
 | **Cache** | Redis | Sessions, presence, rate limiting, pub/sub |
 | **Search** | MeiliSearch | Typo-tolerant full-text search, self-hostable |
 | **Storage** | S3/MinIO | Avatars, attachments, any S3-compatible backend |
 | **Desktop** | Tauri 2 + React + TypeScript | Native performance, tiny binary, cross-platform |
 | **Mobile** | React Native | Shared codebase with web, native feel |
-| **Encryption** | Signal Protocol (libsignal) | Gold standard E2E, double ratchet, forward secrecy |
+| **Encryption** | Nexus E2EE key + ciphertext infrastructure | Privacy-first server key distribution; client ratchet engines are integrated per-client |
 
 ## Architecture
 
