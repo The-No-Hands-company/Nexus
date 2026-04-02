@@ -67,6 +67,7 @@ pub fn init() -> Result<&'static AppConfig, config::ConfigError> {
         .set_default("search.url", "")?
         // Self-hosting feature flags
         .set_default("features.require_email_verification", true)?
+        .set_default("features.enable_ai_generation_writes", false)?
         // Email / Resend defaults (email sending is disabled when api_key is empty)
         .set_default("email.api_key", "")?
         .set_default("email.from", "Nexus <noreply@nexus.local>")?
@@ -239,4 +240,8 @@ pub struct FeaturesConfig {
     /// any protected API route.  Self-hosters who are not running an SMTP
     /// service can set this to `false` to allow unverified access.
     pub require_email_verification: bool,
+    /// Enables write endpoints that persist generated AI outputs
+    /// (suggestions, summaries). Default `false` until an inference backend
+    /// is wired and operators opt in.
+    pub enable_ai_generation_writes: bool,
 }

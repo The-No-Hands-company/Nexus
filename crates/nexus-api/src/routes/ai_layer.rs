@@ -105,6 +105,8 @@ async fn create_ai_suggestion(
     Path(channel_id): Path<Uuid>,
     Json(body): Json<CreateAiSuggestionReq>,
 ) -> NexusResult<Json<AiSuggestion>> {
+    ensure_ai_generation_writes_enabled()?;
+
     let server_id = ensure_channel_server_membership(&state, ctx.user_id, channel_id).await?;
     ensure_ai_consent_enabled(&state, ctx.user_id, server_id, "ai_suggestions").await?;
     let model_name = body.model_name.as_deref().unwrap_or("default");
@@ -155,6 +157,8 @@ async fn upsert_thread_summary(
     Path(channel_id): Path<Uuid>,
     Json(body): Json<UpsertThreadSummaryReq>,
 ) -> NexusResult<Json<ThreadSummary>> {
+    ensure_ai_generation_writes_enabled()?;
+
     let server_id = ensure_channel_server_membership(&state, ctx.user_id, channel_id).await?;
     ensure_ai_consent_enabled(&state, ctx.user_id, server_id, "thread_summaries").await?;
     let model_name = body.model_name.as_deref().unwrap_or("default");
@@ -186,6 +190,16 @@ async fn upsert_thread_summary(
     .await;
 
     Ok(Json(row))
+}
+
+fn ensure_ai_generation_writes_enabled() -> NexusResult<()> {
+    if nexus_common::config::get().features.enable_ai_generation_writes {
+        Ok(())
+    } else {
+        Err(NexusError::Validation {
+            message: "AI generation write endpoints are disabled by server config".into(),
+        })
+    }
 }
 
 async fn list_flagged_toxicity(
