@@ -20,7 +20,7 @@ use nexus_db::repository::{channels, members, messages, moderation, reactions, r
 use nexus_common::gateway_event::GatewayEvent;
 use scylla::SessionBuilder;
 use serde::Deserialize;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::{Arc, OnceLock}};
 use uuid::Uuid;
 
 use crate::{middleware::AuthContext, AppState};
@@ -1545,7 +1545,10 @@ async fn get_message_from_scylla(
     })))
 }
 
-async fn connect_scylla(state: &AppState) -> Result<scylla::Session, String> {
+async fn connect_scylla(state: &AppState) -> Result<Arc<scylla::Session>, String> {
+    static SCYLLA_SESSION_CACHE: OnceLock<tokio::sync::Mutex<HashMap<String, Arc<scylla::Session>>>> =
+        OnceLock::new();
+
     let nodes: Vec<String> = state
         .db
         .scylla_nodes
@@ -1559,12 +1562,28 @@ async fn connect_scylla(state: &AppState) -> Result<scylla::Session, String> {
         return Err("no_scylla_nodes_configured".to_string());
     }
 
+    let cache_key = format!("{}|{}", state.db.scylla_keyspace, nodes.join(","));
+    let cache = SCYLLA_SESSION_CACHE.get_or_init(|| tokio::sync::Mutex::new(HashMap::new()));
+
+    {
+        let guard = cache.lock().await;
+        if let Some(session) = guard.get(&cache_key) {
+            return Ok(Arc::clone(session));
+        }
+    }
+
     let mut builder = SessionBuilder::new();
     for node in &nodes {
         builder = builder.known_node(node);
     }
 
-    builder.build().await.map_err(|e| e.to_string())
+    let session = Arc::new(builder.build().await.map_err(|e| e.to_string())?);
+    {
+        let mut guard = cache.lock().await;
+        guard.entry(cache_key).or_insert_with(|| Arc::clone(&session));
+    }
+
+    Ok(session)
 }
 
 fn scylla_read_strategy(state: &AppState) -> ScyllaReadStrategy {
