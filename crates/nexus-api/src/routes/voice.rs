@@ -86,6 +86,8 @@ async fn get_voice_channel_state(
     Extension(_auth): Extension<AuthContext>,
     Path(channel_id): Path<Uuid>,
 ) -> NexusResult<Json<VoiceChannelResponse>> {
+    metrics::counter!("nexus_voice_requests_total", "route" => "channel_state").increment(1);
+
     // Verify channel exists
     let _channel = nexus_db::repository::channels::find_by_id(&state.db.pool, channel_id)
         .await
@@ -111,6 +113,8 @@ async fn voice_join_preflight(
     Extension(auth): Extension<AuthContext>,
     Path(channel_id): Path<Uuid>,
 ) -> NexusResult<Json<VoiceJoinResponse>> {
+    metrics::counter!("nexus_voice_requests_total", "route" => "join_preflight").increment(1);
+
     // Verify channel exists and is a voice channel
     let channel = nexus_db::repository::channels::find_by_id(&state.db.pool, channel_id)
         .await
@@ -122,6 +126,7 @@ async fn voice_join_preflight(
         nexus_common::models::channel::ChannelType::Voice
         | nexus_common::models::channel::ChannelType::Stage => {}
         _ => {
+            metrics::counter!("nexus_voice_requests_total", "route" => "join_preflight", "outcome" => "invalid_channel_type").increment(1);
             return Err(NexusError::Validation {
                 message: "Channel is not a voice channel".into(),
             });
@@ -133,6 +138,7 @@ async fn voice_join_preflight(
         if limit > 0 {
             let current_count = state.voice_state.get_channel_count(channel_id).await;
             if current_count >= limit as usize {
+                metrics::counter!("nexus_voice_requests_total", "route" => "join_preflight", "outcome" => "full").increment(1);
                 return Err(NexusError::LimitReached {
                     message: "Voice channel is full".into(),
                 });
@@ -151,6 +157,7 @@ async fn voice_join_preflight(
         // Timeout enforcement: timed-out members cannot join voice
         if let Some(disabled_until) = member.communication_disabled_until {
             if disabled_until > Utc::now() {
+                metrics::counter!("nexus_voice_requests_total", "route" => "join_preflight", "outcome" => "timeout_blocked").increment(1);
                 return Err(NexusError::Validation {
                     message: "You are currently timed out in this server".into(),
                 });
@@ -184,6 +191,8 @@ async fn voice_leave(
     Extension(auth): Extension<AuthContext>,
     Path(channel_id): Path<Uuid>,
 ) -> NexusResult<Json<serde_json::Value>> {
+    metrics::counter!("nexus_voice_requests_total", "route" => "leave").increment(1);
+
     // Check if user is actually in this channel
     let voice_state = state
         .voice_state
@@ -192,6 +201,7 @@ async fn voice_leave(
         .ok_or_else(|| NexusError::Validation { message: "Not in a voice channel".into() })?;
 
     if voice_state.channel_id != channel_id {
+        metrics::counter!("nexus_voice_requests_total", "route" => "leave", "outcome" => "wrong_channel").increment(1);
         return Err(NexusError::Validation {
             message: "Not in the specified voice channel".into(),
         });
@@ -223,6 +233,8 @@ async fn update_voice_state(
     Extension(auth): Extension<AuthContext>,
     Json(update): Json<VoiceStateUpdate>,
 ) -> NexusResult<Json<VoiceState>> {
+    metrics::counter!("nexus_voice_requests_total", "route" => "update_state").increment(1);
+
     let new_state = state
         .voice_state
         .update_self_state(auth.user_id, &update)
@@ -248,6 +260,8 @@ async fn server_mute(
     Path(channel_id): Path<Uuid>,
     Json(action): Json<VoiceModAction>,
 ) -> NexusResult<Json<VoiceState>> {
+    metrics::counter!("nexus_voice_requests_total", "route" => "server_mute").increment(1);
+
     // Verify the channel exists and is in a server
     let channel = nexus_db::repository::channels::find_by_id(&state.db.pool, channel_id)
         .await
@@ -274,6 +288,7 @@ async fn server_mute(
         .ok_or_else(|| NexusError::Validation { message: "Target user not in voice".into() })?;
 
     if target_state.channel_id != channel_id {
+        metrics::counter!("nexus_voice_requests_total", "route" => "server_mute", "outcome" => "target_wrong_channel").increment(1);
         return Err(NexusError::Validation {
             message: "Target user not in this channel".into(),
         });
@@ -303,6 +318,7 @@ async fn voice_stats(
     State(state): State<Arc<AppState>>,
     Extension(_auth): Extension<AuthContext>,
 ) -> NexusResult<Json<VoiceGlobalStats>> {
+    metrics::counter!("nexus_voice_requests_total", "route" => "stats").increment(1);
     let stats = state.voice_state.stats().await;
     Ok(Json(stats))
 }

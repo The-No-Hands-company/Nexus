@@ -14,6 +14,7 @@ use axum::{
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_db::repository::{channels, members};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -64,35 +65,90 @@ struct SearchResult {
 
 /// Global message search across all servers the user is a member of.
 async fn search_messages_global(
-    Extension(_auth): Extension<AuthContext>,
+    Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
     Query(params): Query<SearchParams>,
 ) -> NexusResult<Json<SearchResult>> {
+    metrics::counter!("nexus_search_requests_total", "scope" => "global").increment(1);
+
     let limit = params.limit.unwrap_or(20).min(50);
     let offset = params.offset.unwrap_or(0);
 
-    let results = state
-        .search
-        .search_messages(
-            &params.q,
-            None, // no server filter — MeiliSearch will return all accessible
-            params.channel_id,
-            params.author_id,
+    if let Some(channel_id) = params.channel_id {
+        let channel = channels::find_by_id(&state.db.pool, channel_id)
+            .await
+            .map_err(NexusError::Database)?
+            .ok_or(NexusError::NotFound {
+                resource: format!("channel {channel_id}"),
+            })?;
+        if let Some(server_id) = channel.server_id {
+            if !members::is_member(&state.db.pool, auth.user_id, server_id).await? {
+                metrics::counter!("nexus_search_requests_total", "scope" => "global", "outcome" => "forbidden").increment(1);
+                tracing::warn!(%channel_id, %server_id, user_id = %auth.user_id, "Denied global search for inaccessible channel");
+                return Err(NexusError::Forbidden);
+            }
+        } else {
+            metrics::counter!("nexus_search_requests_total", "scope" => "global", "outcome" => "unsupported_dm").increment(1);
+            return Err(NexusError::Validation {
+                message: "Search within DM channels is not yet supported".into(),
+            });
+        }
+    }
+
+    let server_ids = members::list_server_ids_for_user(&state.db.pool, auth.user_id)
+        .await
+        .map_err(NexusError::Database)?;
+    if server_ids.is_empty() {
+        metrics::counter!("nexus_search_requests_total", "scope" => "global", "outcome" => "no_memberships").increment(1);
+        return Ok(Json(SearchResult {
+            query: params.q,
+            total_hits: Some(0),
             limit,
             offset,
-        )
-        .await
-        .map_err(|e| NexusError::Internal(e))?;
+            hits: Vec::new(),
+        }));
+    }
 
-    let hits: Vec<serde_json::Value> = results
-        .hits
+    let window = (limit + offset).min(200);
+    let mut merged_hits = Vec::new();
+    let mut seen_ids: HashSet<String> = HashSet::new();
+    let mut total_hits = 0usize;
+
+    for server_id in server_ids {
+        let results = state
+            .search
+            .search_messages(
+                &params.q,
+                Some(server_id),
+                params.channel_id,
+                params.author_id,
+                window,
+                0,
+            )
+            .await
+            .map_err(NexusError::Internal)?;
+
+        total_hits += results.total_hits.unwrap_or(results.hits.len());
+        for hit in results.hits {
+            if seen_ids.insert(hit.id.clone()) {
+                merged_hits.push(hit);
+            }
+        }
+    }
+
+    merged_hits.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    let hits: Vec<serde_json::Value> = merged_hits
         .into_iter()
+        .skip(offset)
+        .take(limit)
         .map(|h| serde_json::to_value(h).unwrap_or_default())
         .collect();
 
+    metrics::counter!("nexus_search_requests_total", "scope" => "global", "outcome" => "ok").increment(1);
+
     Ok(Json(SearchResult {
         query: params.q,
-        total_hits: results.total_hits,
+        total_hits: Some(total_hits),
         limit,
         offset,
         hits,
@@ -109,6 +165,8 @@ async fn search_server_messages(
     Path(server_id): Path<Uuid>,
     Query(params): Query<SearchParams>,
 ) -> NexusResult<Json<SearchResult>> {
+    metrics::counter!("nexus_search_requests_total", "scope" => "server").increment(1);
+
     // Verify user is a member of the server before allowing search
     if !members::is_member(&state.db.pool, auth.user_id, server_id).await? {
         tracing::warn!(
@@ -116,7 +174,8 @@ async fn search_server_messages(
             server_id = %server_id,
             "Denied message search: user is not a member of the server"
         );
-            return Err(NexusError::Forbidden);
+        metrics::counter!("nexus_search_requests_total", "scope" => "server", "outcome" => "forbidden").increment(1);
+        return Err(NexusError::Forbidden);
     }
 
     let limit = params.limit.unwrap_or(20).min(50);
@@ -141,6 +200,8 @@ async fn search_server_messages(
         .map(|h| serde_json::to_value(h).unwrap_or_default())
         .collect();
 
+    metrics::counter!("nexus_search_requests_total", "scope" => "server", "outcome" => "ok").increment(1);
+
     Ok(Json(SearchResult {
         query: params.q,
         total_hits: results.total_hits,
@@ -160,6 +221,8 @@ async fn search_channel_messages(
     Path(channel_id): Path<Uuid>,
     Query(params): Query<SearchParams>,
 ) -> NexusResult<Json<SearchResult>> {
+    metrics::counter!("nexus_search_requests_total", "scope" => "channel").increment(1);
+
     // Load the channel to get its server context
     let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await
@@ -177,11 +240,13 @@ async fn search_channel_messages(
                 server_id = %server_id,
                 "Denied channel message search: user is not a member of the server"
             );
+            metrics::counter!("nexus_search_requests_total", "scope" => "channel", "outcome" => "forbidden").increment(1);
             return Err(NexusError::Forbidden);
         }
     } else {
         // For DM channels, verify user is a participant (would require separate check)
         // For now, return not supported — can be extended later if needed
+        metrics::counter!("nexus_search_requests_total", "scope" => "channel", "outcome" => "unsupported_dm").increment(1);
         return Err(NexusError::Validation {
             message: "Search within DM channels is not yet supported".into(),
         });
@@ -208,6 +273,8 @@ async fn search_channel_messages(
         .into_iter()
         .map(|h| serde_json::to_value(h).unwrap_or_default())
         .collect();
+
+    metrics::counter!("nexus_search_requests_total", "scope" => "channel", "outcome" => "ok").increment(1);
 
     Ok(Json(SearchResult {
         query: params.q,

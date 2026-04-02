@@ -140,3 +140,21 @@ pub async fn is_member(
     .await?;
     Ok(result.0)
 }
+
+/// List all server IDs the user is currently a member of.
+pub async fn list_server_ids_for_user(
+    pool: &sqlx::AnyPool,
+    user_id: Uuid,
+) -> Result<Vec<Uuid>, sqlx::Error> {
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT server_id::text FROM members WHERE user_id = $1::uuid",
+    )
+    .bind(user_id.to_string())
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .filter_map(|(s,)| s.parse::<Uuid>().ok())
+        .collect())
+}
