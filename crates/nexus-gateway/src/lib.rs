@@ -35,8 +35,8 @@ use tokio::sync::{broadcast, Mutex, RwLock};
 /// Gateway state.
 #[derive(Clone)]
 pub struct GatewayState {
-    /// Broadcast channel for dispatching events to all connected clients.
-    /// In production, this would use Redis pub/sub for multi-node support.
+    /// Local broadcast channel for dispatching events to all connected clients.
+    /// Multi-node fanout is bridged via Redis pub/sub when configured.
     pub broadcast: broadcast::Sender<GatewayEvent>,
     pub db: nexus_db::Database,
     pub sessions: Arc<SessionManager>,
