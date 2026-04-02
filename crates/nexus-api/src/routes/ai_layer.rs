@@ -236,6 +236,13 @@ async fn list_ai_consent(
     Extension(ctx): Extension<AuthContext>,
     Path(server_id): Path<Uuid>,
 ) -> NexusResult<Json<Vec<AiConsent>>> {
+    let member: Option<Member> = members::find_member(&state.db.pool, ctx.user_id, server_id)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    if member.is_none() {
+        return Err(NexusError::Forbidden);
+    }
+
     let rows = ai_intelligence::list_ai_consent(&state.db.pool, ctx.user_id, server_id)
         .await.map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(rows))
@@ -247,6 +254,13 @@ async fn upsert_ai_consent(
     Path(server_id): Path<Uuid>,
     Json(body): Json<UpsertAiConsentReq>,
 ) -> NexusResult<Json<AiConsent>> {
+    let member: Option<Member> = members::find_member(&state.db.pool, ctx.user_id, server_id)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    if member.is_none() {
+        return Err(NexusError::Forbidden);
+    }
+
     let row = ai_intelligence::upsert_ai_consent(
         &state.db.pool, ctx.user_id, server_id, &body.feature, body.enabled,
     ).await.map_err(|e| NexusError::Internal(e.into()))?;
