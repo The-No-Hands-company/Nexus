@@ -1,0 +1,38 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "nexus.fullname" . }}
+  labels:
+    {{- include "nexus.labels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.certManager.enabled }}
+    cert-manager.io/{{- if eq .Values.certManager.issuerKind "Issuer" }}issuer{{- else }}cluster-issuer{{- end }}: {{ .Values.certManager.issuerName | quote }}
+    {{- end }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ include "nexus.fullname" $ }}
+                port:
+                  name: api
+          {{- end }}
+    {{- end }}
+{{- end }}

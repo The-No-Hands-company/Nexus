@@ -2,7 +2,7 @@ apiVersion: v2
 name: nexus
 description: Privacy-first, community-owned communication platform
 type: application
-version: 0.9.0
+version: 0.10.0
 appVersion: "0.9.0"
 home: https://github.com/The-No-hands-Company/Nexus
 sources:
@@ -16,3 +16,16 @@ keywords:
   - self-hosted
 annotations:
   artifacthub.io/license: AGPL-3.0-or-later
+dependencies:
+  - name: postgresql
+    version: ">=18.5.0 <19.0.0"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: postgresql.enabled
+  - name: redis
+    version: ">=25.3.0 <26.0.0"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: redis.enabled
+  - name: minio
+    version: ">=17.0.0 <18.0.0"
+    repository: "https://charts.bitnami.com/bitnami"
+    condition: minio.enabled

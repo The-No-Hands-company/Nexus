@@ -49,46 +49,76 @@ spec:
               containerPort: {{ .Values.service.federationPort }}
               protocol: TCP
           env:
-            - name: SERVER__NAME
+            - name: NEXUS__SERVER__NAME
               value: {{ .Values.config.serverName | quote }}
-            - name: SERVER__HOST
+            - name: NEXUS__SERVER__HOST
               value: "0.0.0.0"
-            - name: SERVER__PORT
+            - name: NEXUS__SERVER__PORT
               value: {{ .Values.service.apiPort | quote }}
+            - name: NEXUS__SERVER__GATEWAY_PORT
+              value: {{ .Values.service.gatewayPort | quote }}
+            - name: NEXUS__SERVER__VOICE_PORT
+              value: {{ .Values.service.voicePort | quote }}
+            - name: NEXUS__SERVER__FEDERATION_PORT
+              value: {{ .Values.service.federationPort | quote }}
             - name: RUST_LOG
               value: {{ .Values.config.logLevel | quote }}
-            - name: AUTH__JWT_SECRET
+            - name: NEXUS__AUTH__JWT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: {{ include "nexus.secretName" . }}
                   key: jwt-secret
-            - name: DATABASE__PASSWORD
+            - name: DATABASE_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "nexus.secretName" . }}
                   key: postgres-password
-            - name: REDIS__PASSWORD
+            - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: {{ include "nexus.secretName" . }}
                   key: redis-password
-            - name: STORAGE__SECRET_KEY
+            - name: STORAGE_SECRET_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ include "nexus.secretName" . }}
                   key: minio-password
-            - name: SEARCH__KEY
+            - name: STORAGE_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "nexus.secretName" . }}
+                  key: minio-access-key
+            - name: SEARCH_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ include "nexus.secretName" . }}
                   key: meili-key
             {{- if .Values.postgresql.enabled }}
-            - name: DATABASE__URL
-              value: "postgres://{{ .Values.postgresql.auth.username }}:$(DATABASE__PASSWORD)@{{ include "nexus.fullname" . }}-postgresql:5432/{{ .Values.postgresql.auth.database }}"
+            - name: NEXUS__DATABASE__URL
+              value: "postgres://{{ .Values.postgresql.auth.username }}:$(DATABASE_PASSWORD)@{{ .Release.Name }}-postgresql:5432/{{ .Values.postgresql.auth.database }}"
             {{- end }}
             {{- if .Values.redis.enabled }}
-            - name: REDIS__URL
-              value: "redis://:$(REDIS__PASSWORD)@{{ include "nexus.fullname" . }}-redis-master:6379"
+            - name: NEXUS__REDIS__URL
+              value: "redis://:$(REDIS_PASSWORD)@{{ .Release.Name }}-redis-master:6379"
+            {{- end }}
+            {{- if .Values.minio.enabled }}
+            - name: NEXUS__STORAGE__ENDPOINT
+              value: "http://{{ .Release.Name }}-minio:9000"
+            - name: NEXUS__STORAGE__ACCESS_KEY
+              value: "$(STORAGE_ACCESS_KEY)"
+            - name: NEXUS__STORAGE__SECRET_KEY
+              value: "$(STORAGE_SECRET_KEY)"
+            - name: NEXUS__STORAGE__BUCKET
+              value: "nexus"
+            {{- end }}
+            - name: NEXUS__SEARCH__API_KEY
+              value: "$(SEARCH_API_KEY)"
+            {{- if .Values.meilisearch.enabled }}
+            - name: NEXUS__SEARCH__URL
+              value: "http://{{ .Release.Name }}-meilisearch:7700"
+            {{- else if .Values.meilisearch.url }}
+            - name: NEXUS__SEARCH__URL
+              value: {{ .Values.meilisearch.url | quote }}
             {{- end }}
           livenessProbe:
             httpGet:

@@ -26,7 +26,6 @@ ingress:
   enabled: true
   className: "nginx"
   annotations:
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-body-size: "100m"
@@ -39,6 +38,12 @@ ingress:
     - secretName: nexus-tls
       hosts:
         - nexus.example.com
+
+certManager:
+  enabled: true
+  # One of: ClusterIssuer, Issuer
+  issuerKind: ClusterIssuer
+  issuerName: letsencrypt-prod
 
 # ── Resources ─────────────────────────────────────────────────────────────────
 resources:
@@ -97,14 +102,21 @@ redis:
       size: 5Gi
 
 # ── MeiliSearch ───────────────────────────────────────────────────────────────
-meilisearch:
+minio:
   enabled: true
-  environment:
-    MEILI_ENV: production
-    MEILI_NO_ANALYTICS: "true"
+  auth:
+    rootUser: nexus
+    rootPassword: "CHANGE_ME"
+  defaultBuckets: nexus
   persistence:
     enabled: true
-    size: 10Gi
+    size: 20Gi
+
+meilisearch:
+  enabled: false
+  # By default, use an external MeiliSearch endpoint.
+  # Example: http://meilisearch.default.svc.cluster.local:7700
+  url: ""
 
 # ── Pod settings ──────────────────────────────────────────────────────────────
 podAnnotations: {}
