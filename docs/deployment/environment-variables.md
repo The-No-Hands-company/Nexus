@@ -86,3 +86,14 @@ follow the pattern `SECTION__KEY` (double underscore as separator).
 |---|---|---|
 | `RUST_LOG` | `nexus=info` | Log filter — see [tracing docs](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html) |
 | `RUST_BACKTRACE` | `0` | Set to `1` for full backtraces on panic |
+
+## Scylla Rollout Telemetry
+
+When `SCYLLA__ENABLED=true`, monitor these metrics during `canary`/`prefer` rollout:
+
+- `nexus_scylla_read_total{route,strategy,outcome}`:
+	track Scylla read hits, empties, errors, and SQL fallbacks by route.
+- `nexus_scylla_metadata_hydration_ratio`:
+	ratio of Scylla list-read rows that required SQL metadata hydration.
+- `nexus_scylla_batch_lookup_total{kind,outcome}`:
+	success/error rates for batch and single lookups used in hydration (`sql_meta`, `reaction_counts`, `user_reactions`, and `*_single` variants).

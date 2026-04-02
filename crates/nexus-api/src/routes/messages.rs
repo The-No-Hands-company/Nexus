@@ -1527,23 +1527,76 @@ async fn get_message_from_scylla(
     let (author_id, author_username, content) = detail_row.map_err(|e| e.to_string())?;
 
     let parsed_author_id = Uuid::parse_str(&author_id).map_err(|e| e.to_string())?;
-    let reaction_counts = reactions::get_reaction_counts(&state.db.pool, message_id)
-        .await
-        .unwrap_or_default();
-    let my_reactions = reactions::get_user_reaction_emojis_for_messages(
+    let reaction_counts = match reactions::get_reaction_counts(&state.db.pool, message_id).await {
+        Ok(rows) => {
+            metrics::counter!(
+                "nexus_scylla_batch_lookup_total",
+                "kind" => "reaction_counts_single",
+                "outcome" => "ok",
+            )
+            .increment(1);
+            rows
+        }
+        Err(error) => {
+            tracing::debug!(%channel_id, %message_id, %error, "Scylla get_message: reaction count lookup failed");
+            metrics::counter!(
+                "nexus_scylla_batch_lookup_total",
+                "kind" => "reaction_counts_single",
+                "outcome" => "error",
+            )
+            .increment(1);
+            Vec::new()
+        }
+    };
+
+    let my_reactions = match reactions::get_user_reaction_emojis_for_messages(
         &state.db.pool,
         user_id,
         &[message_id],
     )
-    .await
-    .ok()
-    .and_then(|map| map.get(&message_id).cloned())
-    .unwrap_or_default();
+    .await {
+        Ok(map) => {
+            metrics::counter!(
+                "nexus_scylla_batch_lookup_total",
+                "kind" => "user_reactions_single",
+                "outcome" => "ok",
+            )
+            .increment(1);
+            map.get(&message_id).cloned().unwrap_or_default()
+        }
+        Err(error) => {
+            tracing::debug!(%channel_id, %message_id, %user_id, %error, "Scylla get_message: user reaction lookup failed");
+            metrics::counter!(
+                "nexus_scylla_batch_lookup_total",
+                "kind" => "user_reactions_single",
+                "outcome" => "error",
+            )
+            .increment(1);
+            std::collections::HashSet::new()
+        }
+    };
 
-    let sql_meta = messages::find_by_id(&state.db.pool, message_id)
-        .await
-        .ok()
-        .flatten();
+    let sql_meta = match messages::find_by_id(&state.db.pool, message_id).await {
+        Ok(row) => {
+            metrics::counter!(
+                "nexus_scylla_batch_lookup_total",
+                "kind" => "sql_meta_single",
+                "outcome" => "ok",
+            )
+            .increment(1);
+            row
+        }
+        Err(error) => {
+            tracing::debug!(%channel_id, %message_id, %error, "Scylla get_message: SQL metadata lookup failed");
+            metrics::counter!(
+                "nexus_scylla_batch_lookup_total",
+                "kind" => "sql_meta_single",
+                "outcome" => "error",
+            )
+            .increment(1);
+            None
+        }
+    };
 
     let (message_type, edited, edited_at, pinned, embeds, attachments, mentions, mention_roles, mention_everyone, reference, thread_id) =
         if let Some(m) = sql_meta {
