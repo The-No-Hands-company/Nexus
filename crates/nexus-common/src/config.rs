@@ -61,6 +61,7 @@ pub fn init() -> Result<&'static AppConfig, config::ConfigError> {
         .set_default("scylla.nodes", "127.0.0.1:9042")?
         .set_default("scylla.keyspace", "nexus")?
         .set_default("scylla.enabled", false)?
+        .set_default("scylla.read_strategy", "canary")?
         // Search: default to empty so the server starts without MeiliSearch.
         // Set NEXUS__SEARCH__URL=http://localhost:7700 to enable it.
         .set_default("search.url", "")?
@@ -149,6 +150,13 @@ pub struct ScyllaConfig {
     pub nodes: String,
     /// Cassandra keyspace name
     pub keyspace: String,
+    /// Read routing strategy for API message reads.
+    ///
+    /// Supported values:
+    /// - `off`: SQL-only reads
+    /// - `canary`: try Scylla first, then fall back to SQL
+    /// - `prefer`: prefer Scylla result (including empty), SQL only on errors
+    pub read_strategy: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]

@@ -26,6 +26,7 @@ dotenvy = { workspace = true }
 anyhow = { workspace = true }
 clap = { workspace = true }
 sqlx = { workspace = true }
+scylla = { workspace = true }
 uuid = { workspace = true }
 rand = { workspace = true }
 hex = { workspace = true }

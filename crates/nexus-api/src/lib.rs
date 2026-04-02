@@ -87,6 +87,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::two_fa::public_router())    // unauthenticated MFA verify endpoint
         .merge(routes::sessions::router())         // session listing + revocation
         .merge(routes::email_verification::router()) // email verify + resend
+        .merge(routes::password_reset::router())   // forgot/reset password
         // v0.9.8 Moderation & Safety
         .merge(routes::moderation::router())       // audit log, kick, ban, timeout, reports, word filters
         // v0.12 Channel Type Completion

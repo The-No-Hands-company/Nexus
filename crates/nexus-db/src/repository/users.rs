@@ -101,6 +101,22 @@ pub async fn update_presence(
     Ok(())
 }
 
+/// Update the password hash for a user account.
+pub async fn update_password_hash(
+    pool: &sqlx::AnyPool,
+    id: Uuid,
+    password_hash: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE users SET password_hash = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2::uuid",
+    )
+    .bind(password_hash)
+    .bind(id.to_string())
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// Delete a user account (soft delete — sets DISABLED flag).
 pub async fn soft_delete_user(pool: &sqlx::AnyPool, id: Uuid) -> Result<(), sqlx::Error> {
     sqlx::query(
@@ -124,6 +140,33 @@ pub async fn count_users(pool: &sqlx::AnyPool) -> Result<i64, sqlx::Error> {
         .fetch_one(pool)
         .await?;
     Ok(row.0)
+}
+
+/// Execute due scheduled account deletions.
+///
+/// This applies a soft-delete policy:
+/// - set DISABLED flag
+/// - clear email
+/// - clear password_hash
+/// - clear scheduled_deletion_at
+///
+/// Returns number of affected users.
+pub async fn purge_scheduled_deletions(pool: &sqlx::AnyPool) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE users SET \
+            flags = flags | (1 << 5), \
+            email = NULL, \
+            password_hash = '', \
+            scheduled_deletion_at = NULL, \
+            updated_at = CURRENT_TIMESTAMP \
+         WHERE scheduled_deletion_at IS NOT NULL \
+           AND scheduled_deletion_at <= NOW() \
+           AND (flags & (1 << 5)) = 0",
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(result.rows_affected())
 }
 
 // ── Federation helpers ────────────────────────────────────────────────────────

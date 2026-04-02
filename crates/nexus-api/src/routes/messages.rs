@@ -16,8 +16,9 @@ use nexus_common::{
     validation::validate_request,
 };
 use chrono::Utc;
-use nexus_db::repository::{channels, members, messages, moderation, reactions, read_states, servers};
+use nexus_db::repository::{channels, members, messages, moderation, reactions, read_states, scylla_outbox, servers};
 use nexus_common::gateway_event::GatewayEvent;
+use scylla::SessionBuilder;
 use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -107,6 +108,23 @@ struct SearchParams {
 #[derive(Debug, Deserialize)]
 struct BulkDeleteBody {
     messages: Vec<Uuid>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScyllaReadStrategy {
+    Off,
+    Canary,
+    Prefer,
+}
+
+impl ScyllaReadStrategy {
+    fn as_label(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Canary => "canary",
+            Self::Prefer => "prefer",
+        }
+    }
 }
 
 // ============================================================================
@@ -271,6 +289,56 @@ async fn send_message(
     let mut response = message_row_to_json(&msg, &[]);
     response["author_username"] = serde_json::Value::String(auth.username.clone());
 
+    // Keep full-text index in sync after create.
+    let _ = state
+        .search
+        .index_message(nexus_db::search::MessageDocument {
+            id: msg.id.to_string(),
+            channel_id: msg.channel_id.to_string(),
+            server_id: channel.server_id.map(|x| x.to_string()),
+            author_id: msg.author_id.to_string(),
+            author_username: auth.username.clone(),
+            content: msg.content.clone(),
+            has_attachments: msg
+                .attachments
+                .as_array()
+                .map(|a| !a.is_empty())
+                .unwrap_or(false),
+            has_embeds: msg
+                .embeds
+                .as_array()
+                .map(|a| !a.is_empty())
+                .unwrap_or(false),
+            created_at: msg.created_at.timestamp(),
+        })
+        .await;
+
+    if state.db.scylla_enabled {
+        let _ = scylla_outbox::enqueue_upsert_message(
+            &state.db.pool,
+            &nexus_db::search::MessageDocument {
+                id: msg.id.to_string(),
+                channel_id: msg.channel_id.to_string(),
+                server_id: channel.server_id.map(|x| x.to_string()),
+                author_id: msg.author_id.to_string(),
+                author_username: auth.username.clone(),
+                content: msg.content.clone(),
+                has_attachments: msg
+                    .attachments
+                    .as_array()
+                    .map(|a| !a.is_empty())
+                    .unwrap_or(false),
+                has_embeds: msg
+                    .embeds
+                    .as_array()
+                    .map(|a| !a.is_empty())
+                    .unwrap_or(false),
+                created_at: msg.created_at.timestamp(),
+            },
+        )
+        .await;
+    }
+
     // Emit MESSAGE_CREATE event to gateway
     let _ = state.gateway_tx.send(GatewayEvent {
         event_type: "MESSAGE_CREATE".into(),
@@ -312,6 +380,59 @@ async fn get_messages(
     }
 
     let limit = params.limit.unwrap_or(50).min(100).max(1);
+    let strategy = scylla_read_strategy(&state);
+    if strategy != ScyllaReadStrategy::Off && params.before.is_none() && params.after.is_none() {
+        match list_messages_from_scylla(&state, channel_id, limit).await {
+            Ok(rows) => {
+                if !rows.is_empty() {
+                    metrics::counter!(
+                        "nexus_scylla_read_total",
+                        "route" => "get_messages",
+                        "strategy" => strategy.as_label(),
+                        "outcome" => "hit",
+                    )
+                    .increment(1);
+                    return Ok(Json(rows));
+                }
+                metrics::counter!(
+                    "nexus_scylla_read_total",
+                    "route" => "get_messages",
+                    "strategy" => strategy.as_label(),
+                    "outcome" => "empty",
+                )
+                .increment(1);
+                if strategy == ScyllaReadStrategy::Prefer {
+                    return Ok(Json(rows));
+                }
+            }
+            Err(err) => {
+                tracing::debug!(
+                    channel_id = %channel_id,
+                    error = %err,
+                    strategy = strategy.as_label(),
+                    "Scylla get_messages read failed; falling back to SQL"
+                );
+                metrics::counter!(
+                    "nexus_scylla_read_total",
+                    "route" => "get_messages",
+                    "strategy" => strategy.as_label(),
+                    "outcome" => "error",
+                )
+                .increment(1);
+            }
+        }
+    }
+
+    if strategy != ScyllaReadStrategy::Off {
+        metrics::counter!(
+            "nexus_scylla_read_total",
+            "route" => "get_messages",
+            "strategy" => strategy.as_label(),
+            "outcome" => "sql_fallback",
+        )
+        .increment(1);
+    }
+
     let rows = messages::list_channel_messages_with_author(
         &state.db.pool,
         channel_id,
@@ -336,10 +457,78 @@ async fn get_messages(
 
 /// GET /api/v1/channels/:channel_id/messages/:message_id — Get a single message.
 async fn get_message(
-    Extension(_auth): Extension<AuthContext>,
+    Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
     Path((channel_id, message_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<serde_json::Value>> {
+    // Verify channel exists and membership rules before exposing message details.
+    let channel = channels::find_by_id(&state.db.pool, channel_id)
+        .await?
+        .ok_or(NexusError::NotFound {
+            resource: "Channel".into(),
+        })?;
+    if let Some(server_id) = channel.server_id {
+        if !members::is_member(&state.db.pool, auth.user_id, server_id).await? {
+            return Err(NexusError::Forbidden);
+        }
+    }
+
+    let strategy = scylla_read_strategy(&state);
+    if strategy != ScyllaReadStrategy::Off {
+        match get_message_from_scylla(&state, channel_id, message_id).await {
+            Ok(Some(msg)) => {
+                metrics::counter!(
+                    "nexus_scylla_read_total",
+                    "route" => "get_message",
+                    "strategy" => strategy.as_label(),
+                    "outcome" => "hit",
+                )
+                .increment(1);
+                return Ok(Json(msg));
+            }
+            Ok(None) => {
+                metrics::counter!(
+                    "nexus_scylla_read_total",
+                    "route" => "get_message",
+                    "strategy" => strategy.as_label(),
+                    "outcome" => "empty",
+                )
+                .increment(1);
+                if strategy == ScyllaReadStrategy::Prefer {
+                    return Err(NexusError::NotFound {
+                        resource: "Message".into(),
+                    });
+                }
+            }
+            Err(err) => {
+                tracing::debug!(
+                    message_id = %message_id,
+                    channel_id = %channel_id,
+                    error = %err,
+                    strategy = strategy.as_label(),
+                    "Scylla get_message read failed; falling back to SQL"
+                );
+                metrics::counter!(
+                    "nexus_scylla_read_total",
+                    "route" => "get_message",
+                    "strategy" => strategy.as_label(),
+                    "outcome" => "error",
+                )
+                .increment(1);
+            }
+        }
+    }
+
+    if strategy != ScyllaReadStrategy::Off {
+        metrics::counter!(
+            "nexus_scylla_read_total",
+            "route" => "get_message",
+            "strategy" => strategy.as_label(),
+            "outcome" => "sql_fallback",
+        )
+        .increment(1);
+    }
+
     let msg = messages::find_by_id(&state.db.pool, message_id)
         .await?
         .ok_or(NexusError::NotFound {
@@ -415,6 +604,56 @@ async fn edit_message(
 
     let updated = messages::update_message(&state.db.pool, message_id, content).await?;
 
+    // Keep full-text index in sync after edit.
+    let _ = state
+        .search
+        .index_message(nexus_db::search::MessageDocument {
+            id: updated.id.to_string(),
+            channel_id: updated.channel_id.to_string(),
+            server_id: channel.server_id.map(|x| x.to_string()),
+            author_id: updated.author_id.to_string(),
+            author_username: auth.username.clone(),
+            content: updated.content.clone(),
+            has_attachments: updated
+                .attachments
+                .as_array()
+                .map(|a| !a.is_empty())
+                .unwrap_or(false),
+            has_embeds: updated
+                .embeds
+                .as_array()
+                .map(|a| !a.is_empty())
+                .unwrap_or(false),
+            created_at: updated.created_at.timestamp(),
+        })
+        .await;
+
+    if state.db.scylla_enabled {
+        let _ = scylla_outbox::enqueue_upsert_message(
+            &state.db.pool,
+            &nexus_db::search::MessageDocument {
+                id: updated.id.to_string(),
+                channel_id: updated.channel_id.to_string(),
+                server_id: channel.server_id.map(|x| x.to_string()),
+                author_id: updated.author_id.to_string(),
+                author_username: auth.username.clone(),
+                content: updated.content.clone(),
+                has_attachments: updated
+                    .attachments
+                    .as_array()
+                    .map(|a| !a.is_empty())
+                    .unwrap_or(false),
+                has_embeds: updated
+                    .embeds
+                    .as_array()
+                    .map(|a| !a.is_empty())
+                    .unwrap_or(false),
+                created_at: updated.created_at.timestamp(),
+            },
+        )
+        .await;
+    }
+
     let response = message_row_to_json(&updated, &[]);
 
     // Emit MESSAGE_UPDATE event
@@ -469,6 +708,12 @@ async fn delete_message(
     }
 
     messages::delete_message(&state.db.pool, message_id).await?;
+
+    // Keep full-text index in sync after delete.
+    let _ = state.search.delete_message(message_id).await;
+    if state.db.scylla_enabled {
+        let _ = scylla_outbox::enqueue_delete_message(&state.db.pool, message_id).await;
+    }
 
     // Write an audit log entry when a moderator deletes someone else's message
     if msg.author_id != auth.user_id {
@@ -538,6 +783,14 @@ async fn bulk_delete_messages(
     }
 
     let deleted = messages::bulk_delete_messages(&state.db.pool, &body.messages).await?;
+
+    // Keep full-text index in sync after bulk delete.
+    for mid in &body.messages {
+        let _ = state.search.delete_message(*mid).await;
+        if state.db.scylla_enabled {
+            let _ = scylla_outbox::enqueue_delete_message(&state.db.pool, *mid).await;
+        }
+    }
 
     // Emit MESSAGE_BULK_DELETE event
     let _ = state.gateway_tx.send(GatewayEvent {
@@ -1015,6 +1268,187 @@ async fn get_user_reactions(
         }
     }
     my_reactions
+}
+
+async fn list_messages_from_scylla(
+    state: &AppState,
+    channel_id: Uuid,
+    limit: i64,
+) -> Result<Vec<serde_json::Value>, String> {
+    let session = connect_scylla(state).await?;
+    let query = format!(
+        "SELECT message_id, author_id, author_username, content, created_at_epoch \
+         FROM {}.messages_by_channel WHERE channel_id = ? LIMIT ?",
+        state.db.scylla_keyspace
+    );
+
+    let rows = session
+        .query_unpaged(query, (channel_id.to_string(), limit as i32))
+        .await
+        .map_err(|e| e.to_string())?
+        .into_rows_result()
+        .map_err(|e| e.to_string())?;
+
+    let mut result = Vec::new();
+    for row in rows
+        .rows::<(String, String, String, String, i64)>()
+        .map_err(|e| e.to_string())?
+    {
+        let (message_id, author_id, author_username, content, created_at_epoch) =
+            row.map_err(|e| e.to_string())?;
+
+        let Ok(parsed_message_id) = Uuid::parse_str(&message_id) else {
+            continue;
+        };
+        let Ok(parsed_author_id) = Uuid::parse_str(&author_id) else {
+            continue;
+        };
+
+        let reaction_counts = reactions::get_reaction_counts(&state.db.pool, parsed_message_id)
+            .await
+            .unwrap_or_default();
+
+        let message_json = serde_json::json!({
+            "id": parsed_message_id,
+            "channel_id": channel_id,
+            "author_id": parsed_author_id,
+            "author_username": author_username,
+            "content": content,
+            "message_type": 0,
+            "edited": false,
+            "edited_at": serde_json::Value::Null,
+            "pinned": false,
+            "embeds": serde_json::json!([]),
+            "attachments": serde_json::json!([]),
+            "mentions": serde_json::json!([]),
+            "mention_roles": serde_json::json!([]),
+            "mention_everyone": false,
+            "reference": serde_json::Value::Null,
+            "thread_id": serde_json::Value::Null,
+            "reactions": reaction_counts.iter().map(|rc| {
+                serde_json::json!({ "emoji": rc.emoji, "count": rc.count, "me": false })
+            }).collect::<Vec<_>>(),
+            "created_at": chrono::DateTime::from_timestamp(created_at_epoch, 0).unwrap_or_else(Utc::now),
+        });
+
+        result.push(message_json);
+    }
+
+    Ok(result)
+}
+
+async fn get_message_from_scylla(
+    state: &AppState,
+    channel_id: Uuid,
+    message_id: Uuid,
+) -> Result<Option<serde_json::Value>, String> {
+    let session = connect_scylla(state).await?;
+
+    let by_id_query = format!(
+        "SELECT channel_id, created_at_epoch FROM {}.messages_by_id WHERE message_id = ?",
+        state.db.scylla_keyspace
+    );
+    let id_rows = session
+        .query_unpaged(by_id_query, (message_id.to_string(),))
+        .await
+        .map_err(|e| e.to_string())?
+        .into_rows_result()
+        .map_err(|e| e.to_string())?;
+
+    let mut row_iter = id_rows
+        .rows::<(String, i64)>()
+        .map_err(|e| e.to_string())?;
+    let Some(next_row) = row_iter.next() else {
+        return Ok(None);
+    };
+    let (row_channel_id, created_at_epoch) = next_row.map_err(|e| e.to_string())?;
+    if row_channel_id != channel_id.to_string() {
+        return Ok(None);
+    }
+
+    let by_channel_query = format!(
+        "SELECT author_id, author_username, content \
+         FROM {}.messages_by_channel WHERE channel_id = ? AND created_at_epoch = ? AND message_id = ?",
+        state.db.scylla_keyspace
+    );
+    let channel_rows = session
+        .query_unpaged(
+            by_channel_query,
+            (channel_id.to_string(), created_at_epoch, message_id.to_string()),
+        )
+        .await
+        .map_err(|e| e.to_string())?
+        .into_rows_result()
+        .map_err(|e| e.to_string())?;
+    let mut detail_iter = channel_rows
+        .rows::<(String, String, String)>()
+        .map_err(|e| e.to_string())?;
+    let Some(detail_row) = detail_iter.next() else {
+        return Ok(None);
+    };
+    let (author_id, author_username, content) = detail_row.map_err(|e| e.to_string())?;
+
+    let parsed_author_id = Uuid::parse_str(&author_id).map_err(|e| e.to_string())?;
+    let reaction_counts = reactions::get_reaction_counts(&state.db.pool, message_id)
+        .await
+        .unwrap_or_default();
+
+    Ok(Some(serde_json::json!({
+        "id": message_id,
+        "channel_id": channel_id,
+        "author_id": parsed_author_id,
+        "author_username": author_username,
+        "content": content,
+        "message_type": 0,
+        "edited": false,
+        "edited_at": serde_json::Value::Null,
+        "pinned": false,
+            "embeds": serde_json::json!([]),
+            "attachments": serde_json::json!([]),
+        "mentions": serde_json::json!([]),
+        "mention_roles": serde_json::json!([]),
+        "mention_everyone": false,
+        "reference": serde_json::Value::Null,
+        "thread_id": serde_json::Value::Null,
+        "reactions": reaction_counts.iter().map(|rc| {
+            serde_json::json!({ "emoji": rc.emoji, "count": rc.count, "me": false })
+        }).collect::<Vec<_>>(),
+        "created_at": chrono::DateTime::from_timestamp(created_at_epoch, 0).unwrap_or_else(Utc::now),
+    })))
+}
+
+async fn connect_scylla(state: &AppState) -> Result<scylla::Session, String> {
+    let nodes: Vec<String> = state
+        .db
+        .scylla_nodes
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string)
+        .collect();
+
+    if nodes.is_empty() {
+        return Err("no_scylla_nodes_configured".to_string());
+    }
+
+    let mut builder = SessionBuilder::new();
+    for node in &nodes {
+        builder = builder.known_node(node);
+    }
+
+    builder.build().await.map_err(|e| e.to_string())
+}
+
+fn scylla_read_strategy(state: &AppState) -> ScyllaReadStrategy {
+    if !state.db.scylla_enabled {
+        return ScyllaReadStrategy::Off;
+    }
+
+    match state.db.scylla_read_strategy.to_ascii_lowercase().as_str() {
+        "off" => ScyllaReadStrategy::Off,
+        "prefer" => ScyllaReadStrategy::Prefer,
+        _ => ScyllaReadStrategy::Canary,
+    }
 }
 
 // ============================================================

@@ -45,6 +45,12 @@ pub struct Database {
     pub backend: DbBackend,
     /// Whether Scylla integration has been explicitly enabled by config.
     pub scylla_enabled: bool,
+    /// Scylla contact points (comma-separated), used by read/write bridge workers.
+    pub scylla_nodes: String,
+    /// Scylla keyspace used for message tables.
+    pub scylla_keyspace: String,
+    /// Scylla read strategy (`off`, `canary`, `prefer`).
+    pub scylla_read_strategy: String,
 }
 
 impl Database {
@@ -106,6 +112,9 @@ impl Database {
             redis,
             backend,
             scylla_enabled: config.scylla.enabled,
+            scylla_nodes: config.scylla.nodes.clone(),
+            scylla_keyspace: config.scylla.keyspace.clone(),
+            scylla_read_strategy: config.scylla.read_strategy.clone(),
         })
     }
 

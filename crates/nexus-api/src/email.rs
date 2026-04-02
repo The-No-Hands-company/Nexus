@@ -120,4 +120,48 @@ impl EmailService {
 
         self.send(to_email, "Verify your Nexus email", &html).await
     }
+
+        /// Send a password reset email with a clickable one-time link.
+        pub async fn send_password_reset_email(
+                &self,
+                to_email: &str,
+                username: &str,
+                raw_token: &str,
+        ) -> Result<(), String> {
+                if !self.is_enabled() {
+                        tracing::debug!(
+                                to = to_email,
+                                token = raw_token,
+                                "Password reset email not sent (no API key configured — token logged for dev)"
+                        );
+                        return Ok(());
+                }
+
+                let base = self.config.base_url.trim_end_matches('/');
+                let reset_url = format!("{base}/reset-password?token={raw_token}");
+
+                let html = format!(
+                        r#"<!DOCTYPE html>
+<html>
+<head><meta charset=\"utf-8\"></head>
+<body style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 40px;\">
+    <div style=\"max-width: 480px; margin: 0 auto; background: #16213e; border-radius: 12px; padding: 32px; text-align: center;\">
+        <h1 style=\"margin: 0 0 8px; font-size: 22px; color: #fff;\">Reset your password</h1>
+        <p style=\"color: #a0a0b0; font-size: 14px; margin: 0 0 24px;\">
+            Hey <strong style=\"color:#fff;\">{username}</strong>, click below to reset your Nexus password.
+            This link expires in 2 hours and can only be used once.
+        </p>
+        <a href=\"{reset_url}\" style=\"display: inline-block; background: #7c3aed; color: white; text-decoration: none; padding: 12px 32px; border-radius: 8px; font-weight: 600; font-size: 15px;\">
+            Reset Password
+        </a>
+        <p style=\"color: #6b6b7b; font-size: 12px; margin: 24px 0 0;\">
+            If you didn't request this, you can safely ignore this email.
+        </p>
+    </div>
+</body>
+</html>"#
+                );
+
+                self.send(to_email, "Reset your Nexus password", &html).await
+        }
 }

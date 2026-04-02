@@ -124,6 +124,11 @@ pub enum VoiceSignal {
         speaking: bool,
     },
 
+    /// Server requests client-side WebRTC renegotiation after track changes.
+    Renegotiate {
+        reason: String,
+    },
+
     /// Error occurred.
     Error {
         code: u32,
@@ -304,6 +309,19 @@ async fn handle_voice_connection(socket: WebSocket, state: Arc<VoiceServerState>
                         let uid = user_id.unwrap();
                         let channel_id = current_channel.unwrap();
 
+                        // Renegotiation path: if this session already has a peer,
+                        // remove it first so we can recreate a fresh SFU peer with
+                        // the new SDP offer.
+                        if let Some(existing_peer) = peer_id {
+                            let room_tx = state.sfu.get_or_create_room(channel_id).await;
+                            let _ = room_tx
+                                .send(SfuCommand::RemovePeer {
+                                    peer_id: existing_peer,
+                                })
+                                .await;
+                            peer_id = None;
+                        }
+
                         // Create a peer in the SFU room
                         let new_peer_id = Uuid::new_v4();
                         let room_tx = state.sfu.get_or_create_room(channel_id).await;
@@ -379,6 +397,32 @@ async fn handle_voice_connection(socket: WebSocket, state: Arc<VoiceServerState>
                                 state.voice_state.update_self_state(uid, &update).await
                             {
                                 broadcast_voice_state(&state, &new_state);
+
+                                // Inform SFU about local media toggles so room stats and
+                                // forwarding policy can adapt.
+                                if let (Some(pid), Some(channel_id)) = (peer_id, current_channel)
+                                {
+                                    let room_tx = state.sfu.get_or_create_room(channel_id).await;
+                                    let _ = room_tx
+                                        .send(SfuCommand::UpdateMedia {
+                                            peer_id: pid,
+                                            audio_enabled: self_mute.map(|m| !m),
+                                            video_enabled: self_video,
+                                        })
+                                        .await;
+                                }
+
+                                // Video/stream toggles generally require renegotiation on
+                                // browser/mobile clients to refresh transceivers.
+                                if self_video.is_some() || self_stream.is_some() {
+                                    send_signal(
+                                        &mut sender,
+                                        &VoiceSignal::Renegotiate {
+                                            reason: "media_state_changed".into(),
+                                        },
+                                    )
+                                    .await;
+                                }
                             }
                         }
                     }

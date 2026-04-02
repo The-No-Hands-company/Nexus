@@ -20,6 +20,7 @@
 
 use axum::{extract::State, http::StatusCode, routing::get, Json, Router};
 use serde::Serialize;
+use sqlx::AnyPool;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -38,6 +39,19 @@ struct CheckResult {
     backend: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pending: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dispatched: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    failed: Option<i64>,
+}
+
+#[derive(Default)]
+struct ScyllaOutboxStats {
+    pending: i64,
+    dispatched: i64,
+    failed: i64,
 }
 
 #[derive(Serialize)]
@@ -73,9 +87,9 @@ async fn health_check(State(state): State<Arc<AppState>>) -> (StatusCode, Json<H
     let db_check = {
         let t = Instant::now();
         match tokio::time::timeout(timeout, nexus_db::postgres::health_check(&state.db.pool)).await {
-            Ok(true)  => CheckResult { status: "ok", latency_ms: Some(t.elapsed().as_millis() as u64), backend: None, error: None },
-            Ok(false) => CheckResult { status: "error", latency_ms: None, backend: None, error: Some("ping query failed".into()) },
-            Err(_)    => CheckResult { status: "error", latency_ms: None, backend: None, error: Some("timeout".into()) },
+            Ok(true)  => CheckResult { status: "ok", latency_ms: Some(t.elapsed().as_millis() as u64), backend: None, error: None, pending: None, dispatched: None, failed: None },
+            Ok(false) => CheckResult { status: "error", latency_ms: None, backend: None, error: Some("ping query failed".into()), pending: None, dispatched: None, failed: None },
+            Err(_)    => CheckResult { status: "error", latency_ms: None, backend: None, error: Some("timeout".into()), pending: None, dispatched: None, failed: None },
         }
     };
 
@@ -83,20 +97,44 @@ async fn health_check(State(state): State<Arc<AppState>>) -> (StatusCode, Json<H
     let redis_check = {
         let t = Instant::now();
         match tokio::time::timeout(timeout, state.db.health_redis()).await {
-            Ok(Some(true))  => CheckResult { status: "ok", latency_ms: Some(t.elapsed().as_millis() as u64), backend: None, error: None },
-            Ok(Some(false)) => CheckResult { status: "error", latency_ms: None, backend: None, error: Some("PING failed".into()) },
-            Ok(None)        => CheckResult { status: "not_configured", latency_ms: None, backend: None, error: None },
-            Err(_)          => CheckResult { status: "error", latency_ms: None, backend: None, error: Some("timeout".into()) },
+            Ok(Some(true))  => CheckResult { status: "ok", latency_ms: Some(t.elapsed().as_millis() as u64), backend: None, error: None, pending: None, dispatched: None, failed: None },
+            Ok(Some(false)) => CheckResult { status: "error", latency_ms: None, backend: None, error: Some("PING failed".into()), pending: None, dispatched: None, failed: None },
+            Ok(None)        => CheckResult { status: "not_configured", latency_ms: None, backend: None, error: None, pending: None, dispatched: None, failed: None },
+            Err(_)          => CheckResult { status: "error", latency_ms: None, backend: None, error: Some("timeout".into()), pending: None, dispatched: None, failed: None },
         }
     };
 
     // ── Search ────────────────────────────────────────────────────────────────
     let scylla_check = if state.db.scylla_enabled {
-        CheckResult {
-            status: "error",
-            latency_ms: None,
-            backend: Some("scylla"),
-            error: Some("enabled in config but not yet wired for message repositories".to_string()),
+        let t = Instant::now();
+        match tokio::time::timeout(timeout, scylla_outbox_stats(&state.db.pool)).await {
+            Ok(Ok(stats)) => CheckResult {
+                status: "ok",
+                latency_ms: Some(t.elapsed().as_millis() as u64),
+                backend: Some("scylla_outbox"),
+                error: None,
+                pending: Some(stats.pending),
+                dispatched: Some(stats.dispatched),
+                failed: Some(stats.failed),
+            },
+            Ok(Err(err)) => CheckResult {
+                status: "error",
+                latency_ms: None,
+                backend: Some("scylla_outbox"),
+                error: Some(err),
+                pending: None,
+                dispatched: None,
+                failed: None,
+            },
+            Err(_) => CheckResult {
+                status: "error",
+                latency_ms: None,
+                backend: Some("scylla_outbox"),
+                error: Some("timeout".into()),
+                pending: None,
+                dispatched: None,
+                failed: None,
+            },
         }
     } else {
         CheckResult {
@@ -104,6 +142,9 @@ async fn health_check(State(state): State<Arc<AppState>>) -> (StatusCode, Json<H
             latency_ms: None,
             backend: Some("scylla"),
             error: None,
+            pending: None,
+            dispatched: None,
+            failed: None,
         }
     };
 
@@ -123,6 +164,9 @@ async fn health_check(State(state): State<Arc<AppState>>) -> (StatusCode, Json<H
             latency_ms: if ok { Some(t.elapsed().as_millis() as u64) } else { None },
             backend: Some(backend_name),
             error: err,
+            pending: None,
+            dispatched: None,
+            failed: None,
         }
     };
 
@@ -143,4 +187,33 @@ async fn health_check(State(state): State<Arc<AppState>>) -> (StatusCode, Json<H
             checks: Checks { database: db_check, redis: redis_check, scylla: scylla_check, search: search_check },
         }),
     )
+}
+
+async fn scylla_outbox_stats(pool: &AnyPool) -> Result<ScyllaOutboxStats, String> {
+    let pending = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM scylla_message_outbox WHERE status = 'pending'",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| format!("pending_count_failed: {e}"))?;
+
+    let dispatched = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM scylla_message_outbox WHERE status = 'dispatched'",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| format!("dispatched_count_failed: {e}"))?;
+
+    let failed = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM scylla_message_outbox WHERE status = 'failed'",
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|e| format!("failed_count_failed: {e}"))?;
+
+    Ok(ScyllaOutboxStats {
+        pending,
+        dispatched,
+        failed,
+    })
 }

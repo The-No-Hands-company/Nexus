@@ -26,10 +26,11 @@ use axum::{
 use futures_util::{SinkExt, StreamExt};
 use nexus_common::gateway_event::GatewayEvent;
 use nexus_db::repository::{bots, channels, members, read_states, servers};
+use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use session::SessionManager;
-use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock};
+use std::{collections::HashMap, sync::Arc, time::Duration};
+use tokio::sync::{broadcast, Mutex, RwLock};
 
 /// Gateway state.
 #[derive(Clone)]
@@ -39,6 +40,7 @@ pub struct GatewayState {
     pub broadcast: broadcast::Sender<GatewayEvent>,
     pub db: nexus_db::Database,
     pub sessions: Arc<SessionManager>,
+    pub instance_id: String,
 }
 
 impl GatewayState {
@@ -48,6 +50,7 @@ impl GatewayState {
             broadcast,
             db,
             sessions: Arc::new(SessionManager::new()),
+            instance_id: uuid::Uuid::new_v4().to_string(),
         }
     }
 
@@ -61,8 +64,16 @@ impl GatewayState {
             broadcast,
             db,
             sessions: Arc::new(SessionManager::new()),
+            instance_id: uuid::Uuid::new_v4().to_string(),
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RedisGatewayEnvelope {
+    origin: String,
+    hash: String,
+    event: GatewayEvent,
 }
 
 /// Gateway opcodes — what the client and server send to each other.
@@ -136,9 +147,159 @@ pub enum GatewayMessage {
 
 /// Build the gateway WebSocket router.
 pub fn build_router(state: GatewayState) -> Router {
+    setup_redis_fanout_bridge(&state);
     Router::new()
         .route("/gateway", get(ws_handler))
         .with_state(Arc::new(state))
+}
+
+fn setup_redis_fanout_bridge(state: &GatewayState) {
+    let redis_url = std::env::var("NEXUS__REDIS__URL")
+        .ok()
+        .or_else(|| std::env::var("REDIS_URL").ok());
+    let Some(redis_url) = redis_url else {
+        tracing::info!("Gateway Redis fanout disabled (no REDIS_URL configured)");
+        return;
+    };
+
+    let channel = std::env::var("NEXUS_GATEWAY_REDIS_CHANNEL")
+        .unwrap_or_else(|_| "nexus:gateway:events".to_string());
+    let origin = state.instance_id.clone();
+    let broadcast = state.broadcast.clone();
+    let seen_hashes: Arc<Mutex<HashMap<String, std::time::Instant>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+
+    // Subscriber: Redis -> local broadcast
+    {
+        let redis_url = redis_url.clone();
+        let channel = channel.clone();
+        let origin = origin.clone();
+        let seen = seen_hashes.clone();
+        let broadcast = broadcast.clone();
+
+        tokio::spawn(async move {
+            let client = match redis::Client::open(redis_url.as_str()) {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!(error = %e, "gateway redis fanout: invalid redis url");
+                    return;
+                }
+            };
+
+            loop {
+                match client.get_async_pubsub().await {
+                    Ok(mut pubsub) => {
+                        if let Err(e) = pubsub.subscribe(&channel).await {
+                            tracing::warn!(error = %e, "gateway redis fanout: subscribe failed");
+                            tokio::time::sleep(Duration::from_secs(2)).await;
+                            continue;
+                        }
+
+                        tracing::info!(channel = %channel, "gateway redis fanout subscriber ready");
+                        let mut stream = pubsub.on_message();
+                        let mut recv_count: u64 = 0;
+
+                        while let Some(msg) = stream.next().await {
+                            let payload: Result<String, _> = msg.get_payload();
+                            let Ok(payload) = payload else { continue };
+                            let Ok(envelope) = serde_json::from_str::<RedisGatewayEnvelope>(&payload) else { continue };
+                            if envelope.origin == origin {
+                                continue;
+                            }
+
+                            {
+                                let mut guard = seen.lock().await;
+                                guard.insert(envelope.hash.clone(), std::time::Instant::now());
+                                let now = std::time::Instant::now();
+                                guard.retain(|_, ts| now.duration_since(*ts) < Duration::from_secs(120));
+                            }
+
+                            let _ = broadcast.send(envelope.event);
+                            recv_count += 1;
+                            if recv_count % 500 == 0 {
+                                tracing::debug!(count = recv_count, channel = %channel, "gateway redis fanout subscriber processed events");
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "gateway redis fanout: pubsub connect failed");
+                    }
+                }
+
+                tokio::time::sleep(Duration::from_secs(3)).await;
+            }
+        });
+    }
+
+    // Publisher: local broadcast -> Redis
+    {
+        let redis_url = redis_url.clone();
+        let channel = channel.clone();
+        let origin = origin.clone();
+        let seen = seen_hashes.clone();
+        let mut rx = broadcast.subscribe();
+
+        tokio::spawn(async move {
+            let client = match redis::Client::open(redis_url.as_str()) {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!(error = %e, "gateway redis fanout publisher: invalid redis url");
+                    return;
+                }
+            };
+
+            loop {
+                let evt = match rx.recv().await {
+                    Ok(e) => e,
+                    Err(_) => continue,
+                };
+
+                let hash = {
+                    let json = match serde_json::to_string(&evt) {
+                        Ok(v) => v,
+                        Err(_) => continue,
+                    };
+                    use sha2::{Digest, Sha256};
+                    let mut hasher = Sha256::new();
+                    hasher.update(json.as_bytes());
+                    format!("{:x}", hasher.finalize())
+                };
+
+                {
+                    let mut guard = seen.lock().await;
+                    if guard.remove(&hash).is_some() {
+                        continue;
+                    }
+                    let now = std::time::Instant::now();
+                    guard.retain(|_, ts| now.duration_since(*ts) < Duration::from_secs(120));
+                }
+
+                let envelope = RedisGatewayEnvelope {
+                    origin: origin.clone(),
+                    hash,
+                    event: evt,
+                };
+
+                let payload = match serde_json::to_string(&envelope) {
+                    Ok(v) => v,
+                    Err(_) => continue,
+                };
+
+                match client.get_multiplexed_async_connection().await {
+                    Ok(mut conn) => {
+                        let publish_res: redis::RedisResult<i64> = conn.publish(&channel, payload).await;
+                        if let Err(e) = publish_res {
+                            tracing::warn!(error = %e, "gateway redis fanout: publish failed");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "gateway redis fanout: publisher connect failed");
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                    }
+                }
+            }
+        });
+    }
 }
 
 /// WebSocket upgrade handler.

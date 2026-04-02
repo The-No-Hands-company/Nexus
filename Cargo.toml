@@ -40,6 +40,7 @@ clap = { version = "4", features = ["derive", "env"] }
 # Database
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "sqlite", "any", "uuid", "chrono", "json"] }
 redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+scylla = { version = "0.15", default-features = false, features = ["rustls-023"] }
 
 # Auth & Crypto
 argon2 = "0.5"

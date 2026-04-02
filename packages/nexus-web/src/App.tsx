@@ -97,74 +97,109 @@ export default function App() {
       return;
     }
 
-    setGatewayStatus("connecting");
-    const ws = new WebSocket(`${gatewayBase}/gateway`);
-
+    let stopped = false;
+    let ws: WebSocket | null = null;
     let heartbeatTimer: number | null = null;
+    let reconnectTimer: number | null = null;
+    let reconnectAttempt = 0;
 
-    ws.onopen = () => {
-      setGatewayStatus("online");
-    };
-
-    ws.onclose = () => {
-      setGatewayStatus("offline");
-      if (heartbeatTimer) window.clearInterval(heartbeatTimer);
-    };
-
-    ws.onerror = () => {
-      setGatewayStatus("offline");
-    };
-
-    ws.onmessage = (evt) => {
-      try {
-        const payload = JSON.parse(String(evt.data)) as GatewayEnvelope;
-
-        if (payload.op === "Hello") {
-          const heartbeatMs = Number((payload.d as { heartbeat_interval?: number } | undefined)?.heartbeat_interval ?? 45000);
-          ws.send(JSON.stringify({
-            op: "Identify",
-            d: { token: session.accessToken },
-          }));
-
-          if (heartbeatTimer) window.clearInterval(heartbeatTimer);
-          heartbeatTimer = window.setInterval(() => {
-            if (ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({ op: "Heartbeat", d: { timestamp: Date.now() } }));
-            }
-          }, Math.max(heartbeatMs, 5000));
-          return;
-        }
-
-        if (payload.op === "Dispatch") {
-          const dispatch = payload.d as { event?: string; data?: Message & { channel_id?: string } } | undefined;
-          if (!dispatch?.event || !dispatch.data) return;
-
-          if (dispatch.event === "MESSAGE_CREATE") {
-            const incoming = dispatch.data;
-            if (!incoming.channel_id || incoming.channel_id !== activeChannelRef.current) return;
-
-            setMessages((prev) => {
-              if (prev.some((m) => m.id === incoming.id)) return prev;
-              return [
-                {
-                  id: incoming.id,
-                  content: incoming.content,
-                  author_username: incoming.author_username,
-                  created_at: incoming.created_at,
-                },
-                ...prev,
-              ];
-            });
-          }
-        }
-      } catch {
-        // Ignore malformed gateway payloads.
+    const clearTimers = () => {
+      if (heartbeatTimer) {
+        window.clearInterval(heartbeatTimer);
+        heartbeatTimer = null;
+      }
+      if (reconnectTimer) {
+        window.clearTimeout(reconnectTimer);
+        reconnectTimer = null;
       }
     };
 
+    const scheduleReconnect = () => {
+      if (stopped) return;
+      reconnectAttempt += 1;
+      const backoffMs = Math.min(30_000, 1000 * 2 ** Math.min(reconnectAttempt, 5));
+      setGatewayStatus("connecting");
+      reconnectTimer = window.setTimeout(() => {
+        connect();
+      }, backoffMs);
+    };
+
+    const connect = () => {
+      if (stopped) return;
+      clearTimers();
+      setGatewayStatus("connecting");
+
+      ws = new WebSocket(`${gatewayBase}/gateway`);
+
+      ws.onopen = () => {
+        reconnectAttempt = 0;
+        setGatewayStatus("online");
+      };
+
+      ws.onclose = () => {
+        setGatewayStatus("offline");
+        clearTimers();
+        scheduleReconnect();
+      };
+
+      ws.onerror = () => {
+        setGatewayStatus("offline");
+      };
+
+      ws.onmessage = (evt) => {
+        try {
+          const payload = JSON.parse(String(evt.data)) as GatewayEnvelope;
+
+          if (payload.op === "Hello") {
+            const heartbeatMs = Number((payload.d as { heartbeat_interval?: number } | undefined)?.heartbeat_interval ?? 45000);
+            ws?.send(JSON.stringify({
+              op: "Identify",
+              d: { token: session.accessToken },
+            }));
+
+            if (heartbeatTimer) window.clearInterval(heartbeatTimer);
+            heartbeatTimer = window.setInterval(() => {
+              if (ws?.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ op: "Heartbeat", d: { timestamp: Date.now() } }));
+              }
+            }, Math.max(heartbeatMs, 5000));
+            return;
+          }
+
+          if (payload.op === "Dispatch") {
+            const dispatch = payload.d as { event?: string; data?: Message & { channel_id?: string } } | undefined;
+            if (!dispatch?.event || !dispatch.data) return;
+
+            if (dispatch.event === "MESSAGE_CREATE") {
+              const incoming = dispatch.data;
+              if (!incoming.channel_id || incoming.channel_id !== activeChannelRef.current) return;
+
+              setMessages((prev) => {
+                if (prev.some((m) => m.id === incoming.id)) return prev;
+                return [
+                  {
+                    id: incoming.id,
+                    content: incoming.content,
+                    author_username: incoming.author_username,
+                    created_at: incoming.created_at,
+                  },
+                  ...prev,
+                ];
+              });
+            }
+          }
+        } catch {
+          // Ignore malformed gateway payloads.
+        }
+      };
+    };
+
+    connect();
+
     return () => {
-      if (heartbeatTimer) window.clearInterval(heartbeatTimer);
-      ws.close();
+      stopped = true;
+      clearTimers();
+      ws?.close();
     };
   }, [session, apiBase]);
 

@@ -5,6 +5,7 @@ pub mod bots;
 pub mod channels;
 pub mod directory;
 pub mod email_verification;
+pub mod password_reset;
 pub mod files;
 pub mod dms;
 pub mod e2ee;

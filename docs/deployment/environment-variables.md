@@ -39,8 +39,10 @@ follow the pattern `SECTION__KEY` (double underscore as separator).
 
 | Variable | Default | Description |
 |---|---|---|
+| `SCYLLA__ENABLED` | `false` | Enables Scylla outbox + read path integration |
 | `SCYLLA__NODES` | `127.0.0.1:9042` | Comma-separated list of seed nodes |
 | `SCYLLA__KEYSPACE` | `nexus` | Cassandra keyspace name |
+| `SCYLLA__READ_STRATEGY` | `canary` | Read behavior: `off`, `canary`, or `prefer` |
 | `SCYLLA__USERNAME` | *(optional)* | ScyllaDB username |
 | `SCYLLA__PASSWORD` | *(optional)* | ScyllaDB password |
 

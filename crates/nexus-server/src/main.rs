@@ -32,6 +32,7 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 
 mod import_worker;
+mod scylla_sink;
 
 // ── CLI ───────────────────────────────────────────────────────────────────────
 
@@ -328,6 +329,114 @@ async fn run_server(
         import_worker::spawn_import_worker(db.pool.clone(), import_rx.resubscribe());
     }
 
+    // ── Scylla outbox worker (dual-write bridge) ───────────────────────────
+    // Drains message mutations queued for Scylla synchronization.
+    if db.scylla_enabled {
+        let scylla_cfg = config.scylla.clone();
+        let pool = db.pool.clone();
+        let mut scylla_rx = shutdown_tx.subscribe();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            let mut sink: Option<scylla_sink::ScyllaSink> = None;
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        if sink.is_none() {
+                            match scylla_sink::ScyllaSink::connect(&scylla_cfg).await {
+                                Ok(s) => {
+                                    tracing::info!(
+                                        nodes = %scylla_cfg.nodes,
+                                        keyspace = %scylla_cfg.keyspace,
+                                        subsystem = "scylla_outbox",
+                                        "connected Scylla sink"
+                                    );
+                                    sink = Some(s);
+                                }
+                                Err(e) => {
+                                    tracing::warn!(error = %e, subsystem = "scylla_outbox", "failed to connect Scylla sink");
+                                    continue;
+                                }
+                            }
+                        }
+
+                        let jobs = match nexus_db::repository::scylla_outbox::claim_pending_jobs(&pool, 100).await {
+                            Ok(j) => j,
+                            Err(e) => {
+                                tracing::warn!(error = %e, subsystem = "scylla_outbox", "failed to claim outbox jobs");
+                                continue;
+                            }
+                        };
+
+                        if !jobs.is_empty() {
+                            let reclaimed = jobs.iter().filter(|j| j.attempt_count > 1).count();
+                            tracing::debug!(
+                                count = jobs.len(),
+                                reclaimed,
+                                subsystem = "scylla_outbox",
+                                "claimed outbox jobs"
+                            );
+                        }
+
+                        for job in jobs {
+                            let process_result: Result<(), String> = match job.operation.as_str() {
+                                "upsert" => {
+                                    let Some(payload) = &job.payload else {
+                                        continue;
+                                    };
+                                    let doc = match serde_json::from_value::<nexus_db::search::MessageDocument>(payload.clone()) {
+                                        Ok(d) => d,
+                                        Err(e) => {
+                                            let err = format!("invalid upsert payload: {e}");
+                                            let _ = nexus_db::repository::scylla_outbox::mark_job_failed(&pool, job.id, &err).await;
+                                            continue;
+                                        }
+                                    };
+
+                                    match sink.as_ref().unwrap().upsert_message(&doc).await {
+                                        Ok(()) => Ok(()),
+                                        Err(e) => Err(e.to_string()),
+                                    }
+                                }
+                                "delete" => match sink.as_ref().unwrap().delete_message(job.message_id, job.payload.as_ref()).await {
+                                    Ok(()) => Ok(()),
+                                    Err(e) => Err(e.to_string()),
+                                },
+                                other => Err(format!("unknown outbox operation: {other}")),
+                            };
+
+                            match process_result {
+                                Ok(()) => {
+                                    if let Err(e) = nexus_db::repository::scylla_outbox::mark_job_completed(&pool, job.id).await {
+                                        tracing::warn!(error = %e, job_id = job.id, subsystem = "scylla_outbox", "failed to mark outbox job completed");
+                                    }
+                                }
+                                Err(err) => {
+                                    if let Err(e) = nexus_db::repository::scylla_outbox::mark_job_failed(&pool, job.id, &err).await {
+                                        tracing::warn!(error = %e, job_id = job.id, subsystem = "scylla_outbox", "failed to mark outbox job failed");
+                                    } else {
+                                        tracing::warn!(
+                                            job_id = job.id,
+                                            message_id = %job.message_id,
+                                            attempts = job.attempt_count,
+                                            error = %err,
+                                            subsystem = "scylla_outbox",
+                                            "outbox job processing failed"
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    _ = scylla_rx.recv() => {
+                        tracing::debug!(subsystem = "scylla_outbox", "outbox worker shutting down");
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
     // ── Moderation background sweep ───────────────────────────────────────────
     // Periodically lift expired bans and timeouts so users are not kept in a
     // timed-out state past the expiry they were given.  Runs every 5 minutes;
@@ -364,6 +473,42 @@ async fn run_server(
                     }
                     _ = sweep_rx.recv() => {
                         tracing::debug!(subsystem = "moderation", "sweep task shutting down");
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    // ── Account deletion purge worker ────────────────────────────────────────
+    // Applies due scheduled account deletions after the 30-day grace period.
+    {
+        let pool = db.pool.clone();
+        let mut deletion_rx = shutdown_tx.subscribe();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(
+                tokio::time::Duration::from_secs(60 * 60),
+            );
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        match nexus_db::repository::users::purge_scheduled_deletions(&pool).await {
+                            Ok(n) if n > 0 => tracing::info!(
+                                count = n,
+                                subsystem = "account_deletion",
+                                "purged due scheduled account deletions"
+                            ),
+                            Err(e) => tracing::warn!(
+                                error = %e,
+                                subsystem = "account_deletion",
+                                "failed to purge scheduled account deletions"
+                            ),
+                            _ => {}
+                        }
+                    }
+                    _ = deletion_rx.recv() => {
+                        tracing::debug!(subsystem = "account_deletion", "purge worker shutting down");
                         break;
                     }
                 }
