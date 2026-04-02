@@ -1310,23 +1310,65 @@ async fn list_messages_from_scylla(
             .unwrap_or_default();
         let my_reactions = get_user_reactions(state, parsed_message_id, user_id, &reaction_counts).await;
 
+        let sql_meta = messages::find_by_id(&state.db.pool, parsed_message_id)
+            .await
+            .ok()
+            .flatten();
+
+        let (message_type, edited, edited_at, pinned, embeds, attachments, mentions, mention_roles, mention_everyone, reference, thread_id) =
+            if let Some(m) = sql_meta {
+                (
+                    m.message_type,
+                    m.edited,
+                    m.edited_at,
+                    m.pinned,
+                    serde_json::to_value(m.embeds).unwrap_or_else(|_| serde_json::json!([])),
+                    serde_json::to_value(m.attachments).unwrap_or_else(|_| serde_json::json!([])),
+                    serde_json::to_value(m.mentions).unwrap_or_else(|_| serde_json::json!([])),
+                    serde_json::to_value(m.mention_roles).unwrap_or_else(|_| serde_json::json!([])),
+                    m.mention_everyone,
+                    match (m.reference_message_id, m.reference_channel_id) {
+                        (Some(mid), Some(cid)) => Some(serde_json::json!({
+                            "message_id": mid,
+                            "channel_id": cid,
+                        })),
+                        _ => None,
+                    },
+                    m.thread_id,
+                )
+            } else {
+                (
+                    0,
+                    false,
+                    None,
+                    false,
+                    serde_json::json!([]),
+                    serde_json::json!([]),
+                    serde_json::json!([]),
+                    serde_json::json!([]),
+                    false,
+                    None,
+                    None,
+                )
+            };
+
         let message_json = serde_json::json!({
             "id": parsed_message_id,
             "channel_id": channel_id,
             "author_id": parsed_author_id,
             "author_username": author_username,
             "content": content,
-            "message_type": 0,
-            "edited": false,
-            "edited_at": serde_json::Value::Null,
-            "pinned": false,
-            "embeds": serde_json::json!([]),
-            "attachments": serde_json::json!([]),
-            "mentions": serde_json::json!([]),
-            "mention_roles": serde_json::json!([]),
-            "mention_everyone": false,
-            "reference": serde_json::Value::Null,
-            "thread_id": serde_json::Value::Null,
+            "message_type": message_type,
+            "edited": edited,
+            "edited_at": edited_at,
+            "pinned": pinned,
+            "embeds": embeds,
+            "attachments": attachments,
+            "mentions": mentions,
+            "mention_roles": mention_roles,
+            "mention_everyone": mention_everyone,
+            "reference": reference,
+            "thread_id": thread_id,
             "reactions": reaction_counts.iter().map(|rc| {
                 serde_json::json!({
                     "emoji": rc.emoji,
@@ -1401,23 +1443,65 @@ async fn get_message_from_scylla(
         .unwrap_or_default();
     let my_reactions = get_user_reactions(state, message_id, user_id, &reaction_counts).await;
 
+    let sql_meta = messages::find_by_id(&state.db.pool, message_id)
+        .await
+        .ok()
+        .flatten();
+
+    let (message_type, edited, edited_at, pinned, embeds, attachments, mentions, mention_roles, mention_everyone, reference, thread_id) =
+        if let Some(m) = sql_meta {
+            (
+                m.message_type,
+                m.edited,
+                m.edited_at,
+                m.pinned,
+                serde_json::to_value(m.embeds).unwrap_or_else(|_| serde_json::json!([])),
+                serde_json::to_value(m.attachments).unwrap_or_else(|_| serde_json::json!([])),
+                serde_json::to_value(m.mentions).unwrap_or_else(|_| serde_json::json!([])),
+                serde_json::to_value(m.mention_roles).unwrap_or_else(|_| serde_json::json!([])),
+                m.mention_everyone,
+                match (m.reference_message_id, m.reference_channel_id) {
+                    (Some(mid), Some(cid)) => Some(serde_json::json!({
+                        "message_id": mid,
+                        "channel_id": cid,
+                    })),
+                    _ => None,
+                },
+                m.thread_id,
+            )
+        } else {
+            (
+                0,
+                false,
+                None,
+                false,
+                serde_json::json!([]),
+                serde_json::json!([]),
+                serde_json::json!([]),
+                serde_json::json!([]),
+                false,
+                None,
+                None,
+            )
+        };
+
     Ok(Some(serde_json::json!({
         "id": message_id,
         "channel_id": channel_id,
         "author_id": parsed_author_id,
         "author_username": author_username,
         "content": content,
-        "message_type": 0,
-        "edited": false,
-        "edited_at": serde_json::Value::Null,
-        "pinned": false,
-            "embeds": serde_json::json!([]),
-            "attachments": serde_json::json!([]),
-        "mentions": serde_json::json!([]),
-        "mention_roles": serde_json::json!([]),
-        "mention_everyone": false,
-        "reference": serde_json::Value::Null,
-        "thread_id": serde_json::Value::Null,
+        "message_type": message_type,
+        "edited": edited,
+        "edited_at": edited_at,
+        "pinned": pinned,
+        "embeds": embeds,
+        "attachments": attachments,
+        "mentions": mentions,
+        "mention_roles": mention_roles,
+        "mention_everyone": mention_everyone,
+        "reference": reference,
+        "thread_id": thread_id,
         "reactions": reaction_counts.iter().map(|rc| {
             serde_json::json!({
                 "emoji": rc.emoji,
