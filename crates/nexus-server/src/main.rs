@@ -251,6 +251,7 @@ async fn run_server(
         prometheus: prometheus_handle,
         email: email_service,
     };
+    let search_for_workers = api_state.search.clone();
     let api_router = build_router(api_state);
     let host: std::net::IpAddr = "0.0.0.0".parse()?;
     let api_addr = SocketAddr::new(host, port);
@@ -525,6 +526,8 @@ async fn run_server(
     {
         let pool = db.pool.clone();
         let gw_tx = gateway_tx.clone();
+        let search = search_for_workers.clone();
+        let scylla_enabled = db.scylla_enabled;
         let mut engage_rx = shutdown_tx.subscribe();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
@@ -562,7 +565,9 @@ async fn run_server(
                         struct SmsRow {
                             id: String,
                             channel_id: String,
+                            server_id: Option<String>,
                             author_id: String,
+                            author_username: String,
                             content: String,
                         }
                         let due: Vec<SmsRow> = sqlx::query_as(
@@ -570,7 +575,10 @@ async fn run_server(
                              SET status = 'sent', updated_at = NOW() \
                              WHERE status = 'pending' AND scheduled_at <= NOW() \
                              RETURNING id::text AS id, channel_id::text AS channel_id, \
-                                       author_id::text AS author_id, content"
+                                       (SELECT server_id::text FROM channels c WHERE c.id = scheduled_messages.channel_id) AS server_id, \
+                                       author_id::text AS author_id, \
+                                       COALESCE((SELECT username FROM users u WHERE u.id = scheduled_messages.author_id), '') AS author_username, \
+                                       content"
                         )
                         .fetch_all(&pool)
                         .await
@@ -599,16 +607,46 @@ async fn run_server(
                                 tracing::warn!(error = %e, sm_id = %sm.id, "Failed to dispatch scheduled message");
                                 continue;
                             }
+
+                            let doc = nexus_db::search::MessageDocument {
+                                id: msg_id.to_string(),
+                                channel_id: sm.channel_id.clone(),
+                                server_id: sm.server_id.clone(),
+                                author_id: sm.author_id.clone(),
+                                author_username: sm.author_username.clone(),
+                                content: sm.content.clone(),
+                                has_attachments: false,
+                                has_embeds: false,
+                                created_at: std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_secs() as i64)
+                                    .unwrap_or_default(),
+                            };
+
+                            if let Err(e) = search.index_message(doc.clone()).await {
+                                tracing::warn!(error = %e, sm_id = %sm.id, "failed to index dispatched scheduled message");
+                            }
+
+                            if scylla_enabled {
+                                let _ = nexus_db::repository::scylla_outbox::enqueue_upsert_message(&pool, &doc).await;
+                            }
+
+                            let server_uuid = sm.server_id.as_ref().and_then(|s| s.parse::<uuid::Uuid>().ok());
+                            let channel_uuid = sm.channel_id.parse::<uuid::Uuid>().ok();
+                            let author_uuid = sm.author_id.parse::<uuid::Uuid>().ok();
                             let _ = gw_tx.send(nexus_common::gateway_event::GatewayEvent {
                                 event_type: nexus_common::gateway_event::event_types::MESSAGE_CREATE.into(),
                                 data: serde_json::json!({
                                     "id": msg_id.to_string(),
                                     "channel_id": sm.channel_id,
                                     "author_id": sm.author_id,
+                                    "author_username": sm.author_username,
                                     "content": sm.content,
                                     "scheduled_message_id": sm.id,
                                 }),
-                                server_id: None, channel_id: None, user_id: None,
+                                server_id: server_uuid,
+                                channel_id: channel_uuid,
+                                user_id: author_uuid,
                             });
                         }
                         if !due.is_empty() {
