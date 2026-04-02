@@ -14,7 +14,8 @@ use axum::{
 };
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_common::models::ecosystem::{BulkInvitation, ImportJob};
-use nexus_db::repository::{bulk_invitations, import_jobs, members};
+use nexus_common::permissions::Permissions;
+use nexus_db::repository::{bulk_invitations, import_jobs, members, roles, servers};
 use nexus_common::models::Member;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -78,11 +79,7 @@ async fn create_import(
     Path(server_id): Path<Uuid>,
     Json(body): Json<CreateImportRequest>,
 ) -> NexusResult<Json<ImportJob>> {
-    // Verify membership (admin-level action)
-    let _member: Option<Member> = members::find_member(&state.db.pool, ctx.user_id, server_id)
-        .await
-        .map_err(|e| NexusError::Internal(e.into()))?;
-    if _member.is_none() { return Err(NexusError::Forbidden); }
+    require_server_admin_or_owner(&state, server_id, ctx.user_id).await?;
 
     let source_kind = normalize_source_kind(&body.source_kind).ok_or_else(|| NexusError::Validation {
         message: "source_kind must be one of: nexus_portability, portable_export, archive_bundle, custom_plugin".into(),
@@ -167,10 +164,7 @@ async fn list_imports(
     Extension(ctx): Extension<AuthContext>,
     Path(server_id): Path<Uuid>,
 ) -> NexusResult<Json<Vec<ImportJob>>> {
-    let _member: Option<Member> = members::find_member(&state.db.pool, ctx.user_id, server_id)
-        .await
-        .map_err(|e| NexusError::Internal(e.into()))?;
-    if _member.is_none() { return Err(NexusError::Forbidden); }
+    require_server_admin_or_owner(&state, server_id, ctx.user_id).await?;
 
     let jobs = import_jobs::list_import_jobs(&state.db.pool, server_id, 100)
         .await
@@ -184,10 +178,7 @@ async fn get_import(
     Extension(ctx): Extension<AuthContext>,
     Path((server_id, import_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<ImportJob>> {
-    let _member: Option<Member> = members::find_member(&state.db.pool, ctx.user_id, server_id)
-        .await
-        .map_err(|e| NexusError::Internal(e.into()))?;
-    if _member.is_none() { return Err(NexusError::Forbidden); }
+    require_server_admin_or_owner(&state, server_id, ctx.user_id).await?;
 
     let job = import_jobs::get_import_job(&state.db.pool, import_id)
         .await
@@ -195,6 +186,12 @@ async fn get_import(
         .ok_or_else(|| NexusError::NotFound {
             resource: "import_job".into(),
         })?;
+
+    if job.server_id != server_id {
+        return Err(NexusError::NotFound {
+            resource: "import_job".into(),
+        });
+    }
 
     Ok(Json(job))
 }
@@ -206,10 +203,7 @@ async fn create_bulk_invite(
     Path(server_id): Path<Uuid>,
     Json(body): Json<BulkInviteRequest>,
 ) -> NexusResult<Json<BulkInvitation>> {
-    let _member: Option<Member> = members::find_member(&state.db.pool, ctx.user_id, server_id)
-        .await
-        .map_err(|e| NexusError::Internal(e.into()))?;
-    if _member.is_none() { return Err(NexusError::Forbidden); }
+    require_server_admin_or_owner(&state, server_id, ctx.user_id).await?;
 
     if body.emails.is_empty() || body.emails.len() > 500 {
         return Err(NexusError::Validation {
@@ -245,4 +239,50 @@ async fn create_bulk_invite(
     .map_err(|e| NexusError::Internal(e.into()))?;
 
     Ok(Json(inv))
+}
+
+async fn require_server_admin_or_owner(
+    state: &AppState,
+    server_id: Uuid,
+    user_id: Uuid,
+) -> NexusResult<()> {
+    let server = servers::find_by_id(&state.db.pool, server_id)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?
+        .ok_or_else(|| NexusError::NotFound {
+            resource: "server".into(),
+        })?;
+
+    if server.owner_id == user_id {
+        return Ok(());
+    }
+
+    let member: Option<Member> = members::find_member(&state.db.pool, user_id, server_id)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    let Some(member) = member else {
+        return Err(NexusError::Forbidden);
+    };
+
+    let all_roles = roles::list_server_roles(&state.db.pool, server_id)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+
+    let base = all_roles
+        .iter()
+        .find(|r| r.is_default)
+        .map(|r| Permissions::from_bits_truncate(r.permissions))
+        .unwrap_or_else(Permissions::empty);
+
+    let bits = all_roles
+        .iter()
+        .filter(|r| !r.is_default && member.roles.contains(&r.id))
+        .map(|r| Permissions::from_bits_truncate(r.permissions))
+        .fold(base, |acc, p| acc | p);
+
+    if bits.contains(Permissions::MANAGE_SERVER) || bits.contains(Permissions::ADMINISTRATOR) {
+        Ok(())
+    } else {
+        Err(NexusError::Forbidden)
+    }
 }
