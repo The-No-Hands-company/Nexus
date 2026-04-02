@@ -12,7 +12,7 @@ use axum::{
 };
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_common::snowflake;
-use nexus_db::repository::voice_captions;
+use nexus_db::repository::{channels, members, voice_captions};
 use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -48,7 +48,12 @@ async fn submit_caption(
     Path(channel_id): Path<Uuid>,
     Json(body): Json<SubmitCaptionRequest>,
 ) -> NexusResult<Json<nexus_common::models::accessibility::VoiceCaption>> {
+    metrics::counter!("nexus_voice_captions_requests_total", "route" => "submit").increment(1);
+
+    ensure_channel_access(&state, ctx.user_id, channel_id).await?;
+
     if body.text.is_empty() || body.text.len() > 5000 {
+        metrics::counter!("nexus_voice_captions_requests_total", "route" => "submit", "outcome" => "invalid_text").increment(1);
         return Err(NexusError::Validation {
             message: "Caption text must be 1-5000 characters".into(),
         });
@@ -69,6 +74,8 @@ async fn submit_caption(
     .await
     .map_err(|e| NexusError::Internal(e.into()))?;
 
+    metrics::counter!("nexus_voice_captions_requests_total", "route" => "submit", "outcome" => "ok").increment(1);
+
     Ok(Json(caption))
 }
 
@@ -78,7 +85,10 @@ async fn finalise_caption(
     Path(id): Path<Uuid>,
     Json(body): Json<FinaliseCaptionRequest>,
 ) -> NexusResult<Json<nexus_common::models::accessibility::VoiceCaption>> {
+    metrics::counter!("nexus_voice_captions_requests_total", "route" => "finalise").increment(1);
+
     if body.text.is_empty() || body.text.len() > 5000 {
+        metrics::counter!("nexus_voice_captions_requests_total", "route" => "finalise", "outcome" => "invalid_text").increment(1);
         return Err(NexusError::Validation {
             message: "Caption text must be 1-5000 characters".into(),
         });
@@ -100,24 +110,71 @@ async fn finalise_caption(
             speaker_id = %caption.speaker_id,
             "Denied caption finalization: user is not the caption author"
         );
+        metrics::counter!("nexus_voice_captions_requests_total", "route" => "finalise", "outcome" => "forbidden_not_author").increment(1);
         return Err(NexusError::Forbidden);
     }
 
-    voice_captions::finalise_caption(&state.db.pool, id, &body.text)
+    let finalised = voice_captions::finalise_caption(&state.db.pool, id, &body.text)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?
-        .map(Json)
         .ok_or(NexusError::NotFound {
             resource: format!("caption {id}"),
-        })
+        })?;
+
+    metrics::counter!("nexus_voice_captions_requests_total", "route" => "finalise", "outcome" => "ok").increment(1);
+
+    Ok(Json(finalised))
 }
 
 async fn list_captions(
     State(state): State<Arc<AppState>>,
+    Extension(ctx): Extension<AuthContext>,
     Path(channel_id): Path<Uuid>,
 ) -> NexusResult<Json<Vec<nexus_common::models::accessibility::VoiceCaption>>> {
+    metrics::counter!("nexus_voice_captions_requests_total", "route" => "list").increment(1);
+
+    ensure_channel_access(&state, ctx.user_id, channel_id).await?;
+
     let captions = voice_captions::list_channel_captions(&state.db.pool, channel_id, 100)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
+
+    metrics::counter!("nexus_voice_captions_requests_total", "route" => "list", "outcome" => "ok").increment(1);
     Ok(Json(captions))
+}
+
+async fn ensure_channel_access(
+    state: &AppState,
+    user_id: Uuid,
+    channel_id: Uuid,
+) -> NexusResult<()> {
+    let channel = channels::find_by_id(&state.db.pool, channel_id)
+        .await
+        .map_err(NexusError::Database)?
+        .ok_or(NexusError::NotFound {
+            resource: format!("channel {channel_id}"),
+        })?;
+
+    if let Some(server_id) = channel.server_id {
+        let is_member = members::is_member(&state.db.pool, user_id, server_id)
+            .await
+            .map_err(NexusError::Database)?;
+        if !is_member {
+            return Err(NexusError::Forbidden);
+        }
+    } else {
+        let is_dm_participant: (bool,) = sqlx::query_as(
+            "SELECT EXISTS(SELECT 1 FROM dm_participants WHERE channel_id = $1::uuid AND user_id = $2::uuid)",
+        )
+        .bind(channel_id.to_string())
+        .bind(user_id.to_string())
+        .fetch_one(&state.db.pool)
+        .await
+        .map_err(NexusError::Database)?;
+        if !is_dm_participant.0 {
+            return Err(NexusError::Forbidden);
+        }
+    }
+
+    Ok(())
 }
