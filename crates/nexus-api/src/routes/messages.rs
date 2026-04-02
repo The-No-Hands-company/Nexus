@@ -442,13 +442,28 @@ async fn get_messages(
     )
     .await?;
 
-    // Fetch reactions for all messages in batch
+    let message_ids: Vec<Uuid> = rows.iter().map(|row| row.id).collect();
+    let reaction_counts_map = reactions::get_reaction_counts_for_messages(&state.db.pool, &message_ids)
+        .await
+        .unwrap_or_default();
+    let my_reactions_map = reactions::get_user_reaction_emojis_for_messages(
+        &state.db.pool,
+        auth.user_id,
+        &message_ids,
+    )
+    .await
+    .unwrap_or_default();
+
     let mut result = Vec::with_capacity(rows.len());
     for row in &rows {
-        let reaction_counts = reactions::get_reaction_counts(&state.db.pool, row.id)
-            .await
+        let reaction_counts = reaction_counts_map
+            .get(&row.id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let my_reactions = my_reactions_map
+            .get(&row.id)
+            .map(|set| set.iter().cloned().collect::<Vec<_>>())
             .unwrap_or_default();
-        let my_reactions = get_user_reactions(&state, row.id, auth.user_id, &reaction_counts).await;
         result.push(message_with_author_to_json(row, &reaction_counts, &my_reactions));
     }
 
@@ -1249,25 +1264,6 @@ async fn check_spam(
         Ok(count) => count > max_messages as i64,
         Err(_) => false, // Don't block messages on Redis failure
     }
-}
-
-/// Get which emojis the current user has reacted with on a message.
-async fn get_user_reactions(
-    state: &AppState,
-    message_id: Uuid,
-    user_id: Uuid,
-    reaction_counts: &[reactions::ReactionCount],
-) -> Vec<String> {
-    let mut my_reactions = Vec::new();
-    for rc in reaction_counts {
-        if reactions::has_user_reacted(&state.db.pool, message_id, user_id, &rc.emoji)
-            .await
-            .unwrap_or(false)
-        {
-            my_reactions.push(rc.emoji.clone());
-        }
-    }
-    my_reactions
 }
 
 async fn list_messages_from_scylla(
