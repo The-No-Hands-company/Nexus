@@ -11,6 +11,7 @@
 //!   "checks": {
 //!     "database": { "status": "ok", "latency_ms": 2 },
 //!     "redis":    { "status": "not_configured" },
+//!     "scylla":   { "status": "ok", "backend": "scylla+outbox", "pending": 0 },
 //!     "search":   { "status": "ok", "backend": "tantivy", "latency_ms": 0 }
 //!   }
 //! }
@@ -19,6 +20,7 @@
 //! The top-level `status` is `"degraded"` if any individual check reports `"error"`.
 
 use axum::{extract::State, http::StatusCode, routing::get, Json, Router};
+use scylla::SessionBuilder;
 use serde::Serialize;
 use sqlx::AnyPool;
 use std::sync::Arc;
@@ -104,14 +106,14 @@ async fn health_check(State(state): State<Arc<AppState>>) -> (StatusCode, Json<H
         }
     };
 
-    // ── Search ────────────────────────────────────────────────────────────────
+    // ── Scylla ────────────────────────────────────────────────────────────────
     let scylla_check = if state.db.scylla_enabled {
         let t = Instant::now();
-        match tokio::time::timeout(timeout, scylla_outbox_stats(&state.db.pool)).await {
+        match tokio::time::timeout(timeout, scylla_health(&state)).await {
             Ok(Ok(stats)) => CheckResult {
                 status: "ok",
                 latency_ms: Some(t.elapsed().as_millis() as u64),
-                backend: Some("scylla_outbox"),
+                backend: Some("scylla+outbox"),
                 error: None,
                 pending: Some(stats.pending),
                 dispatched: Some(stats.dispatched),
@@ -120,7 +122,7 @@ async fn health_check(State(state): State<Arc<AppState>>) -> (StatusCode, Json<H
             Ok(Err(err)) => CheckResult {
                 status: "error",
                 latency_ms: None,
-                backend: Some("scylla_outbox"),
+                backend: Some("scylla+outbox"),
                 error: Some(err),
                 pending: None,
                 dispatched: None,
@@ -129,7 +131,7 @@ async fn health_check(State(state): State<Arc<AppState>>) -> (StatusCode, Json<H
             Err(_) => CheckResult {
                 status: "error",
                 latency_ms: None,
-                backend: Some("scylla_outbox"),
+                backend: Some("scylla+outbox"),
                 error: Some("timeout".into()),
                 pending: None,
                 dispatched: None,
@@ -216,4 +218,36 @@ async fn scylla_outbox_stats(pool: &AnyPool) -> Result<ScyllaOutboxStats, String
         dispatched,
         failed,
     })
+}
+
+async fn scylla_health(state: &AppState) -> Result<ScyllaOutboxStats, String> {
+    let nodes: Vec<String> = state
+        .db
+        .scylla_nodes
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string)
+        .collect();
+
+    if nodes.is_empty() {
+        return Err("no_scylla_nodes_configured".into());
+    }
+
+    let mut builder = SessionBuilder::new();
+    for node in &nodes {
+        builder = builder.known_node(node);
+    }
+
+    let session = builder
+        .build()
+        .await
+        .map_err(|e| format!("connect_failed: {e}"))?;
+
+    session
+        .query_unpaged("SELECT release_version FROM system.local", ())
+        .await
+        .map_err(|e| format!("probe_failed: {e}"))?;
+
+    scylla_outbox_stats(&state.db.pool).await
 }
