@@ -126,6 +126,7 @@ pub fn get_string_vec(row: &AnyRow, col: &str) -> Result<Vec<String>, sqlx::Erro
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{Datelike, Timelike};
 
     // ── parse_datetime ────────────────────────────────────────────────────────
     // parse_datetime is private, but we can reach it through get_datetime's

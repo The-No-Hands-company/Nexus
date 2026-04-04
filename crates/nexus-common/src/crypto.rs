@@ -197,7 +197,7 @@ mod tests {
 
     #[test]
     fn validate_x25519_key_correct_length_succeeds() {
-        let good = to_base64(&[0xcd u8; 32]);
+        let good = to_base64(&[0xcdu8; 32]);
         assert!(validate_x25519_key(&good, "spk").is_ok());
     }
 
