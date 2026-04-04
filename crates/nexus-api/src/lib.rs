@@ -48,8 +48,11 @@ pub struct AppState {
     pub prometheus: PrometheusHandle,
     /// Email delivery service (Resend). Disabled when `NEXUS__EMAIL__API_KEY` is unset.
     pub email: EmailService,
-    /// VAPID public key (base64url) for Web Push subscriptions.
-    /// `None` when `NEXUS__PUSH__VAPID_PRIVATE_KEY` is not set.
+    /// Web Push sender (VAPID). `None` when `NEXUS__PUSH__VAPID_PRIVATE_KEY` is not set.
+    /// Stored here so the P-256 key material is loaded once at startup, not per-request.
+    pub push: Option<crate::push_sender::PushSender>,
+    /// VAPID public key (base64url) — derived from `push` and served at
+    /// `GET /push/vapid-public-key` so browser clients can subscribe.
     pub vapid_public_key: Option<String>,
 }
 

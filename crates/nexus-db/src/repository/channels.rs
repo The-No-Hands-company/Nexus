@@ -142,3 +142,24 @@ pub async fn find_or_create_dm(
 
     Ok(channel)
 }
+
+/// Return all participant user IDs for a DM or group DM channel.
+///
+/// Used by the push notification path to fan out a notification to every
+/// participant when a new DM message arrives (not just @mentioned users).
+pub async fn list_dm_participants(
+    pool: &sqlx::AnyPool,
+    channel_id: uuid::Uuid,
+) -> Result<Vec<uuid::Uuid>, sqlx::Error> {
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT user_id::text FROM dm_participants WHERE channel_id = $1::uuid",
+    )
+    .bind(channel_id.to_string())
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .filter_map(|(s,)| s.parse::<uuid::Uuid>().ok())
+        .collect())
+}

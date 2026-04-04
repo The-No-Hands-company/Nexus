@@ -368,47 +368,134 @@ async fn send_message(
 
     // ── Web Push: notify mentioned users ─────────────────────────────────────
     // Fire-and-forget — push delivery must never block message delivery.
-    // We only notify users who are NOT the message author (no self-pings).
-    if !mentions.is_empty() {
-        if let Some(ref vapid_key) = state.vapid_public_key {
+    // Uses the PushSender already initialised at startup (key material loaded once).
+    if let Some(ref sender) = state.push {
+        let sender = sender.clone();
+        let pool = state.db.pool.clone();
+        let author_name = auth.username.clone();
+        let author_id = auth.user_id;
+        // Truncate at 120 chars — enough for a notification preview without
+        // leaking too much E2EE-adjacent content in push payloads.
+        let content_preview: String = body.content.chars().take(120).collect();
+        let channel_id_copy = channel_id;
+        let mentions_copy = mentions.clone();
+        let channel_type = channel.channel_type.clone();
+
+        tokio::spawn(async move {
+            // ── Case 1: @mention in a server channel ─────────────────────
+            for &mentioned_uid in &mentions_copy {
+                if mentioned_uid == author_id {
+                    continue; // never self-ping
+                }
+                let payload = nexus_api::push_sender::PushPayload {
+                    title: format!("{} mentioned you", author_name),
+                    body: content_preview.clone(),
+                    icon: Some("/icon-192.png".into()),
+                    url: Some(format!("/channel/{channel_id_copy}")),
+                    channel_id: Some(channel_id_copy),
+                };
+                if let Err(e) = sender.notify_user(&pool, mentioned_uid, &payload).await {
+                    tracing::warn!(
+                        user_id = %mentioned_uid,
+                        error = %e,
+                        "Push notification failed for @mention"
+                    );
+                }
+            }
+
+            // ── Case 2: DM / Group DM — notify all other participants ────
+            // DMs always warrant a push regardless of @mention syntax.
+            let is_dm = matches!(
+                channel_type,
+                nexus_common::models::channel::ChannelType::Dm
+                    | nexus_common::models::channel::ChannelType::GroupDm
+            );
+            if is_dm {
+                // Fetch other participants
+                let others: Vec<(String,)> = sqlx::query_as(
+                    "SELECT user_id::text FROM dm_participants \
+                     WHERE channel_id = $1::uuid AND user_id != $2::uuid",
+                )
+                .bind(channel_id_copy.to_string())
+                .bind(author_id.to_string())
+                .fetch_all(&pool)
+                .await
+                .unwrap_or_default();
+
+                for (uid_str,) in others {
+                    let Ok(recipient_uid) = uid_str.parse::<Uuid>() else { continue };
+                    // Skip if already notified via @mention above
+                    if mentions_copy.contains(&recipient_uid) { continue; }
+                    let payload = nexus_api::push_sender::PushPayload {
+                        title: format!("Message from {}", author_name),
+                        body: content_preview.clone(),
+                        icon: Some("/icon-192.png".into()),
+                        url: Some(format!("/channel/{channel_id_copy}")),
+                        channel_id: Some(channel_id_copy),
+                    };
+                    if let Err(e) = sender.notify_user(&pool, recipient_uid, &payload).await {
+                        tracing::warn!(
+                            user_id = %recipient_uid,
+                            error = %e,
+                            "Push notification failed for DM"
+                        );
+                    }
+                }
+            }
+        });
+    }
+
+    // ── Web Push: notify DM participants ──────────────────────────────────────
+    // When a message arrives in a DM or group DM channel (no server_id),
+    // push every other participant so they see it even when the app is closed.
+    // Mentioned-user pushes above cover @mentions in server channels;
+    // this block covers the direct-message case where there are no @mentions.
+    if channel.server_id.is_none() {
+        if let Some(ref sender) = state.push {
+            let sender = sender.clone();
             let pool = state.db.pool.clone();
-            let vapid_key = vapid_key.clone();
             let author_name = auth.username.clone();
             let content_preview: String = body.content.chars().take(120).collect();
             let channel_id_copy = channel_id;
             let author_id = auth.user_id;
-            let mentions_copy = mentions.clone();
 
             tokio::spawn(async move {
-                // Load the VAPID private key for the sender
-                let priv_key_env =
-                    std::env::var("NEXUS__PUSH__VAPID_PRIVATE_KEY").unwrap_or_default();
-                if priv_key_env.is_empty() {
-                    return;
-                }
-                let subject = format!("mailto:admin@nexus");
-                let sender = match nexus_api::push_sender::PushSender::from_private_key(
-                    &priv_key_env,
-                    &subject,
-                ) {
-                    Ok(s) => s,
-                    Err(_) => return,
+                let participants = match nexus_db::repository::channels::list_dm_participants(
+                    &pool,
+                    channel_id_copy,
+                )
+                .await
+                {
+                    Ok(p) => p,
+                    Err(e) => {
+                        tracing::warn!(
+                            channel_id = %channel_id_copy,
+                            error = %e,
+                            "Failed to load DM participants for push notification"
+                        );
+                        return;
+                    }
                 };
 
                 let payload = nexus_api::push_sender::PushPayload {
-                    title: format!("{author_name} mentioned you"),
+                    title: author_name,
                     body: content_preview,
                     icon: Some("/icon-192.png".into()),
                     url: Some(format!("/channel/{channel_id_copy}")),
                     channel_id: Some(channel_id_copy),
                 };
 
-                for &mentioned_uid in &mentions_copy {
-                    // Don't ping the author themselves
-                    if mentioned_uid == author_id {
-                        continue;
+                for participant_uid in participants {
+                    if participant_uid == author_id {
+                        continue; // never self-ping
                     }
-                    let _ = sender.notify_user(&pool, mentioned_uid, &payload).await;
+                    if let Err(e) = sender.notify_user(&pool, participant_uid, &payload).await {
+                        tracing::warn!(
+                            user_id = %participant_uid,
+                            error = %e,
+                            "Push notification failed for DM"
+                        );
+                    }
                 }
             });
         }

@@ -264,9 +264,10 @@ async fn run_server(
 
     // ── Web Push (VAPID) ──────────────────────────────────────────────────────
     // Load the VAPID private key from NEXUS__PUSH__VAPID_PRIVATE_KEY.
-    // If not set, push notifications are disabled but the server starts fine.
-    // To generate a key: cargo run --bin nexus -- gen-vapid-key
-    let vapid_public_key = match std::env::var("NEXUS__PUSH__VAPID_PRIVATE_KEY")
+    // The PushSender is stored in AppState so key material is parsed once at
+    // startup and reused across all requests — never re-parsed per message.
+    // Generate a key with: cargo run --bin nexus -- gen-vapid-key
+    let (push_sender, vapid_public_key) = match std::env::var("NEXUS__PUSH__VAPID_PRIVATE_KEY")
         .ok()
         .filter(|s| !s.is_empty())
     {
@@ -279,11 +280,12 @@ async fn run_server(
                         pub_key_prefix = %sender.public_key_b64.chars().take(12).collect::<String>(),
                         "Web Push (VAPID) enabled"
                     );
-                    Some(sender.public_key_b64.clone())
+                    let pub_key = sender.public_key_b64.clone();
+                    (Some(sender), Some(pub_key))
                 }
                 Err(e) => {
                     tracing::warn!(subsystem = "push", error = %e, "Invalid VAPID key — push disabled");
-                    None
+                    (None, None)
                 }
             }
         }
@@ -293,7 +295,7 @@ async fn run_server(
                 "Web Push disabled (NEXUS__PUSH__VAPID_PRIVATE_KEY not set). \
                  Generate with: cargo run --bin nexus -- gen-vapid-key"
             );
-            None
+            (None, None)
         }
     };
 
@@ -309,6 +311,7 @@ async fn run_server(
         started_at: std::time::Instant::now(),
         prometheus: prometheus_handle,
         email: email_service,
+        push: push_sender,
         vapid_public_key,
     };
     let search_for_workers = api_state.search.clone();
