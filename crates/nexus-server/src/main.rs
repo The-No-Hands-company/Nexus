@@ -72,6 +72,8 @@ enum Command {
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
+// ── Entry point ───────────────────────────────────────────────────────────────
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
@@ -95,34 +97,30 @@ async fn run_server(
     voice_port: u16,
 ) -> anyhow::Result<()> {
     // ── Lite-mode environment bootstrap ──────────────────────────────────────
-    // Before loading config, inject sensible defaults so the server works
-    // out-of-the-box without any env vars or config files.
-    if lite {
-        // SQLite database in current directory
-        if std::env::var("DATABASE_URL").is_err() {
-            // SAFETY: single-threaded startup; no other threads are reading env yet.
-            unsafe { std::env::set_var("DATABASE_URL", "sqlite://nexus.db?mode=rwc") };
-        }
-        // Auto-generate JWT secret on first run and store in NEXUS_JWT_SECRET
-        if std::env::var("JWT_SECRET").is_err() {
-            let secret = generate_or_load_lite_secret("nexus.toml")?;
-            // SAFETY: single-threaded startup; no other threads are reading env yet.
-            unsafe { std::env::set_var("JWT_SECRET", secret) };
-        }
-        // Public file URL for local uploads
-        if std::env::var("NEXUS_PUBLIC_URL").is_err() {
-            // SAFETY: single-threaded startup; no other threads are reading env yet.
-            unsafe {
-                std::env::set_var(
-                    "NEXUS_PUBLIC_URL",
-                    format!("http://127.0.0.1:{port}"),
-                )
-            };
-        }
-    }
+    // Inject sensible defaults so the server works out-of-the-box without any
+    // env vars or config files.  Values are passed directly to the config
+    // builder via `init_with_overrides` so we never need to mutate the process
+    // environment (avoids `unsafe { std::env::set_var(...) }`).
+    let config = if lite {
+        let sqlite_url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "sqlite://nexus.db?mode=rwc".to_string());
+        let jwt_secret = if std::env::var("JWT_SECRET").is_ok()
+            || std::env::var("NEXUS__AUTH__JWT_SECRET").is_ok()
+        {
+            std::env::var("JWT_SECRET")
+                .or_else(|_| std::env::var("NEXUS__AUTH__JWT_SECRET"))
+                .unwrap()
+        } else {
+            generate_or_load_lite_secret("nexus.toml")?
+        };
 
-    // ── Configuration ─────────────────────────────────────────────────────────
-    let config = nexus_common::config::init()?;
+        nexus_common::config::init_with_overrides(&[
+            ("database.url", sqlite_url),
+            ("auth.jwt_secret", jwt_secret),
+        ])?
+    } else {
+        nexus_common::config::init()?
+    };
 
     // ── Tracing ───────────────────────────────────────────────────────────────
     // Format selection:

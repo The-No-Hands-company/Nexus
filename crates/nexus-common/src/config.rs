@@ -16,23 +16,68 @@ pub fn get() -> &'static AppConfig {
     CONFIG.get().expect("Config not initialized. Call nexus_common::config::init() first.")
 }
 
+/// Initialize the global configuration from environment, merging in explicit
+/// overrides at the highest priority level.
+///
+/// Used by lite-mode startup to inject generated defaults (SQLite path, JWT
+/// secret, public URL) without touching the process environment via the
+/// `unsafe` `std::env::set_var`.
+///
+/// `overrides` keys use the same dot-path format as the config builder
+/// (e.g. `"database.url"`, `"auth.jwt_secret"`).
+pub fn init_with_overrides(
+    overrides: &[(&str, String)],
+) -> Result<&'static AppConfig, config::ConfigError> {
+    // Load .env file if present (development)
+    let _ = dotenvy::dotenv();
+
+    let db_url_platform    = std::env::var("DATABASE_URL").ok().filter(|s| !s.is_empty());
+    let redis_url_platform = std::env::var("REDIS_URL").ok().filter(|s| !s.is_empty());
+
+    let mut builder = build_base_config()?;
+
+    if let Some(url) = db_url_platform {
+        builder = builder.set_default("database.url", url)?;
+    }
+    if let Some(url) = redis_url_platform {
+        builder = builder.set_default("redis.url", url)?;
+    }
+
+    // Apply caller-supplied overrides at higher-than-env-var priority.
+    for (key, value) in overrides {
+        builder = builder.set_override(*key, value.clone())?;
+    }
+
+    let cfg = builder
+        .add_source(config::File::with_name("config").required(false))
+        .add_source(
+            config::Environment::with_prefix("NEXUS")
+                .separator("__")
+                .try_parsing(true),
+        )
+        .build()?;
+
+    let app_config: AppConfig = cfg.try_deserialize()?;
+    Ok(CONFIG.get_or_init(|| app_config))
+}
+
 /// Initialize the global configuration from environment.
 ///
 /// Should be called once at application startup, before any other code accesses config.
 pub fn init() -> Result<&'static AppConfig, config::ConfigError> {
-    // Load .env file if present (development)
-    let _ = dotenvy::dotenv();
+    init_with_overrides(&[])
+}
 
+/// Build the config builder pre-loaded with all defaults (shared between
+/// `init` and `init_with_overrides`).
+fn build_base_config() -> Result<config::ConfigBuilder<config::builder::DefaultState>, config::ConfigError> {
     // 12-factor / platform fallbacks — read bare DATABASE_URL and REDIS_URL
     // as set by Fly.io postgres attach, Heroku, Railway, Render, etc.
     // NEXUS__DATABASE__URL / NEXUS__REDIS__URL always win (higher priority).
     // Only injected when the variable is actually set (non-empty), so that
     // Option<String> fields (like redis.url) deserialise to None rather than
     // Some("") when no Redis is configured.
-    let db_url_platform    = std::env::var("DATABASE_URL").ok().filter(|s| !s.is_empty());
-    let redis_url_platform = std::env::var("REDIS_URL").ok().filter(|s| !s.is_empty());
-
-    let mut builder = config::Config::builder()
+    config::Config::builder()
         // Defaults
         .set_default("server.host", "0.0.0.0")?
         .set_default("server.port", 8080)?
@@ -71,30 +116,7 @@ pub fn init() -> Result<&'static AppConfig, config::ConfigError> {
         // Email / Resend defaults (email sending is disabled when api_key is empty)
         .set_default("email.api_key", "")?
         .set_default("email.from", "Nexus <noreply@nexus.local>")?
-        .set_default("email.base_url", "")?;
-
-    // 12-factor platform fallbacks — only inject when the env var is actually set.
-    if let Some(url) = db_url_platform {
-        builder = builder.set_default("database.url", url)?;
-    }
-    if let Some(url) = redis_url_platform {
-        builder = builder.set_default("redis.url", url)?;
-    }
-
-    let cfg = builder
-        // Optional config file
-        .add_source(config::File::with_name("config").required(false))
-        // Environment variables (NEXUS__SERVER__HOST, NEXUS__DATABASE__URL, etc.)
-        // These have the highest priority and override everything above.
-        .add_source(
-            config::Environment::with_prefix("NEXUS")
-                .separator("__")
-                .try_parsing(true),
-        )
-        .build()?;
-
-    let app_config: AppConfig = cfg.try_deserialize()?;
-    Ok(CONFIG.get_or_init(|| app_config))
+        .set_default("email.base_url", "")
 }
 
 #[derive(Debug, Deserialize, Clone)]
