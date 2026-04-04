@@ -136,3 +136,27 @@ pub async fn purge_expired(pool: &sqlx::AnyPool) -> Result<u64, sqlx::Error> {
             .await?;
     Ok(result.rows_affected())
 }
+
+/// Check whether a session still exists and has not been revoked.
+///
+/// Used by auth middleware to validate that a JWT's `jti` claim corresponds to
+/// an active session row — ensuring that logout (which deletes the row) actually
+/// invalidates the token before its cryptographic expiry.
+///
+/// The result is intentionally NOT cached at this layer; callers use Redis for
+/// short-lived caching (see `crate::middleware::auth_middleware`).
+pub async fn session_exists(
+    pool: &sqlx::AnyPool,
+    session_id: Uuid,
+    user_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT 1 FROM refresh_tokens \
+         WHERE id = $1::uuid AND user_id = $2::uuid AND expires_at > NOW()",
+    )
+    .bind(session_id.to_string())
+    .bind(user_id.to_string())
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.is_some())
+}

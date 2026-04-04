@@ -189,10 +189,24 @@ pub struct UpdateUserRequest {
     pub presence: Option<UserPresence>,
 
     /// URL of the user's avatar image.
+    /// Avatar URL — must be HTTPS to prevent client-side SSRF via http:// URLs
+    /// pointing at internal services. Clients that auto-fetch avatar images would
+    /// otherwise make requests to attacker-controlled internal addresses.
     #[validate(url)]
     #[validate(length(max = 512))]
+    #[validate(custom(function = "validate_avatar_url"))]
     #[serde(default)]
     pub avatar: Option<String>,
+}
+
+/// Validate that an avatar URL uses HTTPS — prevents client-side SSRF where
+/// clients auto-fetch avatar images and could be redirected to internal services.
+fn validate_avatar_url(url: &str) -> Result<(), validator::ValidationError> {
+    if !url.starts_with("https://") {
+        return Err(validator::ValidationError::new("avatar_must_be_https")
+            .with_message("Avatar URL must use HTTPS".into()));
+    }
+    Ok(())
 }
 
 use std::sync::LazyLock;

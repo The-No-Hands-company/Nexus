@@ -186,6 +186,72 @@ pub async fn auth_middleware(
         .map_err(|_| NexusError::InvalidToken)?;
 
     let session_id = claims.jti.parse::<uuid::Uuid>().ok();
+
+    // ── Session revocation check ──────────────────────────────────────────────
+    // Validate the JWT's `jti` claim against the active sessions table so that
+    // logout (which deletes the session row) actually invalidates the token
+    // before its cryptographic expiry.
+    //
+    // We cache the result in Redis with a TTL of 60 seconds to bound the DB
+    // fanout while keeping the revocation window short:
+    //   - Tokens expire in 15 minutes (ACCESS_TOKEN_TTL_SECS = 900)
+    //   - Revoked tokens stay valid for at most 60 extra seconds
+    //   - Each unique session_id is looked up from Redis, not DB, on hot paths
+    //
+    // Tokens issued before jti support (jti == "") bypass this check — they
+    // expire naturally and can no longer be issued.
+    if let Some(sid) = session_id {
+        let state = request
+            .extensions()
+            .get::<std::sync::Arc<AppState>>()
+            .cloned();
+
+        if let Some(state) = state {
+            // Fast path: check Redis cache first
+            let cache_key = format!("sess:active:{sid}");
+            let cached = if let Some(ref redis) = state.db.redis {
+                let mut conn = redis.clone();
+                let val: Option<String> = redis::AsyncCommands::get(&mut conn, &cache_key)
+                    .await
+                    .unwrap_or(None);
+                val
+            } else {
+                None
+            };
+
+            let is_active = match cached.as_deref() {
+                Some("1") => true,
+                Some("0") => false,
+                None => {
+                    // Cache miss — query DB
+                    let exists = nexus_db::repository::sessions::session_exists(
+                        &state.db.pool,
+                        sid,
+                        user_id,
+                    )
+                    .await
+                    .unwrap_or(true); // fail open on DB error to avoid locking out all users
+
+                    // Cache result for 60 seconds
+                    if let Some(ref redis) = state.db.redis {
+                        let mut conn = redis.clone();
+                        let val = if exists { "1" } else { "0" };
+                        let _: Result<(), _> = redis::AsyncCommands::set_ex(
+                            &mut conn, &cache_key, val, 60u64,
+                        ).await;
+                    }
+
+                    exists
+                }
+                _ => true,
+            };
+
+            if !is_active {
+                return Err(NexusError::InvalidToken);
+            }
+        }
+    }
+
     let two_fa_verified = claims.two_fa_verified;
     let email_verified = claims.email_verified;
 
