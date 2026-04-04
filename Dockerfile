@@ -78,3 +78,31 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \
     CMD curl -f http://localhost:8080/api/v1/health || exit 1
 
 ENTRYPOINT ["/app/nexus", "serve"]
+
+# ── nexus-web builder stage ───────────────────────────────────────────────────
+# Separate image that builds the web client and exports /dist.
+# Used by docker-compose.prod.yml to populate the nexus_web_dist volume.
+#
+# Build and populate volume:
+#   docker build --target nexus-web-builder -t nexus-web-builder .
+#   docker run --rm -v nexus_web_dist:/out nexus-web-builder \
+#     sh -c "cp -r /dist/. /out/"
+
+FROM node:22-alpine AS nexus-web-builder
+
+WORKDIR /web
+
+# Install dependencies (package-lock.json is the authoritative lock)
+COPY packages/nexus-web/package.json packages/nexus-web/package-lock.json ./
+RUN npm ci --prefer-offline
+
+# Copy source
+COPY packages/nexus-web/ ./
+
+# Build production bundle
+RUN npm run build
+
+# The built files are in /web/dist — copy them to a clean export layer
+FROM scratch AS nexus-web-dist
+COPY --from=nexus-web-builder /web/dist /dist
+

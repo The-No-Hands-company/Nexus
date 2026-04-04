@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { Routes, Route } from "react-router-dom";
 import { useStore } from "../store";
 import { useGateway } from "../gateway";
+import { usePushNotifications } from "../hooks/usePushNotifications";
 import ServerList from "../components/ServerList";
 import ChannelList from "../components/ChannelList";
 import ChatView from "../components/ChatView";
@@ -9,8 +10,17 @@ import ChatView from "../components/ChatView";
 export default function MainLayout() {
   const { session, loadServers } = useStore();
 
-  // Open and maintain the WebSocket gateway connection
+  // Real-time WebSocket gateway
   useGateway();
+
+  // Register service worker + auto-resubscribe if permission already granted
+  const { enablePush } = usePushNotifications();
+  useEffect(() => {
+    if (!session) return;
+    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+      enablePush().catch(() => {});
+    }
+  }, [session, enablePush]);
 
   // Refresh the access token every 10 minutes (TTL is 15 min)
   const refreshRef = useRef<ReturnType<typeof setInterval> | null>(null);

@@ -114,7 +114,7 @@ export function usePushNotifications() {
       // 4. Subscribe via PushManager
       const subscription = await reg.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+        applicationServerKey: urlBase64ToUint8Array(vapidPublicKey) as BufferSource,
       });
 
       // 5. Send subscription to the Nexus API

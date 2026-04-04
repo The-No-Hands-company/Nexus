@@ -157,8 +157,15 @@ services:
       - "443:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Mount the built nexus-web SPA so Caddy can serve it as static files.
+      # Build it first: cd packages/nexus-web && npm run build
+      # Or use the pre-built image which runs the build step during Docker build.
+      - nexus_web_dist:/srv/nexus-web:ro
       - caddy_data:/data
       - caddy_config:/config
+    environment:
+      NEXUS_DOMAIN: "${NEXUS_DOMAIN:-localhost}"
+      NEXUS_WEB_ROOT: "/srv/nexus-web"
     networks:
       - nexus-public
       - nexus-internal
@@ -176,3 +183,7 @@ volumes:
   meilisearch_data:
   caddy_data:
   caddy_config:
+  # Populated by running: docker run --rm -v nexus_web_dist:/dist nexus-web-builder
+  # Or mounted from the host: docker volume create --driver local \
+  #   --opt type=none --opt o=bind --opt device=./packages/nexus-web/dist nexus_web_dist
+  nexus_web_dist:

@@ -366,6 +366,54 @@ async fn send_message(
         user_id: Some(auth.user_id),
     });
 
+    // ── Web Push: notify mentioned users ─────────────────────────────────────
+    // Fire-and-forget — push delivery must never block message delivery.
+    // We only notify users who are NOT the message author (no self-pings).
+    if !mentions.is_empty() {
+        if let Some(ref vapid_key) = state.vapid_public_key {
+            let pool = state.db.pool.clone();
+            let vapid_key = vapid_key.clone();
+            let author_name = auth.username.clone();
+            let content_preview: String = body.content.chars().take(120).collect();
+            let channel_id_copy = channel_id;
+            let author_id = auth.user_id;
+            let mentions_copy = mentions.clone();
+
+            tokio::spawn(async move {
+                // Load the VAPID private key for the sender
+                let priv_key_env =
+                    std::env::var("NEXUS__PUSH__VAPID_PRIVATE_KEY").unwrap_or_default();
+                if priv_key_env.is_empty() {
+                    return;
+                }
+                let subject = format!("mailto:admin@nexus");
+                let sender = match nexus_api::push_sender::PushSender::from_private_key(
+                    &priv_key_env,
+                    &subject,
+                ) {
+                    Ok(s) => s,
+                    Err(_) => return,
+                };
+
+                let payload = nexus_api::push_sender::PushPayload {
+                    title: format!("{author_name} mentioned you"),
+                    body: content_preview,
+                    icon: Some("/icon-192.png".into()),
+                    url: Some(format!("/channel/{channel_id_copy}")),
+                    channel_id: Some(channel_id_copy),
+                };
+
+                for &mentioned_uid in &mentions_copy {
+                    // Don't ping the author themselves
+                    if mentioned_uid == author_id {
+                        continue;
+                    }
+                    let _ = sender.notify_user(&pool, mentioned_uid, &payload).await;
+                }
+            });
+        }
+    }
+
     tracing::debug!(
         message_id = %message_id,
         channel_id = %channel_id,
