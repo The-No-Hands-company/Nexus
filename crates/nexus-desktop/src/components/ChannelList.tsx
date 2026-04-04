@@ -7,7 +7,9 @@ import NotificationTray from "./NotificationTray";
 
 export default function ChannelList() {
   const { channels, activeChannelId, setActiveChannel, activeServerId, servers, createChannel, unreadChannels,
-    isHomeMode, dmChannels, drafts, noteToSelfChannelId, loadNoteToSelfChannel, setSavedMessagesPanelOpen } =
+    isHomeMode, dmChannels, drafts, noteToSelfChannelId, loadNoteToSelfChannel, setSavedMessagesPanelOpen,
+    storyFeed, setStoryViewerOpen, setImportWizardOpen,
+    setMediaGalleryOpen, setCalendarOpen, setVoiceSettingsOpen } =
     useStore();
 
   // Load note-to-self channel when entering home mode
@@ -108,6 +110,30 @@ export default function ChannelList() {
           >
             <span className="shrink-0">🔖</span>
             <span className="truncate text-sm flex-1">Saved Messages</span>
+          </button>
+          {/* Stories */}
+          <button
+            onClick={() => setStoryViewerOpen(true)}
+            aria-label="Stories"
+            className="channel-item w-full text-left"
+            disabled={storyFeed.length === 0}
+          >
+            <span className="shrink-0">📸</span>
+            <span className="truncate text-sm flex-1">Stories</span>
+            {storyFeed.length > 0 && (
+              <span className="text-[10px] bg-accent-500/30 text-accent-300 rounded px-1">
+                {storyFeed.length}
+              </span>
+            )}
+          </button>
+          {/* Import from another platform */}
+          <button
+            onClick={() => setImportWizardOpen(true)}
+            aria-label="Import data"
+            className="channel-item w-full text-left"
+          >
+            <span className="shrink-0">📥</span>
+            <span className="truncate text-sm flex-1">Import Data</span>
           </button>
           {/* Friends nav item */}
           <button
@@ -327,6 +353,36 @@ export default function ChannelList() {
             </div>
           )}
         </>
+
+        {/* ── Server tools ──────────────────────────────────────── */}
+        <div className="h-px bg-bg-600/40 mx-2 my-1.5" />
+        <p className="text-[10px] text-muted/60 uppercase tracking-widest font-medium px-2 py-1 select-none">
+          Tools
+        </p>
+        <button
+          onClick={() => setMediaGalleryOpen(true)}
+          aria-label="Media Gallery"
+          className="channel-item w-full text-left"
+        >
+          <span className="shrink-0 opacity-60">📷</span>
+          <span className="truncate text-sm flex-1">Media Gallery</span>
+        </button>
+        <button
+          onClick={() => setCalendarOpen(true)}
+          aria-label="Calendar"
+          className="channel-item w-full text-left"
+        >
+          <span className="shrink-0 opacity-60">📅</span>
+          <span className="truncate text-sm flex-1">Calendar</span>
+        </button>
+        <button
+          onClick={() => setVoiceSettingsOpen(true)}
+          aria-label="Voice Settings"
+          className="channel-item w-full text-left"
+        >
+          <span className="shrink-0 opacity-60">🎤</span>
+          <span className="truncate text-sm flex-1">Voice Settings</span>
+        </button>
       </div>
     </nav>
 

@@ -866,6 +866,18 @@ interface StoreState {
   savedMessagesPanelOpen: boolean;
   setSavedMessagesPanelOpen: (v: boolean) => void;
 
+  // ─── Overlay panel visibility ─────────────────────────────────────────
+  mediaGalleryOpen: boolean;
+  setMediaGalleryOpen: (v: boolean) => void;
+  calendarOpen: boolean;
+  setCalendarOpen: (v: boolean) => void;
+  storyViewerOpen: boolean;
+  setStoryViewerOpen: (v: boolean) => void;
+  importWizardOpen: boolean;
+  setImportWizardOpen: (v: boolean) => void;
+  voiceSettingsOpen: boolean;
+  setVoiceSettingsOpen: (v: boolean) => void;
+
   // Scheduled messages — keyed by channelId
   channelScheduled: Record<string, ScheduledMessage[]>;
   setChannelScheduled: (channelId: string, msgs: ScheduledMessage[]) => void;
@@ -1479,6 +1491,18 @@ export const useStore = create<StoreState>((set, get) => ({
   // ─── Saved Messages panel ─────────────────────────────────────────────
   savedMessagesPanelOpen: false,
   setSavedMessagesPanelOpen: (v) => set({ savedMessagesPanelOpen: v }),
+
+  // ─── Overlay panels ───────────────────────────────────────────────────
+  mediaGalleryOpen: false,
+  setMediaGalleryOpen: (v) => set({ mediaGalleryOpen: v }),
+  calendarOpen: false,
+  setCalendarOpen: (v) => set({ calendarOpen: v }),
+  storyViewerOpen: false,
+  setStoryViewerOpen: (v) => set({ storyViewerOpen: v }),
+  importWizardOpen: false,
+  setImportWizardOpen: (v) => set({ importWizardOpen: v }),
+  voiceSettingsOpen: false,
+  setVoiceSettingsOpen: (v) => set({ voiceSettingsOpen: v }),
 
   // ─── Scheduled messages ───────────────────────────────────────────────
   channelScheduled: {},

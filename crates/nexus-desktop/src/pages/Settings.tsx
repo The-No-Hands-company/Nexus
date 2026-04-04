@@ -4,6 +4,10 @@ import { invoke } from "../invoke";
 import ThemeSwitcher from "../themes/ThemeSwitcher";
 import FederationPanel from "../components/FederationPanel";
 import AccessibilitySettingsPanel from "../components/AccessibilitySettingsPanel";
+import VoiceSettingsPanel from "../components/VoiceSettingsPanel";
+import AiIntelligencePanel from "../components/AiIntelligencePanel";
+import AdminAnalyticsPanel from "../components/AdminAnalyticsPanel";
+import ImportWizard from "../components/ImportWizard";
 import type { PluginManifest } from "../plugins/types";
 import { formatDistanceToNow } from "date-fns";
 import clsx from "clsx";
@@ -53,6 +57,7 @@ export default function SettingsPage() {
     experienceProfile,
     loadExperienceProfile,
     setExperienceMode,
+    activeServerId,
   } = useStore();
   const [urlInput, setUrlInput] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -838,6 +843,48 @@ export default function SettingsPage() {
         </div>
         <FederationPanel />
       </section>
+
+      {/* ── Voice ─────────────────────────────────────────────────────── */}
+      <section className="mb-10" aria-labelledby="voice-heading">
+        <h2 id="voice-heading" className="text-base font-semibold mb-4 border-b border-bg-600 pb-2">
+          Voice & Audio
+        </h2>
+        <VoiceSettingsPanel onClose={() => {}} />
+      </section>
+
+      {/* ── AI Intelligence ──────────────────────────────────────────── */}
+      <section className="mb-10" aria-labelledby="ai-heading">
+        <h2 id="ai-heading" className="text-base font-semibold mb-4 border-b border-bg-600 pb-2">
+          AI Features
+        </h2>
+        <p className="text-xs text-muted mb-4">
+          All AI features are opt-in, on-device or self-hosted only. No data leaves your instance.
+        </p>
+        <AiIntelligencePanel />
+      </section>
+
+      {/* ── Import & Migration ───────────────────────────────────────── */}
+      {session && activeServerId && (
+        <section className="mb-10" aria-labelledby="import-heading">
+          <h2 id="import-heading" className="text-base font-semibold mb-4 border-b border-bg-600 pb-2">
+            Import Data
+          </h2>
+          <p className="text-xs text-muted mb-4">
+            Migrate messages and channels from Discord, Slack, or Matrix exports.
+          </p>
+          <ImportWizard serverId={activeServerId} />
+        </section>
+      )}
+
+      {/* ── Admin Analytics — instance-admin only ────────────────────── */}
+      {session && activeServerId && (
+        <section className="mb-10" aria-labelledby="analytics-heading">
+          <h2 id="analytics-heading" className="text-base font-semibold mb-4 border-b border-bg-600 pb-2">
+            Server Analytics
+          </h2>
+          <AdminAnalyticsPanel serverId={activeServerId} />
+        </section>
+      )}
     </div>
   );
 }

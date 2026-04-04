@@ -132,6 +132,30 @@ export default function ServerList() {
         {/* Push rest to bottom */}
         <div className="flex-1" />
 
+        {/* Admin analytics */}
+        <button
+          onClick={() => navigate("/admin")}
+          className="w-8 h-8 rounded flex items-center justify-center text-muted hover:text-fg hover:bg-bg-700 transition-colors mb-1"
+          title="Server Analytics"
+          aria-label="Server Analytics"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 3c1.93 0 3.5 1.57 3.5 3.5S13.93 13 12 13s-3.5-1.57-3.5-3.5S10.07 6 12 6zm7 13H5v-.23c0-.62.28-1.2.76-1.58C7.47 15.82 9.64 15 12 15s4.53.82 6.24 2.19c.48.38.76.97.76 1.58V19z"/>
+          </svg>
+        </button>
+
+        {/* Onboarding / getting started */}
+        <button
+          onClick={() => navigate("/onboarding")}
+          className="w-8 h-8 rounded flex items-center justify-center text-muted hover:text-fg hover:bg-bg-700 transition-colors mb-1"
+          title="Getting Started"
+          aria-label="Getting Started"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/>
+          </svg>
+        </button>
+
         {/* Settings */}
         <button
           onClick={() => navigate("/settings")}
