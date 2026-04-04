@@ -5,38 +5,122 @@
 #     caddy run --config Caddyfile
 #
 #   Production (public domain with auto-TLS):
-#     Set YOUR_DOMAIN below and run: caddy run --config Caddyfile
+#     Set NEXUS_DOMAIN below and run: caddy run --config Caddyfile
+#     Or via docker compose: see deploy/docker-compose.prod.yml
 #
 # Caddy automatically provisions and renews Let's Encrypt certificates for
 # public hostnames. For LAN/local use it serves plain HTTP.
 #
-# To install Caddy: https://caddyserver.com/docs/install
-# Or via Podman/Docker: see the caddy service in docker-compose.yml
+# Environment variables (set in .env or export before running):
+#   NEXUS_DOMAIN      — Public hostname (default: localhost)
+#   NEXUS_WEB_ROOT    — Path to built nexus-web dist/ directory
+#                       (default: packages/nexus-web/dist)
 
-# ── Replace with your public domain (or keep as your LAN IP for local use) ────
+# ── Global options ─────────────────────────────────────────────────────────────
+{
+    # Email for Let's Encrypt registration (required for auto-TLS on public domains)
+    # email admin@{$NEXUS_DOMAIN:localhost}
+    #
+    # Uncomment and fill in for production:
+    # email your@email.com
+}
+
+# ── Main site ──────────────────────────────────────────────────────────────────
 {$NEXUS_DOMAIN:localhost} {
-    # Reverse proxy API + WebSocket gateway
-    reverse_proxy /api/*          localhost:8080
-    reverse_proxy /gateway        localhost:8081 {
-        transport http {
-            # Pass WebSocket upgrade headers through
+
+    # ── REST API ───────────────────────────────────────────────────────────────
+    handle /api/* {
+        reverse_proxy localhost:8080
+    }
+
+    # ── WebSocket gateway (real-time events) ───────────────────────────────────
+    handle /gateway {
+        reverse_proxy localhost:8081 {
+            # Preserve WebSocket upgrade
+            header_up Connection {>Connection}
+            header_up Upgrade {>Upgrade}
+            # Long timeout for persistent WebSocket connections
+            transport http {
+                dial_timeout 5s
+                response_header_timeout 0
+            }
         }
     }
 
-    # Federation S2S endpoints (must be accessible from other servers)
-    reverse_proxy /_nexus/*       localhost:8080
-    reverse_proxy /.well-known/*  localhost:8080
+    # ── Voice signaling WebSocket ──────────────────────────────────────────────
+    handle /voice/ws {
+        reverse_proxy localhost:8082 {
+            header_up Connection {>Connection}
+            header_up Upgrade {>Upgrade}
+            transport http {
+                dial_timeout 5s
+                response_header_timeout 0
+            }
+        }
+    }
 
-    # Matrix AS bridge (optional)
-    reverse_proxy /_matrix/*      localhost:8080
+    # ── Federation & Matrix bridge endpoints ──────────────────────────────────
+    handle /_nexus/* {
+        reverse_proxy localhost:8080
+    }
+    handle /.well-known/nexus/* {
+        reverse_proxy localhost:8080
+    }
+    handle /.well-known/matrix/* {
+        reverse_proxy localhost:8080
+    }
+    handle /_matrix/* {
+        reverse_proxy localhost:8080
+    }
 
-    # Prometheus metrics (restrict to internal access)
-    @metrics path /metrics
-    respond @metrics 403
+    # ── Prometheus metrics — deny external access ─────────────────────────────
+    handle /metrics {
+        respond 403
+    }
 
-    # Logging
+    # ── Web client (nexus-web SPA) — serve static files ──────────────────────
+    handle {
+        root * {$NEXUS_WEB_ROOT:packages/nexus-web/dist}
+        # Try the exact file first, then the directory index, then fall back
+        # to index.html for client-side routing (react-router-dom)
+        try_files {path} {path}/ /index.html
+        file_server
+        # Cache hashed assets aggressively; index.html must not be cached
+        @hashed path_regexp hashed \.[0-9a-f]{8,}\.(js|css|woff2?)$
+        header @hashed Cache-Control "public, max-age=31536000, immutable"
+        header /index.html Cache-Control "no-cache, no-store, must-revalidate"
+    }
+
+    # ── Security headers ───────────────────────────────────────────────────────
+    header {
+        # Prevent MIME sniffing
+        X-Content-Type-Options "nosniff"
+        # Prevent clickjacking
+        X-Frame-Options "DENY"
+        # HSTS (2 years) — enable only when you're confident in TLS
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        # Referrer policy
+        Referrer-Policy "strict-origin-when-cross-origin"
+        # Permissions policy
+        Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+        # Content security policy for the web client
+        Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' wss: ws:; font-src 'self'; media-src 'self' blob:; worker-src 'self' blob:; frame-ancestors 'none'"
+        # Remove server identification
+        -Server
+    }
+
+    # ── Logging ────────────────────────────────────────────────────────────────
     log {
         output stdout
         format console
+        level INFO
     }
 }
+
+# ── Optional: separate admin subdomain ────────────────────────────────────────
+# Uncomment and configure if you deploy the admin dashboard separately.
+#
+# admin.{$NEXUS_DOMAIN:localhost} {
+#     reverse_proxy localhost:8090
+# }
+

@@ -68,6 +68,18 @@ enum Command {
         #[arg(long, env = "VOICE_PORT", default_value_t = 8082)]
         voice_port: u16,
     },
+
+    /// Generate a VAPID key pair for Web Push notifications.
+    ///
+    /// Outputs the private key (base64url). Set it as NEXUS__PUSH__VAPID_PRIVATE_KEY.
+    /// The matching public key is served at GET /push/vapid-public-key.
+    ///
+    /// Example:
+    ///   nexus gen-vapid-key
+    ///   # then add to .env:
+    ///   # NEXUS__PUSH__VAPID_PRIVATE_KEY=<output>
+    #[command(name = "gen-vapid-key")]
+    GenVapidKey,
 }
 
 // ── Entry point ───────────────────────────────────────────────────────────────
@@ -85,6 +97,20 @@ async fn main() -> anyhow::Result<()> {
             gateway_port,
             voice_port,
         } => run_server(lite, port, gateway_port, voice_port).await,
+
+        Command::GenVapidKey => {
+            let private_key = nexus_api::push_sender::PushSender::generate_private_key();
+            let subject = "mailto:admin@your-domain.com";
+            let sender = nexus_api::push_sender::PushSender::from_private_key(&private_key, subject)
+                .expect("freshly generated key must be valid");
+
+            println!("# Add to your .env file:");
+            println!("NEXUS__PUSH__VAPID_PRIVATE_KEY={private_key}");
+            println!();
+            println!("# Public key (served at GET /push/vapid-public-key):");
+            println!("# {}", sender.public_key_b64);
+            Ok(())
+        }
     }
 }
 
@@ -236,6 +262,41 @@ async fn run_server(
         tracing::info!("email delivery disabled (no NEXUS__EMAIL__API_KEY)");
     }
 
+    // ── Web Push (VAPID) ──────────────────────────────────────────────────────
+    // Load the VAPID private key from NEXUS__PUSH__VAPID_PRIVATE_KEY.
+    // If not set, push notifications are disabled but the server starts fine.
+    // To generate a key: cargo run --bin nexus -- gen-vapid-key
+    let vapid_public_key = match std::env::var("NEXUS__PUSH__VAPID_PRIVATE_KEY")
+        .ok()
+        .filter(|s| !s.is_empty())
+    {
+        Some(priv_key_b64) => {
+            let subject = format!("mailto:admin@{}", config.server.name);
+            match nexus_api::push_sender::PushSender::from_private_key(&priv_key_b64, &subject) {
+                Ok(sender) => {
+                    tracing::info!(
+                        subsystem = "push",
+                        pub_key_prefix = %sender.public_key_b64.chars().take(12).collect::<String>(),
+                        "Web Push (VAPID) enabled"
+                    );
+                    Some(sender.public_key_b64.clone())
+                }
+                Err(e) => {
+                    tracing::warn!(subsystem = "push", error = %e, "Invalid VAPID key — push disabled");
+                    None
+                }
+            }
+        }
+        None => {
+            tracing::info!(
+                subsystem = "push",
+                "Web Push disabled (NEXUS__PUSH__VAPID_PRIVATE_KEY not set). \
+                 Generate with: cargo run --bin nexus -- gen-vapid-key"
+            );
+            None
+        }
+    };
+
     let api_state = AppState {
         db: db.clone(),
         gateway_tx: gateway_tx.clone(),
@@ -248,6 +309,7 @@ async fn run_server(
         started_at: std::time::Instant::now(),
         prometheus: prometheus_handle,
         email: email_service,
+        vapid_public_key,
     };
     let search_for_workers = api_state.search.clone();
     let api_router = build_router(api_state);

@@ -6,6 +6,7 @@
 pub mod auth;
 pub mod email;
 pub mod middleware;
+pub mod push_sender;
 pub mod routes;
 
 use axum::Router;
@@ -47,6 +48,9 @@ pub struct AppState {
     pub prometheus: PrometheusHandle,
     /// Email delivery service (Resend). Disabled when `NEXUS__EMAIL__API_KEY` is unset.
     pub email: EmailService,
+    /// VAPID public key (base64url) for Web Push subscriptions.
+    /// `None` when `NEXUS__PUSH__VAPID_PRIVATE_KEY` is not set.
+    pub vapid_public_key: Option<String>,
 }
 
 /// Build the complete API router with all routes and middleware.
@@ -143,6 +147,7 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::sustainability::router())                  // governance, protocol versions, security audits, tutorials
         // v0.8.5 Federation UX — admin management + cross-instance search
         .merge(routes::federation_admin::router())                // federation admin panel API
+        .merge(routes::push::router())                             // Web Push subscriptions + VAPID key
         // Make Arc<AppState> available as an Axum Extension so that
         // `combined_auth_middleware` can perform DB lookups for bot tokens
         // without requiring `from_fn_with_state` on every sub-router.

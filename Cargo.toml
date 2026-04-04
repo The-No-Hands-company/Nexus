@@ -98,6 +98,8 @@ hex = "0.4"
 mime_guess = "2"
 hmac = "0.12"
 aes-gcm = "0.10"
+p256 = { version = "0.13", features = ["ecdh", "ecdsa"] }
+url = "2"
 
 # Ed25519 signing (federation)
 ed25519-dalek = { version = "2.1", features = ["rand_core"] }

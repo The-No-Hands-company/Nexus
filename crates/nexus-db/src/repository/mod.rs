@@ -72,3 +72,6 @@ pub mod growth;
 
 // v2.x Sustainability & Extensibility
 pub mod sustainability;
+
+/// Push notification subscriptions (Web Push / VAPID)
+pub mod push_subscriptions;

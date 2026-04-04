@@ -32,6 +32,10 @@ hex = { workspace = true }
 rand = { workspace = true }
 ed25519-dalek = { workspace = true }
 rand_core = { workspace = true }
+p256 = { workspace = true }
+url = { workspace = true }
+hmac = { workspace = true }
+aes-gcm = { workspace = true }
 meilisearch-sdk = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-config = { workspace = true }

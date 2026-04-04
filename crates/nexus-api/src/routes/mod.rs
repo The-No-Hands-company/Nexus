@@ -92,3 +92,6 @@ pub mod growth;
 
 // v2.x Sustainability & Extensibility
 pub mod sustainability;
+
+/// Web Push notification subscription management
+pub mod push;
