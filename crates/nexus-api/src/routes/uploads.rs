@@ -308,3 +308,120 @@ fn sanitize_filename(name: &str) -> String {
         .take(255)
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── is_allowed_content_type ───────────────────────────────────────────────
+
+    #[test]
+    fn images_are_allowed() {
+        for ct in &[
+            "image/jpeg", "image/png", "image/gif", "image/webp",
+            "image/svg+xml", "image/avif", "image/bmp", "image/tiff",
+        ] {
+            assert!(is_allowed_content_type(ct), "{ct} should be allowed");
+        }
+    }
+
+    #[test]
+    fn video_types_are_allowed() {
+        for ct in &["video/mp4", "video/webm", "video/ogg", "video/quicktime"] {
+            assert!(is_allowed_content_type(ct), "{ct} should be allowed");
+        }
+    }
+
+    #[test]
+    fn audio_types_are_allowed() {
+        for ct in &[
+            "audio/mpeg", "audio/ogg", "audio/wav", "audio/flac",
+            "audio/aac", "audio/opus", "audio/webm",
+        ] {
+            assert!(is_allowed_content_type(ct), "{ct} should be allowed");
+        }
+    }
+
+    #[test]
+    fn document_types_are_allowed() {
+        for ct in &[
+            "application/pdf", "text/plain", "text/markdown",
+            "application/zip", "application/x-tar",
+        ] {
+            assert!(is_allowed_content_type(ct), "{ct} should be allowed");
+        }
+    }
+
+    #[test]
+    fn executable_types_are_blocked() {
+        for ct in &[
+            "application/octet-stream",
+            "application/x-executable",
+            "application/x-msdownload",
+            "application/x-sh",
+            "application/x-bat",
+        ] {
+            assert!(!is_allowed_content_type(ct), "{ct} must be blocked");
+        }
+    }
+
+    #[test]
+    fn empty_and_wildcard_types_are_blocked() {
+        assert!(!is_allowed_content_type(""));
+        assert!(!is_allowed_content_type("*/*"));
+        assert!(!is_allowed_content_type("application/*"));
+    }
+
+    #[test]
+    fn case_sensitive_match() {
+        // MIME types are lowercase — uppercase variants must not slip through
+        assert!(!is_allowed_content_type("IMAGE/JPEG"));
+        assert!(!is_allowed_content_type("Image/Png"));
+    }
+
+    // ── sanitize_filename ─────────────────────────────────────────────────────
+
+    #[test]
+    fn forward_slash_removed() {
+        assert_eq!(sanitize_filename("../../etc/passwd"), "....etcpasswd");
+    }
+
+    #[test]
+    fn backslash_removed() {
+        assert_eq!(sanitize_filename("C:\\Windows\\system32"), "CWindowssystem32");
+    }
+
+    #[test]
+    fn null_byte_removed() {
+        let name = "file\0name.txt";
+        let result = sanitize_filename(name);
+        assert!(!result.contains('\0'));
+        assert_eq!(result, "filename.txt");
+    }
+
+    #[test]
+    fn normal_filename_unchanged() {
+        assert_eq!(sanitize_filename("photo.jpg"), "photo.jpg");
+        assert_eq!(sanitize_filename("my document.pdf"), "my document.pdf");
+        assert_eq!(sanitize_filename("résumé.pdf"), "résumé.pdf");
+    }
+
+    #[test]
+    fn truncated_to_255_chars() {
+        let long: String = "a".repeat(500);
+        let result = sanitize_filename(&long);
+        assert_eq!(result.len(), 255);
+    }
+
+    #[test]
+    fn exactly_255_chars_unchanged() {
+        let exactly: String = "b".repeat(255);
+        let result = sanitize_filename(&exactly);
+        assert_eq!(result.len(), 255);
+    }
+
+    #[test]
+    fn empty_filename_stays_empty() {
+        assert_eq!(sanitize_filename(""), "");
+    }
+}

@@ -362,3 +362,47 @@ struct RefreshRequest {
     refresh_token: String,
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── user_agent_from_headers ───────────────────────────────────────────────
+
+    #[test]
+    fn returns_none_when_header_absent() {
+        let headers = HeaderMap::new();
+        assert!(user_agent_from_headers(&headers).is_none());
+    }
+
+    #[test]
+    fn returns_ua_string_when_present() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::USER_AGENT,
+            "NexusClient/1.0 (Tauri; Linux)".parse().unwrap(),
+        );
+        let ua = user_agent_from_headers(&headers).unwrap();
+        assert_eq!(ua, "NexusClient/1.0 (Tauri; Linux)");
+    }
+
+    #[test]
+    fn returns_none_for_non_utf8_header_value() {
+        use axum::http::HeaderValue;
+        let mut headers = HeaderMap::new();
+        // Build a header value with a raw non-UTF-8 byte sequence
+        let raw: &[u8] = b"Mozilla/5.0 \xff\xfe";
+        let val = HeaderValue::from_bytes(raw).unwrap();
+        headers.insert(axum::http::header::USER_AGENT, val);
+        // to_str() fails for invalid UTF-8, so the function must return None
+        assert!(user_agent_from_headers(&headers).is_none());
+    }
+
+    #[test]
+    fn returns_empty_string_for_empty_ua_value() {
+        let mut headers = HeaderMap::new();
+        headers.insert(axum::http::header::USER_AGENT, "".parse().unwrap());
+        let ua = user_agent_from_headers(&headers).unwrap();
+        assert_eq!(ua, "");
+    }
+}

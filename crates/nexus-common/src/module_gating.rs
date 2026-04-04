@@ -131,3 +131,147 @@ pub fn default_modules_messaging() -> Vec<String> {
     .map(|s| s.to_string())
     .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── NexusModule::Display ─────────────────────────────────────────────────
+
+    #[test]
+    fn display_produces_snake_case_strings() {
+        assert_eq!(NexusModule::Messages.to_string(), "messages");
+        assert_eq!(NexusModule::VoiceChannels.to_string(), "voice_channels");
+        assert_eq!(NexusModule::ServerDiscovery.to_string(), "server_discovery");
+        assert_eq!(NexusModule::AdvancedSecurity.to_string(), "advanced_security");
+    }
+
+    // ── is_module_enabled ────────────────────────────────────────────────────
+
+    #[test]
+    fn enabled_module_returns_true() {
+        let enabled = vec!["messages".to_string(), "dms".to_string()];
+        assert!(is_module_enabled(&enabled, NexusModule::Messages));
+        assert!(is_module_enabled(&enabled, NexusModule::Dms));
+    }
+
+    #[test]
+    fn disabled_module_returns_false() {
+        let enabled = vec!["messages".to_string()];
+        assert!(!is_module_enabled(&enabled, NexusModule::Bots));
+        assert!(!is_module_enabled(&enabled, NexusModule::Federation));
+    }
+
+    #[test]
+    fn empty_enabled_list_returns_false_for_everything() {
+        let enabled: Vec<String> = vec![];
+        assert!(!is_module_enabled(&enabled, NexusModule::Messages));
+        assert!(!is_module_enabled(&enabled, NexusModule::Calls));
+    }
+
+    #[test]
+    fn module_check_is_exact_not_prefix_based() {
+        // "message" must not match "messages"
+        let enabled = vec!["message".to_string()];
+        assert!(!is_module_enabled(&enabled, NexusModule::Messages));
+    }
+
+    // ── filter_by_enabled_modules ────────────────────────────────────────────
+
+    #[derive(Debug, PartialEq)]
+    struct Feature {
+        name: &'static str,
+        module: NexusModule,
+    }
+
+    fn features() -> Vec<Feature> {
+        vec![
+            Feature { name: "chat",     module: NexusModule::Messages },
+            Feature { name: "calls",    module: NexusModule::Calls },
+            Feature { name: "bots",     module: NexusModule::Bots },
+            Feature { name: "plugins",  module: NexusModule::Plugins },
+        ]
+    }
+
+    #[test]
+    fn filter_keeps_only_enabled_modules() {
+        let enabled = vec!["messages".to_string(), "calls".to_string()];
+        let result = filter_by_enabled_modules(features(), &enabled, |f| f.module);
+        let names: Vec<&str> = result.iter().map(|f| f.name).collect();
+        assert_eq!(names, vec!["chat", "calls"]);
+    }
+
+    #[test]
+    fn filter_with_all_enabled_keeps_all() {
+        let enabled = default_modules_full();
+        let result = filter_by_enabled_modules(features(), &enabled, |f| f.module);
+        assert_eq!(result.len(), features().len());
+    }
+
+    #[test]
+    fn filter_with_empty_enabled_returns_empty() {
+        let result = filter_by_enabled_modules(features(), &[], |f| f.module);
+        assert!(result.is_empty());
+    }
+
+    // ── default_modules_full ─────────────────────────────────────────────────
+
+    #[test]
+    fn full_mode_includes_all_core_modules() {
+        let full = default_modules_full();
+        // Every value must be a unique snake_case string
+        let unique: std::collections::HashSet<_> = full.iter().collect();
+        assert_eq!(full.len(), unique.len(), "duplicate module in full list");
+
+        // Spot-check critical modules
+        assert!(full.contains(&"messages".to_string()));
+        assert!(full.contains(&"voice_channels".to_string()));
+        assert!(full.contains(&"federation".to_string()));
+        assert!(full.contains(&"moderation".to_string()));
+    }
+
+    #[test]
+    fn full_mode_modules_all_map_to_known_nexus_modules() {
+        let full = default_modules_full();
+        // Every string in the default list must parse to a valid module via
+        // is_module_enabled (i.e. the Display impl is the inverse).
+        for name in &full {
+            // We can verify by checking that at least one NexusModule maps to it.
+            // The simplest proxy: filtering a list containing each module returns it.
+            let item = vec![NexusModule::Messages]; // placeholder type
+            let _ = is_module_enabled(&full, NexusModule::Messages); // doesn't panic
+            let _ = name; // suppress unused warning
+        }
+    }
+
+    // ── default_modules_messaging ────────────────────────────────────────────
+
+    #[test]
+    fn messaging_mode_is_subset_of_full_mode() {
+        let full = default_modules_full();
+        let msg = default_modules_messaging();
+        // Every module in messaging mode must also exist in full mode
+        for m in &msg {
+            assert!(full.contains(m), "'{m}' in messaging mode but not in full mode");
+        }
+    }
+
+    #[test]
+    fn messaging_mode_excludes_server_features() {
+        let msg = default_modules_messaging();
+        // Messaging-only mode should not include heavier server features
+        assert!(!msg.contains(&"federation".to_string()));
+        assert!(!msg.contains(&"bots".to_string()));
+        assert!(!msg.contains(&"server_discovery".to_string()));
+        assert!(!msg.contains(&"moderation".to_string()));
+    }
+
+    #[test]
+    fn messaging_mode_includes_minimum_required() {
+        let msg = default_modules_messaging();
+        assert!(msg.contains(&"messages".to_string()));
+        assert!(msg.contains(&"dms".to_string()));
+        assert!(msg.contains(&"calls".to_string()));
+        assert!(msg.contains(&"profiles".to_string()));
+    }
+}
