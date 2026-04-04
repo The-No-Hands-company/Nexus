@@ -1,0 +1,255 @@
+import { useState, type KeyboardEvent } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import clsx from "clsx";
+import { useStore } from "../store";
+
+export default function ChannelList() {
+  const {
+    channels,
+    activeServerId,
+    servers,
+    activeChannelId,
+    setActiveChannel,
+    loadMessages,
+    unread,
+    loadDms,
+    dmChannels,
+    session,
+    createChannel,
+  } = useStore();
+
+  const navigate = useNavigate();
+  const { channelId } = useParams<{ channelId: string }>();
+  const [creatingText, setCreatingText] = useState(false);
+  const [newName, setNewName] = useState("");
+
+  const activeServer = servers.find((s) => s.id === activeServerId);
+  const homeMode = !activeServerId;
+
+  const textChannels = channels.filter(
+    (c) => c.kind === "text" || c.kind === "announcement"
+  );
+  const voiceChannels = channels.filter((c) => c.kind === "voice");
+
+  const handleChannel = (id: string) => {
+    setActiveChannel(id);
+    loadMessages(id);
+    navigate(`/channel/${id}`);
+  };
+
+  const confirmCreate = async () => {
+    if (!newName.trim() || !activeServerId) return;
+    try {
+      const ch = await createChannel(activeServerId, newName.trim(), "text");
+      setCreatingText(false);
+      setNewName("");
+      handleChannel(ch.id);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") confirmCreate();
+    if (e.key === "Escape") {
+      setCreatingText(false);
+      setNewName("");
+    }
+  };
+
+  // ── Home / DM mode ────────────────────────────────────────────────────────
+  if (homeMode) {
+    return (
+      <nav
+        aria-label="Direct Messages"
+        className="w-56 bg-bg-800 flex flex-col shrink-0 border-r border-bg-600/40 overflow-hidden"
+      >
+        <div className="px-3 py-2.5 text-sm font-semibold border-b border-bg-600/40 shrink-0">
+          Direct Messages
+        </div>
+        <div className="flex-1 overflow-y-auto px-2 py-2 flex flex-col gap-px">
+          {dmChannels.map((dm) => {
+            const name =
+              dm.name ??
+              dm.recipients
+                ?.filter((r) => r.id !== session?.userId)
+                .map((r) => r.username)
+                .join(", ") ??
+              "Direct Message";
+            const initials = name.slice(0, 2).toUpperCase();
+            const active = activeChannelId === dm.id || channelId === dm.id;
+            return (
+              <button
+                key={dm.id}
+                onClick={() => handleChannel(dm.id)}
+                aria-label={name}
+                aria-current={active ? "page" : undefined}
+                className={clsx(
+                  "flex items-center gap-2 px-2 py-1.5 rounded text-sm w-full text-left transition-colors",
+                  active
+                    ? "bg-bg-600 text-fg"
+                    : "text-muted hover:bg-bg-700 hover:text-fg"
+                )}
+              >
+                <div className="w-6 h-6 rounded-full bg-accent-500/30 flex items-center justify-center text-[9px] font-bold text-accent-300 shrink-0">
+                  {initials}
+                </div>
+                <span className="truncate flex-1">{name}</span>
+                {unread[dm.id] && (
+                  <span className="w-2 h-2 rounded-full bg-white shrink-0" />
+                )}
+              </button>
+            );
+          })}
+          {dmChannels.length === 0 && (
+            <p className="text-xs text-muted/60 px-2 py-4 text-center">
+              No direct messages yet
+            </p>
+          )}
+        </div>
+      </nav>
+    );
+  }
+
+  // ── Server channel mode ───────────────────────────────────────────────────
+  return (
+    <nav
+      aria-label="Channels"
+      className="w-56 bg-bg-800 flex flex-col shrink-0 border-r border-bg-600/40 overflow-hidden"
+    >
+      {/* Server name header */}
+      <div className="px-3 py-2.5 text-sm font-semibold border-b border-bg-600/40 shrink-0 truncate">
+        {activeServer?.name ?? "Server"}
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-2 py-2 flex flex-col gap-px">
+        {/* Text channels */}
+        <div className="flex items-center px-2 py-1 group">
+          <span className="flex-1 text-[10px] text-muted/60 uppercase tracking-widest font-medium select-none">
+            Channels
+          </span>
+          <button
+            onClick={() => setCreatingText((v) => !v)}
+            className="opacity-0 group-hover:opacity-100 text-muted/60 hover:text-fg transition-all p-0.5 rounded"
+            title="Create channel"
+            aria-label="Create text channel"
+          >
+            <PlusIcon />
+          </button>
+        </div>
+
+        {textChannels.map((ch) => {
+          const active = activeChannelId === ch.id || channelId === ch.id;
+          return (
+            <button
+              key={ch.id}
+              onClick={() => handleChannel(ch.id)}
+              aria-label={`Channel ${ch.name}`}
+              aria-current={active ? "page" : undefined}
+              className={clsx(
+                "flex items-center gap-2 px-2 py-1.5 rounded text-sm w-full text-left transition-colors",
+                active
+                  ? "bg-bg-600 text-fg"
+                  : "text-muted hover:bg-bg-700 hover:text-fg"
+              )}
+            >
+              <HashIcon />
+              <span className="truncate flex-1">{ch.name}</span>
+              {ch.is_e2ee && (
+                <span className="text-[9px] text-green-400/80 shrink-0">E2E</span>
+              )}
+              {unread[ch.id] && (
+                <span className="w-2 h-2 rounded-full bg-white shrink-0" aria-label="Unread" />
+              )}
+            </button>
+          );
+        })}
+
+        {creatingText && (
+          <div className="px-1 py-1">
+            <input
+              autoFocus
+              type="text"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={onKeyDown}
+              placeholder="channel-name"
+              maxLength={100}
+              className="w-full bg-bg-700 text-sm text-fg rounded px-2 py-1 outline-none focus:ring-1 focus:ring-accent-500 placeholder-muted/50"
+            />
+            <div className="flex gap-1 mt-1">
+              <button
+                onClick={confirmCreate}
+                disabled={!newName.trim()}
+                className="flex-1 text-[11px] bg-accent-500 hover:bg-accent-400 text-white rounded px-2 py-0.5 disabled:opacity-40 transition-colors"
+              >
+                Create
+              </button>
+              <button
+                onClick={() => { setCreatingText(false); setNewName(""); }}
+                className="flex-1 text-[11px] bg-bg-600 hover:bg-bg-500 text-muted rounded px-2 py-0.5 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Voice channels */}
+        {voiceChannels.length > 0 && (
+          <>
+            <div className="h-px bg-bg-600/40 mx-2 my-1.5" />
+            <div className="px-2 py-1">
+              <span className="text-[10px] text-muted/60 uppercase tracking-widest font-medium select-none">
+                Voice
+              </span>
+            </div>
+            {voiceChannels.map((ch) => {
+              const active = activeChannelId === ch.id || channelId === ch.id;
+              return (
+                <button
+                  key={ch.id}
+                  aria-label={`Voice channel ${ch.name}`}
+                  aria-current={active ? "page" : undefined}
+                  className={clsx(
+                    "flex items-center gap-2 px-2 py-1.5 rounded text-sm w-full text-left transition-colors",
+                    active
+                      ? "bg-bg-600 text-fg"
+                      : "text-muted hover:bg-bg-700 hover:text-fg"
+                  )}
+                >
+                  <MicIcon />
+                  <span className="truncate flex-1">{ch.name}</span>
+                </button>
+              );
+            })}
+          </>
+        )}
+      </div>
+    </nav>
+  );
+}
+
+function HashIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className="shrink-0 opacity-60">
+      <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/>
+    </svg>
+  );
+}
+
+function MicIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className="shrink-0 opacity-60">
+      <path d="M12 15c1.66 0 2.99-1.34 2.99-3L15 6c0-1.66-1.34-3-3-3S9 4.34 9 6v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 15 6.7 12H5c0 3.42 2.72 6.23 6 6.72V22h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/>
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+    </svg>
+  );
+}
