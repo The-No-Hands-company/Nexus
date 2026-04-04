@@ -39,9 +39,25 @@ pub async fn browse_media(
         bind_idx += 1;
     }
 
-    if !media_types.is_empty() {
-        // Match on content_type prefix (e.g. 'image' matches 'image/png')
-        let type_conditions: Vec<String> = media_types
+    // Sanitize media_types: strip SQL LIKE wildcards (%, _) and restrict to
+    // alphanumeric + MIME-legal chars before building the LIKE clause.
+    let sanitized_types_for_bind: Vec<String> = media_types
+        .iter()
+        .map(|mt| {
+            mt.chars()
+                .filter(|&c| c != '%' && c != '_' && c != '\\')
+                .take(64)
+                .collect::<String>()
+                .to_lowercase()
+        })
+        .filter(|mt| {
+            !mt.is_empty()
+                && mt.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '+')
+        })
+        .collect();
+
+    if !sanitized_types_for_bind.is_empty() {
+        let type_conditions: Vec<String> = sanitized_types_for_bind
             .iter()
             .map(|_mt| {
                 let cond = format!("a.content_type LIKE ${bind_idx} || '/%'");
@@ -82,7 +98,8 @@ pub async fn browse_media(
     if let Some(cid) = channel_id {
         query = query.bind(cid.to_string());
     }
-    for mt in media_types {
+    // Bind the sanitized type strings, not the raw user input
+    for mt in &sanitized_types_for_bind {
         query = query.bind(mt.clone());
     }
     if let Some(df) = date_from {

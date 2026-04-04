@@ -21,7 +21,7 @@ use nexus_db::repository::{audit_log, channels, members, roles, servers, users};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
 
 /// Server routes.
 pub fn router() -> Router<Arc<AppState>> {
@@ -42,15 +42,18 @@ pub fn router() -> Router<Arc<AppState>> {
         .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
 }
 
-/// Generate a short random alphanumeric invite code.
+/// Generate a cryptographically secure random invite code.
+///
+/// 12 alphanumeric characters (upper+lower+digits, base-62) gives ~71 bits
+/// of entropy — resistant to brute-force even without rate limiting, and
+/// consistent with Slack/Discord invite code strength.
 fn generate_invite_code() -> String {
-    use rand::Rng;
-    let mut rng = rand::rng();
-    (0..8)
-        .map(|_| {
-            let idx = rng.random_range(0..36u8);
-            (if idx < 10 { b'0' + idx } else { b'a' + idx - 10 }) as char
-        })
+    use rand::distr::Alphanumeric;
+    use rand_core::OsRng;
+    OsRng
+        .sample_iter(Alphanumeric)
+        .take(12)
+        .map(|c| (c as char).to_uppercase().next().unwrap_or(c as char))
         .collect()
 }
 
@@ -468,8 +471,25 @@ async fn get_invite_route(
 async fn join_via_invite_route(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Path(code): Path<String>,
 ) -> NexusResult<Json<serde_json::Value>> {
+    // Rate limit invite joins to prevent brute-force enumeration of invite codes.
+    // Even with 12-char codes (~71 bit entropy) an attacker sending millions of
+    // requests could eventually find a valid code without this guard.
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:invite:user:{}", auth.user_id),
+        10,  // 10 join attempts per user
+        300, // per 5 minutes
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:invite:ip:{ip}"),
+        20,  // 20 per IP
+        300,
+    ).await?;
     let invite = servers::find_invite(&state.db.pool, &code)
         .await?
         .ok_or(NexusError::NotFound { resource: "Invite".into() })?;

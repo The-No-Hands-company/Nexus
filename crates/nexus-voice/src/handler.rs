@@ -195,10 +195,28 @@ async fn handle_voice_connection(socket: WebSocket, state: Arc<VoiceServerState>
 
     tracing::debug!(session = %session_id, "Voice WebSocket connected");
 
+    // Voice clients must authenticate within 10 seconds of connecting.
+    const IDENTIFY_TIMEOUT_SECS: u64 = 10;
+    const MAX_VOICE_FRAME_BYTES: usize = 32 * 1024; // 32 KiB — ample for any signaling op
+    let identify_deadline = tokio::time::Instant::now()
+        + tokio::time::Duration::from_secs(IDENTIFY_TIMEOUT_SECS);
+
     // Receive loop
     while let Some(Ok(msg)) = receiver.next().await {
+        if !authenticated && tokio::time::Instant::now() > identify_deadline {
+            tracing::warn!(session = %session_id, "Voice: Identify timeout — closing connection");
+            break;
+        }
         match msg {
             Message::Text(text) => {
+                if text.len() > MAX_VOICE_FRAME_BYTES {
+                    tracing::warn!(
+                        session = %session_id,
+                        bytes = text.len(),
+                        "Voice: oversized signaling frame rejected"
+                    );
+                    continue;
+                }
                 let signal = match serde_json::from_str::<VoiceSignal>(&text) {
                     Ok(s) => s,
                     Err(e) => {

@@ -28,8 +28,8 @@ use crate::{auth, middleware::AuthContext, AppState};
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const ISSUER: &str = "Nexus";
-const BACKUP_CODE_COUNT: usize = 8;
-const BACKUP_CODE_LEN: usize = 8;
+const BACKUP_CODE_COUNT: usize = 10; // 10 single-use codes
+const BACKUP_CODE_LEN: usize = 12;  // 12 chars × 62 alphabet = ~71 bits entropy
 
 // ── Router ───────────────────────────────────────────────────────────────────
 
@@ -71,11 +71,16 @@ fn totp_from_secret(secret_b32: &str, username: &str) -> Result<TOTP, NexusError
 
 /// Generate `BACKUP_CODE_COUNT` random alphanumeric backup codes.
 fn generate_raw_backup_codes() -> Vec<String> {
-    let mut rng = rand::rng();
+    // Use OsRng (CSPRNG) — never the thread-local SmallRng which is not
+    // cryptographically secure. 10 codes × 12 alphanumeric chars ≈ 71 bits
+    // entropy per code — exceeds NIST SP 800-63B single-use token guidance.
+    use rand::distr::Alphanumeric;
+    use rand_core::OsRng;
+    let mut rng = OsRng;
     (0..BACKUP_CODE_COUNT)
         .map(|_| {
             (&mut rng)
-                .sample_iter(rand::distr::Alphanumeric)
+                .sample_iter(Alphanumeric)
                 .take(BACKUP_CODE_LEN)
                 .map(char::from)
                 .collect::<String>()

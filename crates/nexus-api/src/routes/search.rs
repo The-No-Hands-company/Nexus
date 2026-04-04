@@ -18,7 +18,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -67,8 +67,39 @@ struct SearchResult {
 async fn search_messages_global(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Query(params): Query<SearchParams>,
 ) -> NexusResult<Json<SearchResult>> {
+    // Rate limit: 20 searches per user per 60 seconds.
+    // Search is expensive (MeiliSearch + DB fan-out); protect against DoS.
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:search:user:{}", auth.user_id),
+        20,
+        60,
+    )
+    .await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:search:ip:{ip}"),
+        40,
+        60,
+    )
+    .await?;
+
+    // Enforce query length to prevent ReDoS / oversized MeiliSearch queries
+    if params.q.len() > 500 {
+        return Err(nexus_common::error::NexusError::Validation {
+            message: "Search query must be 500 characters or fewer".into(),
+        });
+    }
+    if params.q.trim().is_empty() {
+        return Err(nexus_common::error::NexusError::Validation {
+            message: "Search query cannot be empty".into(),
+        });
+    }
+
     metrics::counter!("nexus_search_requests_total", "scope" => "global").increment(1);
 
     let limit = params.limit.unwrap_or(20).min(50);
@@ -162,9 +193,27 @@ async fn search_messages_global(
 async fn search_server_messages(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Path(server_id): Path<Uuid>,
     Query(params): Query<SearchParams>,
 ) -> NexusResult<Json<SearchResult>> {
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:search:user:{}", auth.user_id),
+        20, 60,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:search:ip:{ip}"),
+        40, 60,
+    ).await?;
+    if params.q.len() > 500 || params.q.trim().is_empty() {
+        return Err(nexus_common::error::NexusError::Validation {
+            message: "Search query must be 1-500 characters".into(),
+        });
+    }
+
     metrics::counter!("nexus_search_requests_total", "scope" => "server").increment(1);
 
     // Verify user is a member of the server before allowing search
