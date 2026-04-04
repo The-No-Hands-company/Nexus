@@ -1969,3 +1969,109 @@ async fn add_channel_follower(
         "target_channel_id": target_channel_id,
     })))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── parse_mentions ────────────────────────────────────────────────────────
+
+    #[test]
+    fn empty_content_returns_no_mentions() {
+        assert!(parse_mentions("").is_empty());
+    }
+
+    #[test]
+    fn content_with_no_mentions_returns_empty() {
+        assert!(parse_mentions("hello world, no mentions here").is_empty());
+        assert!(parse_mentions("@plainname without angle brackets").is_empty());
+    }
+
+    #[test]
+    fn single_valid_mention_is_parsed() {
+        let uid = Uuid::new_v4();
+        let content = format!("hey <@{uid}> how are you");
+        let mentions = parse_mentions(&content);
+        assert_eq!(mentions, vec![uid]);
+    }
+
+    #[test]
+    fn multiple_different_mentions_are_all_parsed() {
+        let u1 = Uuid::new_v4();
+        let u2 = Uuid::new_v4();
+        let content = format!("<@{u1}> and <@{u2}> both mentioned");
+        let mentions = parse_mentions(&content);
+        assert_eq!(mentions.len(), 2);
+        assert!(mentions.contains(&u1));
+        assert!(mentions.contains(&u2));
+    }
+
+    #[test]
+    fn duplicate_mention_is_deduplicated() {
+        let uid = Uuid::new_v4();
+        let content = format!("<@{uid}> <@{uid}> mentioned twice");
+        let mentions = parse_mentions(&content);
+        assert_eq!(mentions.len(), 1, "duplicate mention must be deduplicated");
+        assert_eq!(mentions[0], uid);
+    }
+
+    #[test]
+    fn malformed_mention_missing_closing_angle_ignored() {
+        let uid = Uuid::new_v4();
+        let content = format!("<@{uid} no closing bracket");
+        assert!(parse_mentions(&content).is_empty());
+    }
+
+    #[test]
+    fn malformed_mention_missing_at_ignored() {
+        let uid = Uuid::new_v4();
+        let content = format!("<{uid}>");
+        assert!(parse_mentions(&content).is_empty());
+    }
+
+    #[test]
+    fn non_uuid_inside_mention_syntax_ignored() {
+        assert!(parse_mentions("<@not-a-uuid>").is_empty());
+        assert!(parse_mentions("<@12345>").is_empty());
+        assert!(parse_mentions("<@>").is_empty());
+    }
+
+    #[test]
+    fn mention_at_start_of_content_parsed() {
+        let uid = Uuid::new_v4();
+        let content = format!("<@{uid}>");
+        let mentions = parse_mentions(&content);
+        assert_eq!(mentions, vec![uid]);
+    }
+
+    #[test]
+    fn mention_at_end_of_content_parsed() {
+        let uid = Uuid::new_v4();
+        let content = format!("hello <@{uid}>");
+        let mentions = parse_mentions(&content);
+        assert_eq!(mentions, vec![uid]);
+    }
+
+    #[test]
+    fn mention_embedded_in_word_without_space_ignored() {
+        // parse_mentions uses split_whitespace, so a mention glued to other
+        // characters without spaces is treated as one token.
+        // "<@uuid>foo" splits as one token, strip_prefix("<@") works but
+        // strip_suffix('>') fails because the token ends with "foo".
+        let uid = Uuid::new_v4();
+        let content = format!("<@{uid}>extra_text_no_space");
+        // This should NOT extract the UUID because the token doesn't end with '>'
+        assert!(parse_mentions(&content).is_empty(),
+            "glued mention without trailing space must not parse");
+    }
+
+    #[test]
+    fn mixed_valid_and_invalid_mentions() {
+        let uid = Uuid::new_v4();
+        let content = format!(
+            "valid <@{uid}> invalid <@not-uuid> also <@12> end"
+        );
+        let mentions = parse_mentions(&content);
+        assert_eq!(mentions, vec![uid], "only valid UUID mentions should be extracted");
+    }
+}
