@@ -244,12 +244,37 @@ async fn search_channel_messages(
             return Err(NexusError::Forbidden);
         }
     } else {
-        // For DM channels, verify user is a participant (would require separate check)
-        // For now, return not supported — can be extended later if needed
-        metrics::counter!("nexus_search_requests_total", "scope" => "channel", "outcome" => "unsupported_dm").increment(1);
-        return Err(NexusError::Validation {
-            message: "Search within DM channels is not yet supported".into(),
-        });
+        // DM channel — verify the caller is a participant before searching.
+        let is_participant: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM dm_participants WHERE channel_id = $1::uuid AND user_id = $2::uuid)",
+        )
+        .bind(channel_id.to_string())
+        .bind(auth.user_id.to_string())
+        .fetch_one(&state.db.pool)
+        .await
+        .unwrap_or(false);
+
+        if !is_participant {
+            tracing::warn!(
+                user_id = %auth.user_id,
+                channel_id = %channel_id,
+                "Denied DM channel search: user is not a participant"
+            );
+            metrics::counter!(
+                "nexus_search_requests_total",
+                "scope" => "channel",
+                "outcome" => "forbidden_dm"
+            )
+            .increment(1);
+            return Err(NexusError::Forbidden);
+        }
+
+        metrics::counter!(
+            "nexus_search_requests_total",
+            "scope" => "channel",
+            "outcome" => "dm_allowed"
+        )
+        .increment(1);
     }
 
     let limit = params.limit.unwrap_or(20).min(50);

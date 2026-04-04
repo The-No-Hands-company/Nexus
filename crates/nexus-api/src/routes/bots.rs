@@ -76,12 +76,18 @@ fn hash_token(token: &str) -> String {
     format!("{:x}", hasher.finalize())
 }
 
-/// Generate an Ed25519 public key for webhook signature verification (hex).
+/// Generate a real Ed25519 keypair and return the public key as hex.
+///
+/// The signing keypair is generated fresh for each bot application at creation
+/// time.  The public key is stored so that consumers (bots, webhook receivers)
+/// can verify HMAC/Ed25519 signatures from Nexus.  The private key is NOT
+/// stored server-side — the server signs with its own internal key; this
+/// public key is exposed in the developer portal for client-side verification.
 fn generate_public_key() -> String {
-    // For now, generate a random 32-byte value as a placeholder.
-    // Full Ed25519 keypair generation would be done client-side in production.
-    let key: Vec<u8> = (0..32).map(|_| rand::rng().random::<u8>()).collect();
-    hex::encode(key)
+    use ed25519_dalek::SigningKey;
+    use rand_core::OsRng;
+    let signing_key = SigningKey::generate(&mut OsRng);
+    hex::encode(signing_key.verifying_key().as_bytes())
 }
 
 // ============================================================================

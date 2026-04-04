@@ -409,6 +409,41 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
                                 let Ok(uid) = claims.sub.parse::<uuid::Uuid>() else {
                                     continue;
                                 };
+
+                                // Reject suspended or disabled accounts before doing anything else.
+                                let account_ok = match nexus_db::repository::users::find_by_id(
+                                    &state.db.pool,
+                                    uid,
+                                )
+                                .await
+                                {
+                                    Ok(Some(user)) => {
+                                        let flags = user.flags;
+                                        let suspended =
+                                            nexus_common::models::user::UserFlags::SUSPENDED;
+                                        let disabled =
+                                            nexus_common::models::user::UserFlags::DISABLED;
+                                        (flags & suspended) == 0 && (flags & disabled) == 0
+                                    }
+                                    // User not found or DB error — reject to be safe.
+                                    _ => false,
+                                };
+
+                                if !account_ok {
+                                    tracing::warn!(
+                                        session = %session_id,
+                                        user_id = %uid,
+                                        "Gateway IDENTIFY rejected: account suspended or disabled"
+                                    );
+                                    let _ = direct_tx
+                                        .send(serde_json::json!({
+                                            "op": "InvalidSession",
+                                            "d": { "reason": "Account suspended" },
+                                        }))
+                                        .await;
+                                    break;
+                                }
+
                                 authenticated = true;
                                 user_id = Some(uid);
 

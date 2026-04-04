@@ -272,13 +272,50 @@ async fn server_mute(
         .server_id
         .ok_or_else(|| NexusError::Validation { message: "Not a server channel".into() })?;
 
-    // Check the moderator has permission (MUTE_MEMBERS)
-    // For now, check they're a member. Full permission check coming in v0.4.
-    let _moderator =
-        nexus_db::repository::members::find_member(&state.db.pool, auth.user_id, server_id)
-            .await
-            .map_err(NexusError::Database)?
-            .ok_or(NexusError::Forbidden)?;
+    // Check the moderator has the MUTE_MEMBERS permission.
+    let server = nexus_db::repository::servers::find_by_id(&state.db.pool, server_id)
+        .await
+        .map_err(NexusError::Database)?
+        .ok_or_else(|| NexusError::NotFound { resource: "Server".into() })?;
+
+    // Server owner always passes; otherwise evaluate role permissions.
+    if server.owner_id != auth.user_id {
+        let member =
+            nexus_db::repository::members::find_member(&state.db.pool, auth.user_id, server_id)
+                .await
+                .map_err(NexusError::Database)?
+                .ok_or(NexusError::Forbidden)?;
+
+        let all_roles =
+            nexus_db::repository::roles::list_server_roles(&state.db.pool, server_id)
+                .await
+                .map_err(NexusError::Database)?;
+
+        let effective = all_roles.iter().fold(
+            nexus_common::models::permissions::Permissions::empty(),
+            |acc, role| {
+                if role.is_default || member.roles.contains(&role.id) {
+                    acc | nexus_common::models::permissions::Permissions::from_bits_truncate(
+                        role.permissions,
+                    )
+                } else {
+                    acc
+                }
+            },
+        );
+
+        if !effective.has(nexus_common::models::permissions::Permissions::MUTE_MEMBERS) {
+            metrics::counter!(
+                "nexus_voice_requests_total",
+                "route" => "server_mute",
+                "outcome" => "forbidden"
+            )
+            .increment(1);
+            return Err(NexusError::MissingPermission {
+                permission: "MUTE_MEMBERS".into(),
+            });
+        }
+    }
 
     // Check target is in this channel
     let target_state = state
