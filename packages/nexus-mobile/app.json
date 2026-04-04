@@ -1,0 +1,38 @@
+{
+  "expo": {
+    "name": "Nexus Mobile",
+    "slug": "nexus-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "nexus",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#030a14"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.nexus.mobile"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#030a14"
+      },
+      "package": "com.nexus.mobile"
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static"
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
