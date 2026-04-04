@@ -11,6 +11,28 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+/// Percent-decode a URL-encoded path key, converting sequences like %2E or %2F
+/// back to their ASCII equivalents before path traversal checks.
+fn percent_decode(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let bytes = input.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hi = (bytes[i + 1] as char).to_digit(16);
+            let lo = (bytes[i + 2] as char).to_digit(16);
+            if let (Some(h), Some(l)) = (hi, lo) {
+                out.push((h * 16 + l) as u8 as char);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
+}
+
 /// Storage configuration (loaded from app config).
 #[derive(Debug, Clone)]
 pub struct StorageConfig {
@@ -177,18 +199,50 @@ impl StorageClient {
         match self.inner.as_ref() {
             StorageBackend::S3(_, _, _) => Ok(None),
             StorageBackend::Local(dir, _) => {
-                let safe_key = key.trim_start_matches('/');
-                // Prevent path traversal
-                if safe_key.contains("../") || safe_key.starts_with('/') {
+                // ── Path traversal guard ──────────────────────────────────────
+                // Strip leading slashes and reject any key that contains path
+                // components that could escape the data directory:
+                //   - "../" and ".."  (Unix traversal)
+                //   - "..\" and null bytes (Windows / exotic)
+                //   - URL-encoded sequences (%2e%2e, %2f, etc.) — decode first
+                let decoded = percent_decode(key);
+                let safe_key = decoded.trim_start_matches('/');
+
+                if safe_key.contains('\0')
+                    || safe_key.split('/').any(|seg| seg == ".." || seg == ".")
+                    || safe_key.contains('\\')
+                {
+                    tracing::warn!(key, "Path traversal attempt blocked");
                     return Ok(None);
                 }
-                let path = dir.join(safe_key.replace('/', std::path::MAIN_SEPARATOR_STR));
-                if !path.exists() {
+
+                let candidate = dir.join(safe_key.replace('/', std::path::MAIN_SEPARATOR_STR));
+
+                // Canonicalize both paths and verify the candidate is a
+                // descendant of the data directory. This catches symlink escapes
+                // and any traversal sequences that slipped through the above.
+                let canon_dir = match dir.canonicalize() {
+                    Ok(p) => p,
+                    Err(_) => return Ok(None),
+                };
+                let canon_candidate = match candidate.canonicalize() {
+                    Ok(p) => p,
+                    Err(_) => return Ok(None), // file doesn't exist
+                };
+                if !canon_candidate.starts_with(&canon_dir) {
+                    tracing::error!(
+                        key,
+                        candidate = %canon_candidate.display(),
+                        root = %canon_dir.display(),
+                        "Path traversal: resolved path escapes data directory"
+                    );
                     return Ok(None);
                 }
-                let bytes = tokio::fs::read(&path).await
+
+                let bytes = tokio::fs::read(&canon_candidate)
+                    .await
                     .with_context(|| format!("Local: failed to read {key}"))?;
-                let ct = mime_guess::from_path(&path)
+                let ct = mime_guess::from_path(&canon_candidate)
                     .first_raw()
                     .unwrap_or("application/octet-stream")
                     .to_owned();

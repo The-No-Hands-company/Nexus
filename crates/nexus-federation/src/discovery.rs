@@ -140,6 +140,20 @@ impl DiscoveryCache {
             if let Ok(resp) = self.http.get(&url).send().await {
                 if resp.status().is_success() {
                     if let Ok(wk) = resp.json::<WellKnownServer>().await {
+                        // ── SSRF guard ────────────────────────────────────────
+                        // The delegated server in the well-known response MUST NOT
+                        // point at a private/loopback address. An attacker on a
+                        // public server could otherwise redirect federation requests
+                        // to localhost or internal services.
+                        let delegated_host = wk.server.split(':').next().unwrap_or(&wk.server);
+                        if is_private_or_loopback(delegated_host) {
+                            tracing::warn!(
+                                server = server_name,
+                                delegated = %wk.server,
+                                "SSRF guard: rejected well-known delegation to private address"
+                            );
+                            return None;
+                        }
                         // Follow the delegated server name.
                         let resolved = if has_explicit_port(&wk.server) {
                             // Preserve whatever scheme was reachable.
@@ -174,18 +188,38 @@ pub fn has_explicit_port(server_name: &str) -> bool {
     colon_count > 0 && colon_count < 2
 }
 
-/// Returns `true` for localhost / loopback / RFC-1918 addresses (no port).
-/// Used to pick HTTP over HTTPS as the default scheme for local dev.
+/// Returns `true` for localhost, loopback, RFC-1918, link-local, and
+/// other non-routable addresses. Used as an SSRF guard on well-known delegation
+/// responses and for local-dev HTTP scheme selection.
+///
+/// Covers all ranges that should never be reachable via public federation:
+/// - Loopback: 127.0.0.0/8, ::1
+/// - RFC-1918: 10/8, 172.16/12, 192.168/16
+/// - Link-local: 169.254/16, fe80::/10
+/// - ULA IPv6: fc00::/7
+/// - Metadata: 169.254.169.254 (AWS/GCP/Azure IMDS)
 fn is_local_address(server_name: &str) -> bool {
-    let host = server_name.split(':').next().unwrap_or(server_name);
-    if host == "localhost" {
+    is_private_or_loopback(server_name.split(':').next().unwrap_or(server_name))
+}
+
+fn is_private_or_loopback(host: &str) -> bool {
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    if matches!(host, "localhost" | "ip6-localhost" | "ip6-loopback") {
         return true;
     }
-    // Loopback
+    // IPv6 loopback
+    if host == "::1" || host == "0:0:0:0:0:0:0:1" {
+        return true;
+    }
+    // IPv4 loopback 127.0.0.0/8
     if host.starts_with("127.") {
         return true;
     }
-    // RFC-1918: 10.x, 172.16-31.x, 192.168.x
+    // Unspecified / broadcast
+    if host == "0.0.0.0" || host == "255.255.255.255" {
+        return true;
+    }
+    // RFC-1918
     if host.starts_with("10.") || host.starts_with("192.168.") {
         return true;
     }
@@ -197,6 +231,18 @@ fn is_local_address(server_name: &str) -> bool {
                 }
             }
         }
+    }
+    // Link-local IPv4 (includes cloud metadata 169.254.169.254)
+    if host.starts_with("169.254.") {
+        return true;
+    }
+    // Link-local IPv6 fe80::/10 and ULA fc00::/7
+    let lower = host.to_lowercase();
+    if lower.starts_with("fe80:")
+        || lower.starts_with("fc")
+        || lower.starts_with("fd")
+    {
+        return true;
     }
     false
 }

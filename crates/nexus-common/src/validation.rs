@@ -130,3 +130,21 @@ mod tests {
         }
     }
 }
+
+/// Extract user UUIDs mentioned via the `<@uuid>` syntax from message content.
+///
+/// Returns a deduplicated `Vec<Uuid>` — used by message creation, webhook
+/// execution, and any other path that stores and broadcasts mention data.
+pub fn parse_mentions_from_content(content: &str) -> Vec<uuid::Uuid> {
+    let mut mentions: Vec<uuid::Uuid> = Vec::new();
+    for token in content.split_whitespace() {
+        if let Some(id_str) = token.strip_prefix("<@").and_then(|s| s.strip_suffix('>')) {
+            if let Ok(id) = id_str.parse::<uuid::Uuid>() {
+                if !mentions.contains(&id) {
+                    mentions.push(id);
+                }
+            }
+        }
+    }
+    mentions
+}
