@@ -173,3 +173,94 @@ mod tests {
         assert!(validate_identity_key(&short).is_err());
     }
 }
+
+    // (appended to existing #[cfg(test)] mod tests block — compile error guard
+    // catches any accidental duplication)
+
+    #[test]
+    fn validate_identity_key_correct_length_succeeds() {
+        let good = to_base64(&[0xabu8; 32]);
+        assert!(validate_identity_key(&good).is_ok());
+    }
+
+    #[test]
+    fn validate_identity_key_not_base64_errors() {
+        assert!(validate_identity_key("not!!base64!!").is_err());
+    }
+
+    #[test]
+    fn validate_identity_key_too_long_errors() {
+        let long = to_base64(&[0u8; 64]);
+        let err = validate_identity_key(&long).unwrap_err();
+        assert!(matches!(err, KeyValidationError::WrongLength { expected: 32, actual: 64 }));
+    }
+
+    #[test]
+    fn validate_x25519_key_correct_length_succeeds() {
+        let good = to_base64(&[0xcd u8; 32]);
+        assert!(validate_x25519_key(&good, "spk").is_ok());
+    }
+
+    #[test]
+    fn validate_signature_64_bytes_succeeds() {
+        let good = to_base64(&[0u8; 64]);
+        assert!(validate_signature(&good).is_ok());
+    }
+
+    #[test]
+    fn validate_signature_wrong_length_errors() {
+        let short = to_base64(&[0u8; 32]);
+        assert!(validate_signature(&short).is_err());
+    }
+
+    #[test]
+    fn safety_number_different_users_produce_different_numbers() {
+        let key = to_base64(&[1u8; 32]);
+        let uid_a = Uuid::new_v4();
+        let uid_b = Uuid::new_v4();
+        let uid_c = Uuid::new_v4();
+
+        let sn1 = compute_safety_number(uid_a, &key, uid_b, &key).unwrap();
+        let sn2 = compute_safety_number(uid_a, &key, uid_c, &key).unwrap();
+        assert_ne!(sn1, sn2, "different user pairs must produce different safety numbers");
+    }
+
+    #[test]
+    fn safety_number_format_is_ten_groups_of_five_digits() {
+        let key_a = to_base64(&[2u8; 32]);
+        let key_b = to_base64(&[3u8; 32]);
+        let sn = compute_safety_number(Uuid::nil(), &key_a, Uuid::max(), &key_b).unwrap();
+
+        let groups: Vec<&str> = sn.split(' ').collect();
+        assert_eq!(groups.len(), 10, "expected 10 space-separated groups");
+        for g in &groups {
+            assert_eq!(g.len(), 5, "each group must be exactly 5 chars: {g}");
+            assert!(g.chars().all(|c| c.is_ascii_digit()), "group must be digits: {g}");
+        }
+    }
+
+    #[test]
+    fn safety_number_invalid_key_returns_error() {
+        let good = to_base64(&[0u8; 32]);
+        let bad = "not-valid-base64!!";
+        assert!(compute_safety_number(Uuid::nil(), bad, Uuid::max(), &good).is_err());
+        assert!(compute_safety_number(Uuid::nil(), &good, Uuid::max(), bad).is_err());
+    }
+
+    #[test]
+    fn from_base64_round_trips_arbitrary_bytes() {
+        let original: Vec<u8> = (0u8..=255).collect();
+        let encoded = to_base64(&original);
+        let decoded = from_base64(&encoded).unwrap();
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn from_base64_returns_none_for_invalid_input() {
+        assert!(from_base64("!!!invalid!!!").is_none());
+    }
+
+    #[test]
+    fn to_base64_empty_bytes_gives_empty_string() {
+        assert_eq!(to_base64(&[]), "");
+    }

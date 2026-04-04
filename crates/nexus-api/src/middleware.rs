@@ -573,3 +573,151 @@ pub async fn security_headers(request: Request, next: Next) -> Response {
     response
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::HeaderMap;
+
+    // ── normalize_path ────────────────────────────────────────────────────────
+
+    #[test]
+    fn normalize_path_keeps_up_to_four_segments() {
+        assert_eq!(normalize_path("/api/v1/users/123"), "/api/v1/users/123");
+    }
+
+    #[test]
+    fn normalize_path_truncates_beyond_four_segments() {
+        // Only the first four slash-delimited parts are kept
+        assert_eq!(
+            normalize_path("/api/v1/channels/abc/messages/def"),
+            "/api/v1/channels/abc"
+        );
+    }
+
+    #[test]
+    fn normalize_path_root_is_preserved() {
+        assert_eq!(normalize_path("/"), "/");
+    }
+
+    #[test]
+    fn normalize_path_short_path_unchanged() {
+        assert_eq!(normalize_path("/health"), "/health");
+        assert_eq!(normalize_path("/api/v1"), "/api/v1");
+    }
+
+    // ── sha256_hex ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn sha256_hex_is_deterministic() {
+        let a = sha256_hex("hello");
+        let b = sha256_hex("hello");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn sha256_hex_differs_for_different_inputs() {
+        assert_ne!(sha256_hex("hello"), sha256_hex("world"));
+    }
+
+    #[test]
+    fn sha256_hex_produces_64_char_lowercase_hex() {
+        let h = sha256_hex("nexus");
+        assert_eq!(h.len(), 64);
+        assert!(h.chars().all(|c| c.is_ascii_hexdigit()));
+        // Hex digits should all be lowercase
+        assert_eq!(h, h.to_lowercase());
+    }
+
+    #[test]
+    fn sha256_hex_empty_string_known_value() {
+        // SHA-256("") = e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+        assert!(sha256_hex("").starts_with("e3b0c44"));
+    }
+
+    #[test]
+    fn sha256_hex_bot_token_differs_from_raw_token() {
+        let raw = "my-bot-token";
+        let prefixed = format!("Bot {raw}");
+        assert_ne!(sha256_hex(raw), sha256_hex(&prefixed));
+    }
+
+    // ── extract_client_ip ─────────────────────────────────────────────────────
+
+    #[test]
+    fn extract_client_ip_returns_unknown_with_no_headers() {
+        let headers = HeaderMap::new();
+        assert_eq!(extract_client_ip(&headers), "unknown");
+    }
+
+    #[test]
+    fn extract_client_ip_reads_x_forwarded_for_first_value() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-forwarded-for",
+            "203.0.113.1, 10.0.0.1, 172.16.0.1".parse().unwrap(),
+        );
+        // Must return the leftmost (original client) address
+        assert_eq!(extract_client_ip(&headers), "203.0.113.1");
+    }
+
+    #[test]
+    fn extract_client_ip_reads_x_real_ip_as_fallback() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-real-ip", "198.51.100.42".parse().unwrap());
+        assert_eq!(extract_client_ip(&headers), "198.51.100.42");
+    }
+
+    #[test]
+    fn extract_client_ip_prefers_xff_over_x_real_ip() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-for", "203.0.113.1".parse().unwrap());
+        headers.insert("x-real-ip", "198.51.100.42".parse().unwrap());
+        // X-Forwarded-For takes precedence
+        assert_eq!(extract_client_ip(&headers), "203.0.113.1");
+    }
+
+    #[test]
+    fn extract_client_ip_trims_whitespace_from_xff() {
+        let mut headers = HeaderMap::new();
+        // Some proxies add extra spaces
+        headers.insert("x-forwarded-for", "  203.0.113.5  , 10.0.0.1".parse().unwrap());
+        assert_eq!(extract_client_ip(&headers), "203.0.113.5");
+    }
+
+    // ── check_rate_limit_local ────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn rate_limit_local_allows_under_limit() {
+        // Use a unique key to avoid cross-test interference
+        let key = format!("test:allow:{}", uuid::Uuid::new_v4());
+        let result = check_rate_limit_local(&key, 5, 60).await;
+        assert!(result.is_ok(), "first request should be allowed");
+    }
+
+    #[tokio::test]
+    async fn rate_limit_local_blocks_over_limit() {
+        let key = format!("test:block:{}", uuid::Uuid::new_v4());
+        let limit = 3u64;
+        // Exhaust the limit
+        for _ in 0..limit {
+            check_rate_limit_local(&key, limit, 60).await.unwrap();
+        }
+        // Next call should be rate limited
+        let err = check_rate_limit_local(&key, limit, 60).await.unwrap_err();
+        assert!(
+            matches!(err, NexusError::RateLimited { .. }),
+            "expected RateLimited, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn rate_limit_local_window_resets_after_expiry() {
+        let key = format!("test:reset:{}", uuid::Uuid::new_v4());
+        // Exhaust a limit with a 0-second window (already expired by next call)
+        check_rate_limit_local(&key, 1, 0).await.unwrap();
+        // A 0-second window resets immediately — next call should succeed
+        let result = check_rate_limit_local(&key, 1, 0).await;
+        assert!(result.is_ok(), "window should have reset");
+    }
+}

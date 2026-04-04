@@ -54,3 +54,79 @@ pub fn validate_name(name: &str) -> Result<(), NexusError> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── validate_name ────────────────────────────────────────────────────────
+
+    #[test]
+    fn empty_string_is_rejected() {
+        assert!(validate_name("").is_err());
+    }
+
+    #[test]
+    fn whitespace_only_is_rejected() {
+        assert!(validate_name("   ").is_err());
+        assert!(validate_name("\t").is_err());
+    }
+
+    #[test]
+    fn valid_simple_names_are_accepted() {
+        assert!(validate_name("general").is_ok());
+        assert!(validate_name("General").is_ok());
+        assert!(validate_name("my-channel").is_ok());
+        assert!(validate_name("my_channel").is_ok());
+        assert!(validate_name("channel 42").is_ok());
+        assert!(validate_name("CoolServer2026").is_ok());
+    }
+
+    #[test]
+    fn special_chars_are_rejected() {
+        assert!(validate_name("hello!").is_err());
+        assert!(validate_name("chan#name").is_err());
+        assert!(validate_name("server@home").is_err());
+        assert!(validate_name("path/traversal").is_err());
+        assert!(validate_name("semi;colon").is_err());
+    }
+
+    #[test]
+    fn error_variant_is_validation() {
+        let err = validate_name("!bad!").unwrap_err();
+        assert!(matches!(err, crate::error::NexusError::Validation { .. }));
+    }
+
+    #[test]
+    fn unicode_letters_are_accepted() {
+        assert!(validate_name("Ñexus").is_ok());
+        assert!(validate_name("Ñèxùs").is_ok());
+    }
+
+    // ── validate_request ─────────────────────────────────────────────────────
+
+    #[derive(Debug, validator::Validate)]
+    struct Dummy {
+        #[validate(length(min = 1, max = 10, message = "too long or empty"))]
+        pub name: String,
+    }
+
+    #[test]
+    fn validate_request_passes_for_valid_data() {
+        let req = Dummy { name: "hello".into() };
+        assert!(validate_request(&req).is_ok());
+    }
+
+    #[test]
+    fn validate_request_fails_and_formats_error() {
+        let req = Dummy { name: "this is way too long for the limit".into() };
+        let err = validate_request(&req).unwrap_err();
+        // Error should be a Validation variant with a non-empty message
+        match err {
+            crate::error::NexusError::Validation { message } => {
+                assert!(!message.is_empty());
+            }
+            other => panic!("expected Validation error, got {other:?}"),
+        }
+    }
+}

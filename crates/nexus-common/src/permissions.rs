@@ -220,3 +220,332 @@ pub fn compute_permissions(
 
     perms
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uuid::Uuid;
+
+    // ── Permissions bitfield ─────────────────────────────────────────────────
+
+    #[test]
+    fn empty_permissions_contains_nothing() {
+        let p = Permissions::empty();
+        assert!(!p.contains(Permissions::SEND_MESSAGES));
+        assert!(!p.contains(Permissions::ADMINISTRATOR));
+        assert!(!p.is_admin());
+    }
+
+    #[test]
+    fn individual_bits_are_distinct() {
+        // Every defined permission bit must be unique (no aliasing).
+        let all_bits: Vec<i64> = vec![
+            Permissions::VIEW_CHANNEL.bits(),
+            Permissions::MANAGE_SERVER.bits(),
+            Permissions::MANAGE_CHANNELS.bits(),
+            Permissions::MANAGE_ROLES.bits(),
+            Permissions::CREATE_INVITES.bits(),
+            Permissions::KICK_MEMBERS.bits(),
+            Permissions::BAN_MEMBERS.bits(),
+            Permissions::SEND_MESSAGES.bits(),
+            Permissions::MUTE_MEMBERS.bits(),
+            Permissions::ADMINISTRATOR.bits(),
+        ];
+        let unique: std::collections::HashSet<_> = all_bits.iter().collect();
+        assert_eq!(all_bits.len(), unique.len(), "duplicate permission bits detected");
+    }
+
+    #[test]
+    fn or_combines_permissions() {
+        let p = Permissions::SEND_MESSAGES | Permissions::VIEW_CHANNEL;
+        assert!(p.contains(Permissions::SEND_MESSAGES));
+        assert!(p.contains(Permissions::VIEW_CHANNEL));
+        assert!(!p.contains(Permissions::ADMINISTRATOR));
+    }
+
+    #[test]
+    fn and_not_removes_permission() {
+        let p = Permissions::SEND_MESSAGES | Permissions::VIEW_CHANNEL;
+        let stripped = p & !Permissions::SEND_MESSAGES;
+        assert!(!stripped.contains(Permissions::SEND_MESSAGES));
+        assert!(stripped.contains(Permissions::VIEW_CHANNEL));
+    }
+
+    #[test]
+    fn administrator_implies_all_via_has() {
+        let p = Permissions::ADMINISTRATOR;
+        assert!(p.is_admin());
+        // has() returns true for any permission when ADMINISTRATOR is set
+        assert!(p.has(Permissions::SEND_MESSAGES));
+        assert!(p.has(Permissions::BAN_MEMBERS));
+        assert!(p.has(Permissions::MANAGE_SERVER));
+        assert!(p.has(Permissions::MUTE_MEMBERS));
+    }
+
+    #[test]
+    fn has_returns_false_without_permission() {
+        let p = Permissions::VIEW_CHANNEL | Permissions::SEND_MESSAGES;
+        assert!(!p.has(Permissions::BAN_MEMBERS));
+        assert!(!p.has(Permissions::ADMINISTRATOR));
+    }
+
+    #[test]
+    fn has_returns_true_for_held_permission() {
+        let p = Permissions::BAN_MEMBERS | Permissions::KICK_MEMBERS;
+        assert!(p.has(Permissions::BAN_MEMBERS));
+        assert!(p.has(Permissions::KICK_MEMBERS));
+    }
+
+    #[test]
+    fn default_everyone_contains_expected_permissions() {
+        let p = Permissions::default_everyone();
+        assert!(p.contains(Permissions::VIEW_CHANNEL));
+        assert!(p.contains(Permissions::SEND_MESSAGES));
+        assert!(p.contains(Permissions::ADD_REACTIONS));
+        assert!(p.contains(Permissions::CONNECT));
+        assert!(p.contains(Permissions::SPEAK));
+        // Should NOT grant moderation powers
+        assert!(!p.contains(Permissions::BAN_MEMBERS));
+        assert!(!p.contains(Permissions::KICK_MEMBERS));
+        assert!(!p.contains(Permissions::ADMINISTRATOR));
+        assert!(!p.contains(Permissions::MANAGE_SERVER));
+    }
+
+    #[test]
+    fn from_bits_truncate_ignores_unknown_bits() {
+        // Bits beyond the defined flags should be masked out silently.
+        let p = Permissions::from_bits_truncate(i64::MAX);
+        // All known bits are set but no panic or invalid state.
+        assert!(p.contains(Permissions::ADMINISTRATOR));
+        assert!(p.contains(Permissions::SEND_MESSAGES));
+    }
+
+    // ── compute_permissions ──────────────────────────────────────────────────
+
+    fn setup() -> (Uuid, Uuid, Uuid) {
+        let everyone_id = Uuid::new_v4();
+        let member_id = Uuid::new_v4();
+        let role_id = Uuid::new_v4();
+        (everyone_id, member_id, role_id)
+    }
+
+    #[test]
+    fn base_permissions_without_overwrites() {
+        let (everyone_id, member_id, _) = setup();
+        let base = Permissions::VIEW_CHANNEL | Permissions::SEND_MESSAGES;
+
+        let effective = compute_permissions(
+            base,
+            &[],
+            &[],
+            &[],
+            member_id,
+            everyone_id,
+        );
+
+        assert!(effective.contains(Permissions::VIEW_CHANNEL));
+        assert!(effective.contains(Permissions::SEND_MESSAGES));
+        assert!(!effective.contains(Permissions::BAN_MEMBERS));
+    }
+
+    #[test]
+    fn role_permissions_are_ored_in() {
+        let (everyone_id, member_id, role_id) = setup();
+        let base = Permissions::VIEW_CHANNEL;
+        let role_perms = Permissions::BAN_MEMBERS | Permissions::KICK_MEMBERS;
+
+        let effective = compute_permissions(
+            base,
+            &[role_perms],
+            &[],
+            &[role_id],
+            member_id,
+            everyone_id,
+        );
+
+        assert!(effective.contains(Permissions::VIEW_CHANNEL));
+        assert!(effective.contains(Permissions::BAN_MEMBERS));
+        assert!(effective.contains(Permissions::KICK_MEMBERS));
+    }
+
+    #[test]
+    fn channel_deny_overwrite_removes_permission() {
+        let (everyone_id, member_id, _) = setup();
+        let base = Permissions::VIEW_CHANNEL | Permissions::SEND_MESSAGES;
+
+        let overwrite = PermissionOverwrite {
+            target_id: everyone_id,
+            target_type: OverwriteType::Role,
+            allow: 0,
+            deny: Permissions::SEND_MESSAGES.bits(),
+        };
+
+        let effective = compute_permissions(
+            base,
+            &[],
+            &[overwrite],
+            &[],
+            member_id,
+            everyone_id,
+        );
+
+        assert!(effective.contains(Permissions::VIEW_CHANNEL));
+        assert!(!effective.contains(Permissions::SEND_MESSAGES));
+    }
+
+    #[test]
+    fn channel_allow_overwrite_grants_permission() {
+        let (everyone_id, member_id, _) = setup();
+        // Base has no MANAGE_MESSAGES
+        let base = Permissions::VIEW_CHANNEL;
+
+        let overwrite = PermissionOverwrite {
+            target_id: everyone_id,
+            target_type: OverwriteType::Role,
+            allow: Permissions::MANAGE_MESSAGES.bits(),
+            deny: 0,
+        };
+
+        let effective = compute_permissions(
+            base,
+            &[],
+            &[overwrite],
+            &[],
+            member_id,
+            everyone_id,
+        );
+
+        assert!(effective.contains(Permissions::MANAGE_MESSAGES));
+    }
+
+    #[test]
+    fn user_overwrite_takes_priority_over_role_deny() {
+        let (everyone_id, member_id, _) = setup();
+        let base = Permissions::VIEW_CHANNEL | Permissions::SEND_MESSAGES;
+
+        // Everyone deny SEND_MESSAGES
+        let role_deny = PermissionOverwrite {
+            target_id: everyone_id,
+            target_type: OverwriteType::Role,
+            allow: 0,
+            deny: Permissions::SEND_MESSAGES.bits(),
+        };
+        // But user-level allow restores it
+        let user_allow = PermissionOverwrite {
+            target_id: member_id,
+            target_type: OverwriteType::User,
+            allow: Permissions::SEND_MESSAGES.bits(),
+            deny: 0,
+        };
+
+        let effective = compute_permissions(
+            base,
+            &[],
+            &[role_deny, user_allow],
+            &[],
+            member_id,
+            everyone_id,
+        );
+
+        assert!(effective.contains(Permissions::SEND_MESSAGES));
+    }
+
+    #[test]
+    fn user_deny_overwrite_removes_even_role_granted_permission() {
+        let (everyone_id, member_id, role_id) = setup();
+        let base = Permissions::VIEW_CHANNEL;
+        let role_perms = Permissions::SEND_MESSAGES;
+
+        // Role grants SEND_MESSAGES, but user override denies it
+        let user_deny = PermissionOverwrite {
+            target_id: member_id,
+            target_type: OverwriteType::User,
+            allow: 0,
+            deny: Permissions::SEND_MESSAGES.bits(),
+        };
+
+        let effective = compute_permissions(
+            base,
+            &[role_perms],
+            &[user_deny],
+            &[role_id],
+            member_id,
+            everyone_id,
+        );
+
+        assert!(!effective.contains(Permissions::SEND_MESSAGES));
+    }
+
+    #[test]
+    fn administrator_bypasses_channel_deny_overwrites() {
+        let (everyone_id, member_id, _) = setup();
+        let base = Permissions::ADMINISTRATOR;
+
+        let deny_all = PermissionOverwrite {
+            target_id: everyone_id,
+            target_type: OverwriteType::Role,
+            allow: 0,
+            deny: i64::MAX, // deny everything
+        };
+
+        let effective = compute_permissions(
+            base,
+            &[],
+            &[deny_all],
+            &[],
+            member_id,
+            everyone_id,
+        );
+
+        // Admin short-circuits before channel overwrites are applied
+        assert!(effective.contains(Permissions::SEND_MESSAGES));
+        assert!(effective.contains(Permissions::BAN_MEMBERS));
+        assert!(effective.contains(Permissions::VIEW_CHANNEL));
+    }
+
+    #[test]
+    fn role_overwrites_only_apply_to_members_holding_the_role() {
+        let (everyone_id, member_id, role_id) = setup();
+        let other_role_id = Uuid::new_v4();
+        let base = Permissions::VIEW_CHANNEL | Permissions::SEND_MESSAGES;
+
+        // Overwrite targets a role the member does NOT hold
+        let overwrite = PermissionOverwrite {
+            target_id: other_role_id,
+            target_type: OverwriteType::Role,
+            allow: 0,
+            deny: Permissions::SEND_MESSAGES.bits(),
+        };
+
+        let effective = compute_permissions(
+            base,
+            &[],
+            &[overwrite],
+            &[role_id], // member holds role_id, not other_role_id
+            member_id,
+            everyone_id,
+        );
+
+        // Deny from a role the member doesn't have must NOT apply
+        assert!(effective.contains(Permissions::SEND_MESSAGES));
+    }
+
+    #[test]
+    fn multiple_role_permissions_are_all_included() {
+        let (everyone_id, member_id, _) = setup();
+        let role1_id = Uuid::new_v4();
+        let role2_id = Uuid::new_v4();
+
+        let effective = compute_permissions(
+            Permissions::empty(),
+            &[Permissions::VIEW_CHANNEL, Permissions::BAN_MEMBERS],
+            &[],
+            &[role1_id, role2_id],
+            member_id,
+            everyone_id,
+        );
+
+        assert!(effective.contains(Permissions::VIEW_CHANNEL));
+        assert!(effective.contains(Permissions::BAN_MEMBERS));
+    }
+}
