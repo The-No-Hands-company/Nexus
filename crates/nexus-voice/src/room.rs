@@ -162,3 +162,194 @@ impl VoiceRoom {
         self.participants.read().await.is_empty()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn channel() -> Uuid { Uuid::new_v4() }
+    fn user()    -> Uuid { Uuid::new_v4() }
+    fn session() -> String { Uuid::new_v4().to_string() }
+
+    // ── VoiceRoom construction ────────────────────────────────────────────────
+
+    #[test]
+    fn new_room_has_correct_channel_id() {
+        let cid = channel();
+        let room = VoiceRoom::new(cid);
+        assert_eq!(room.channel_id, cid);
+    }
+
+    #[test]
+    fn new_room_has_no_server_id() {
+        let room = VoiceRoom::new(channel());
+        assert!(room.server_id.is_none());
+    }
+
+    #[test]
+    fn with_server_sets_server_id() {
+        let sid = Uuid::new_v4();
+        let room = VoiceRoom::new(channel()).with_server(sid);
+        assert_eq!(room.server_id, Some(sid));
+    }
+
+    // ── join / leave / count ──────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn join_adds_participant_with_defaults() {
+        let room = VoiceRoom::new(channel());
+        let uid = user();
+        let p = room.join(uid, session()).await;
+
+        assert_eq!(p.user_id, uid);
+        assert!(!p.self_mute);
+        assert!(!p.self_deaf);
+        assert!(!p.server_mute);
+        assert!(!p.video);
+        assert!(p.noise_suppression, "noise suppression on by default");
+        assert_eq!(p.volume, 100);
+    }
+
+    #[tokio::test]
+    async fn participant_count_increments_on_join() {
+        let room = VoiceRoom::new(channel());
+        assert_eq!(room.participant_count().await, 0);
+        room.join(user(), session()).await;
+        assert_eq!(room.participant_count().await, 1);
+        room.join(user(), session()).await;
+        assert_eq!(room.participant_count().await, 2);
+    }
+
+    #[tokio::test]
+    async fn leave_removes_participant_and_returns_it() {
+        let room = VoiceRoom::new(channel());
+        let uid = user();
+        room.join(uid, session()).await;
+
+        let removed = room.leave(uid).await;
+        assert!(removed.is_some());
+        assert_eq!(removed.unwrap().user_id, uid);
+        assert_eq!(room.participant_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn leave_nonexistent_user_returns_none() {
+        let room = VoiceRoom::new(channel());
+        let result = room.leave(user()).await;
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn is_empty_true_when_no_participants() {
+        let room = VoiceRoom::new(channel());
+        assert!(room.is_empty().await);
+        let uid = user();
+        room.join(uid, session()).await;
+        assert!(!room.is_empty().await);
+        room.leave(uid).await;
+        assert!(room.is_empty().await);
+    }
+
+    // ── get_participant / get_participants ────────────────────────────────────
+
+    #[tokio::test]
+    async fn get_participant_returns_correct_user() {
+        let room = VoiceRoom::new(channel());
+        let uid = user();
+        room.join(uid, session()).await;
+
+        let p = room.get_participant(uid).await.unwrap();
+        assert_eq!(p.user_id, uid);
+    }
+
+    #[tokio::test]
+    async fn get_participant_absent_returns_none() {
+        let room = VoiceRoom::new(channel());
+        assert!(room.get_participant(user()).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn get_participants_returns_all() {
+        let room = VoiceRoom::new(channel());
+        let uid1 = user();
+        let uid2 = user();
+        room.join(uid1, session()).await;
+        room.join(uid2, session()).await;
+
+        let all = room.get_participants().await;
+        assert_eq!(all.len(), 2);
+        let ids: Vec<Uuid> = all.iter().map(|p| p.user_id).collect();
+        assert!(ids.contains(&uid1));
+        assert!(ids.contains(&uid2));
+    }
+
+    // ── update_state ──────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn update_state_applies_mute() {
+        let room = VoiceRoom::new(channel());
+        let uid = user();
+        room.join(uid, session()).await;
+
+        room.update_state(uid, Some(true), None, None, None).await;
+        let p = room.get_participant(uid).await.unwrap();
+        assert!(p.self_mute);
+        assert!(!p.self_deaf); // unchanged
+    }
+
+    #[tokio::test]
+    async fn update_state_applies_video_and_screen_share() {
+        let room = VoiceRoom::new(channel());
+        let uid = user();
+        room.join(uid, session()).await;
+
+        room.update_state(uid, None, None, Some(true), Some(true)).await;
+        let p = room.get_participant(uid).await.unwrap();
+        assert!(p.video);
+        assert!(p.screen_share);
+    }
+
+    #[tokio::test]
+    async fn update_state_no_op_for_unknown_user() {
+        let room = VoiceRoom::new(channel());
+        // Should not panic for a user who isn't in the room
+        room.update_state(user(), Some(true), Some(true), Some(true), Some(true)).await;
+    }
+
+    // ── sync_from_voice_state ─────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn sync_from_voice_state_mirrors_fields() {
+        use crate::state::VoiceState;
+
+        let room = VoiceRoom::new(channel());
+        let uid = user();
+        room.join(uid, session()).await;
+
+        let vs = VoiceState {
+            user_id: uid,
+            channel_id: room.channel_id,
+            server_id: None,
+            session_id: session(),
+            self_mute: true,
+            self_deaf: true,
+            server_mute: true,
+            server_deaf: false,
+            self_video: true,
+            self_stream: true,
+            suppress: false,
+            speaking: true,
+            connected_at: chrono::Utc::now(),
+        };
+
+        room.sync_from_voice_state(&vs).await;
+
+        let p = room.get_participant(uid).await.unwrap();
+        assert!(p.self_mute);
+        assert!(p.self_deaf);
+        assert!(p.server_mute);
+        assert!(p.video);
+        assert!(p.screen_share);
+        assert!(p.speaking);
+    }
+}

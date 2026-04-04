@@ -289,3 +289,264 @@ pub struct VoiceGlobalStats {
     pub streaming_count: usize,
     pub video_count: usize,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn uid() -> Uuid { Uuid::new_v4() }
+    fn cid() -> Uuid { Uuid::new_v4() }
+    fn sid() -> String { Uuid::new_v4().to_string() }
+
+    // ── join ──────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn join_creates_state_with_defaults() {
+        let mgr = VoiceStateManager::new();
+        let user = uid();
+        let chan = cid();
+
+        let (state, old) = mgr.join(user, chan, None, sid()).await;
+
+        assert_eq!(state.user_id, user);
+        assert_eq!(state.channel_id, chan);
+        assert!(old.is_none(), "first join has no previous channel");
+        assert!(!state.self_mute);
+        assert!(!state.self_deaf);
+        assert!(!state.server_mute);
+        assert!(!state.speaking);
+    }
+
+    #[tokio::test]
+    async fn join_returns_old_channel_on_channel_switch() {
+        let mgr = VoiceStateManager::new();
+        let user = uid();
+        let chan1 = cid();
+        let chan2 = cid();
+
+        mgr.join(user, chan1, None, sid()).await;
+        let (_, old) = mgr.join(user, chan2, None, sid()).await;
+
+        assert_eq!(old, Some(chan1), "second join must report previous channel");
+    }
+
+    #[tokio::test]
+    async fn join_moves_user_out_of_previous_channel() {
+        let mgr = VoiceStateManager::new();
+        let user = uid();
+        let chan1 = cid();
+        let chan2 = cid();
+
+        mgr.join(user, chan1, None, sid()).await;
+        mgr.join(user, chan2, None, sid()).await;
+
+        assert_eq!(mgr.get_channel_count(chan1).await, 0, "old channel must be empty");
+        assert_eq!(mgr.get_channel_count(chan2).await, 1, "new channel has the user");
+    }
+
+    // ── leave ─────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn leave_returns_channel_id() {
+        let mgr = VoiceStateManager::new();
+        let user = uid();
+        let chan = cid();
+
+        mgr.join(user, chan, None, sid()).await;
+        let left = mgr.leave(user).await;
+
+        assert_eq!(left, Some(chan));
+    }
+
+    #[tokio::test]
+    async fn leave_removes_from_channel_index() {
+        let mgr = VoiceStateManager::new();
+        let user = uid();
+        let chan = cid();
+
+        mgr.join(user, chan, None, sid()).await;
+        mgr.leave(user).await;
+
+        assert_eq!(mgr.get_channel_count(chan).await, 0);
+        assert!(!mgr.is_in_voice(user).await);
+    }
+
+    #[tokio::test]
+    async fn leave_for_absent_user_returns_none() {
+        let mgr = VoiceStateManager::new();
+        assert!(mgr.leave(uid()).await.is_none());
+    }
+
+    // ── is_in_voice / get_user_state ─────────────────────────────────────────
+
+    #[tokio::test]
+    async fn is_in_voice_true_after_join() {
+        let mgr = VoiceStateManager::new();
+        let user = uid();
+        assert!(!mgr.is_in_voice(user).await);
+        mgr.join(user, cid(), None, sid()).await;
+        assert!(mgr.is_in_voice(user).await);
+    }
+
+    #[tokio::test]
+    async fn get_user_state_returns_current_state() {
+        let mgr = VoiceStateManager::new();
+        let user = uid();
+        let chan = cid();
+        mgr.join(user, chan, None, sid()).await;
+
+        let state = mgr.get_user_state(user).await.unwrap();
+        assert_eq!(state.channel_id, chan);
+    }
+
+    // ── get_channel_members / get_channel_count ───────────────────────────────
+
+    #[tokio::test]
+    async fn channel_members_includes_all_joined_users() {
+        let mgr = VoiceStateManager::new();
+        let chan = cid();
+        let u1 = uid();
+        let u2 = uid();
+
+        mgr.join(u1, chan, None, sid()).await;
+        mgr.join(u2, chan, None, sid()).await;
+
+        let members = mgr.get_channel_members(chan).await;
+        assert_eq!(members.len(), 2);
+        let ids: Vec<Uuid> = members.iter().map(|s| s.user_id).collect();
+        assert!(ids.contains(&u1));
+        assert!(ids.contains(&u2));
+    }
+
+    #[tokio::test]
+    async fn channel_count_zero_for_empty_channel() {
+        let mgr = VoiceStateManager::new();
+        assert_eq!(mgr.get_channel_count(cid()).await, 0);
+    }
+
+    // ── update_self_state ─────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn update_self_state_applies_mute() {
+        let mgr = VoiceStateManager::new();
+        let user = uid();
+        mgr.join(user, cid(), None, sid()).await;
+
+        let update = VoiceStateUpdate {
+            self_mute: Some(true),
+            self_deaf: None,
+            self_video: None,
+            self_stream: None,
+        };
+        let updated = mgr.update_self_state(user, &update).await.unwrap();
+        assert!(updated.self_mute);
+        assert!(!updated.self_deaf); // unchanged
+    }
+
+    #[tokio::test]
+    async fn update_self_state_returns_none_for_absent_user() {
+        let mgr = VoiceStateManager::new();
+        let update = VoiceStateUpdate {
+            self_mute: Some(true),
+            self_deaf: None,
+            self_video: None,
+            self_stream: None,
+        };
+        assert!(mgr.update_self_state(uid(), &update).await.is_none());
+    }
+
+    // ── apply_mod_action ──────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn apply_mod_action_server_mutes_user() {
+        let mgr = VoiceStateManager::new();
+        let user = uid();
+        mgr.join(user, cid(), None, sid()).await;
+
+        let action = VoiceModAction {
+            target_user_id: user,
+            server_mute: Some(true),
+            server_deaf: None,
+        };
+        let updated = mgr.apply_mod_action(&action).await.unwrap();
+        assert!(updated.server_mute);
+        assert!(!updated.server_deaf); // unchanged
+    }
+
+    #[tokio::test]
+    async fn apply_mod_action_on_absent_user_returns_none() {
+        let mgr = VoiceStateManager::new();
+        let action = VoiceModAction {
+            target_user_id: uid(),
+            server_mute: Some(true),
+            server_deaf: None,
+        };
+        assert!(mgr.apply_mod_action(&action).await.is_none());
+    }
+
+    // ── set_speaking ──────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn set_speaking_updates_flag() {
+        let mgr = VoiceStateManager::new();
+        let user = uid();
+        mgr.join(user, cid(), None, sid()).await;
+
+        mgr.set_speaking(user, true).await;
+        assert!(mgr.get_user_state(user).await.unwrap().speaking);
+
+        mgr.set_speaking(user, false).await;
+        assert!(!mgr.get_user_state(user).await.unwrap().speaking);
+    }
+
+    // ── disconnect_channel ────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn disconnect_channel_removes_all_members() {
+        let mgr = VoiceStateManager::new();
+        let chan = cid();
+        let u1 = uid();
+        let u2 = uid();
+
+        mgr.join(u1, chan, None, sid()).await;
+        mgr.join(u2, chan, None, sid()).await;
+
+        let evicted = mgr.disconnect_channel(chan).await;
+        assert_eq!(evicted.len(), 2);
+        assert_eq!(mgr.get_channel_count(chan).await, 0);
+        assert!(!mgr.is_in_voice(u1).await);
+        assert!(!mgr.is_in_voice(u2).await);
+    }
+
+    #[tokio::test]
+    async fn disconnect_empty_channel_returns_empty_vec() {
+        let mgr = VoiceStateManager::new();
+        let evicted = mgr.disconnect_channel(cid()).await;
+        assert!(evicted.is_empty());
+    }
+
+    // ── stats ─────────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn stats_reflect_current_connections() {
+        let mgr = VoiceStateManager::new();
+        let chan = cid();
+        let u1 = uid();
+        let u2 = uid();
+
+        mgr.join(u1, chan, None, sid()).await;
+        mgr.join(u2, chan, None, sid()).await;
+
+        // Set u1 streaming and u2 on video
+        let s1 = VoiceStateUpdate { self_stream: Some(true), self_mute: None, self_deaf: None, self_video: None };
+        let s2 = VoiceStateUpdate { self_video: Some(true), self_mute: None, self_deaf: None, self_stream: None };
+        mgr.update_self_state(u1, &s1).await;
+        mgr.update_self_state(u2, &s2).await;
+
+        let stats = mgr.stats().await;
+        assert_eq!(stats.total_connections, 2);
+        assert_eq!(stats.active_channels, 1);
+        assert_eq!(stats.streaming_count, 1);
+        assert_eq!(stats.video_count, 1);
+    }
+}

@@ -112,3 +112,122 @@ pub struct GatewayEvent {
     /// Which user triggered this event
     pub user_id: Option<Uuid>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use uuid::Uuid;
+
+    fn make_event(event_type: &str) -> GatewayEvent {
+        GatewayEvent {
+            event_type: event_type.to_string(),
+            data: json!({}),
+            server_id: None,
+            channel_id: None,
+            user_id: None,
+        }
+    }
+
+    // ── GatewayEvent construction ─────────────────────────────────────────────
+
+    #[test]
+    fn event_type_is_stored_verbatim() {
+        let evt = make_event("MESSAGE_CREATE");
+        assert_eq!(evt.event_type, "MESSAGE_CREATE");
+    }
+
+    #[test]
+    fn optional_ids_default_to_none() {
+        let evt = make_event("TYPING_START");
+        assert!(evt.server_id.is_none());
+        assert!(evt.channel_id.is_none());
+        assert!(evt.user_id.is_none());
+    }
+
+    #[test]
+    fn ids_are_stored_when_provided() {
+        let server = Uuid::new_v4();
+        let channel = Uuid::new_v4();
+        let user = Uuid::new_v4();
+
+        let evt = GatewayEvent {
+            event_type: "MESSAGE_CREATE".to_string(),
+            data: json!({"content": "hello"}),
+            server_id: Some(server),
+            channel_id: Some(channel),
+            user_id: Some(user),
+        };
+
+        assert_eq!(evt.server_id, Some(server));
+        assert_eq!(evt.channel_id, Some(channel));
+        assert_eq!(evt.user_id, Some(user));
+    }
+
+    // ── Serialization round-trip ──────────────────────────────────────────────
+
+    #[test]
+    fn event_serializes_and_deserializes() {
+        let original = GatewayEvent {
+            event_type: "PRESENCE_UPDATE".to_string(),
+            data: json!({"user_id": "abc", "status": "online"}),
+            server_id: Some(Uuid::new_v4()),
+            channel_id: None,
+            user_id: Some(Uuid::new_v4()),
+        };
+
+        let json = serde_json::to_string(&original).unwrap();
+        let decoded: GatewayEvent = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(decoded.event_type, original.event_type);
+        assert_eq!(decoded.server_id, original.server_id);
+        assert_eq!(decoded.user_id, original.user_id);
+        assert!(decoded.channel_id.is_none());
+    }
+
+    #[test]
+    fn event_with_complex_data_survives_round_trip() {
+        let evt = GatewayEvent {
+            event_type: "MESSAGE_CREATE".to_string(),
+            data: json!({
+                "id": "123456",
+                "content": "Hello, Nexus!",
+                "author": { "id": "user-1", "username": "alice" },
+                "attachments": [],
+                "reactions": []
+            }),
+            server_id: None,
+            channel_id: Some(Uuid::new_v4()),
+            user_id: None,
+        };
+
+        let json = serde_json::to_string(&evt).unwrap();
+        let decoded: GatewayEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.data["content"], "Hello, Nexus!");
+    }
+
+    // ── event_types constants ─────────────────────────────────────────────────
+
+    #[test]
+    fn event_type_constants_are_screaming_snake_case() {
+        for constant in &[
+            event_types::MESSAGE_CREATE,
+            event_types::MESSAGE_DELETE,
+            event_types::TYPING_START,
+            event_types::PRESENCE_UPDATE,
+            event_types::VOICE_STATE_UPDATE,
+        ] {
+            let s = *constant;
+            assert_eq!(s, s.to_uppercase(), "not all-caps: {s}");
+            assert!(!s.contains(' '), "contains space: {s}");
+            assert!(s.contains('_') || s.len() < 10, "no underscore: {s}");
+        }
+    }
+
+    #[test]
+    fn event_type_constants_are_non_empty() {
+        assert!(!event_types::MESSAGE_CREATE.is_empty());
+        assert!(!event_types::POLL_ENDED.is_empty());
+        assert!(!event_types::FORUM_POST_CREATE.is_empty());
+    }
+}
