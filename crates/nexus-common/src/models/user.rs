@@ -198,3 +198,150 @@ pub struct UpdateUserRequest {
 use std::sync::LazyLock;
 static USERNAME_REGEX: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"^[a-zA-Z0-9_-]+$").unwrap());
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::validation::validate_request;
+
+    // ── user_flags bit constants ──────────────────────────────────────────────
+
+    #[test]
+    fn all_flag_bits_are_unique() {
+        let flags = [
+            user_flags::STAFF,
+            user_flags::BOT,
+            user_flags::EMAIL_VERIFIED,
+            user_flags::EARLY_SUPPORTER,
+            user_flags::PREMIUM_SUPPORTER,
+            user_flags::DISABLED,
+            user_flags::SUSPENDED,
+            user_flags::INSTANCE_ADMIN,
+            user_flags::MARKETPLACE_REVIEWER,
+            user_flags::MARKETPLACE_MODERATOR,
+            user_flags::MARKETPLACE_CREATOR,
+        ];
+        let unique: std::collections::HashSet<_> = flags.iter().collect();
+        assert_eq!(flags.len(), unique.len(), "duplicate flag bit detected");
+    }
+
+    #[test]
+    fn flags_are_powers_of_two() {
+        let flags = [
+            user_flags::STAFF,
+            user_flags::BOT,
+            user_flags::EMAIL_VERIFIED,
+            user_flags::DISABLED,
+            user_flags::SUSPENDED,
+            user_flags::INSTANCE_ADMIN,
+        ];
+        for flag in flags {
+            assert!(flag > 0 && (flag & (flag - 1)) == 0,
+                "flag {flag:#x} is not a power of two");
+        }
+    }
+
+    #[test]
+    fn suspended_and_disabled_are_combinable_with_or() {
+        let flags = user_flags::SUSPENDED | user_flags::DISABLED;
+        assert_ne!(flags & user_flags::SUSPENDED, 0, "SUSPENDED bit must be set");
+        assert_ne!(flags & user_flags::DISABLED, 0, "DISABLED bit must be set");
+        assert_eq!(flags & user_flags::STAFF, 0, "STAFF bit must NOT be set");
+    }
+
+    #[test]
+    fn gateway_ban_check_logic_with_flags() {
+        // Mirrors the gateway Identify handler ban check:
+        //   (flags & SUSPENDED) == 0 && (flags & DISABLED) == 0
+        let clean: i64 = 0;
+        let suspended: i64 = user_flags::SUSPENDED;
+        let disabled: i64 = user_flags::DISABLED;
+        let both: i64 = user_flags::SUSPENDED | user_flags::DISABLED;
+
+        let is_allowed = |f: i64| {
+            (f & user_flags::SUSPENDED) == 0 && (f & user_flags::DISABLED) == 0
+        };
+
+        assert!(is_allowed(clean),     "clean account must be allowed");
+        assert!(!is_allowed(suspended), "suspended account must be blocked");
+        assert!(!is_allowed(disabled),  "disabled account must be blocked");
+        assert!(!is_allowed(both),      "suspended+disabled must be blocked");
+    }
+
+    // ── CreateUserRequest validation ──────────────────────────────────────────
+
+    fn valid_request() -> CreateUserRequest {
+        CreateUserRequest {
+            username: "alice42".to_string(),
+            password: "securepassword".to_string(),
+            email: None,
+            invite_code: None,
+        }
+    }
+
+    #[test]
+    fn valid_create_user_request_passes_validation() {
+        assert!(validate_request(&valid_request()).is_ok());
+    }
+
+    #[test]
+    fn username_too_short_fails() {
+        let req = CreateUserRequest { username: "ab".to_string(), ..valid_request() };
+        assert!(validate_request(&req).is_err(), "username < 3 chars must fail");
+    }
+
+    #[test]
+    fn username_too_long_fails() {
+        let req = CreateUserRequest {
+            username: "a".repeat(33),
+            ..valid_request()
+        };
+        assert!(validate_request(&req).is_err(), "username > 32 chars must fail");
+    }
+
+    #[test]
+    fn username_with_invalid_chars_fails() {
+        for bad in &["alice!", "alice@", "alice space", "alice.dot", "alice#"] {
+            let req = CreateUserRequest { username: bad.to_string(), ..valid_request() };
+            assert!(validate_request(&req).is_err(), "{bad} must fail username regex");
+        }
+    }
+
+    #[test]
+    fn username_with_valid_chars_passes() {
+        for good in &["alice", "Alice42", "alice_42", "alice-42", "SCREAMING"] {
+            let req = CreateUserRequest { username: good.to_string(), ..valid_request() };
+            assert!(validate_request(&req).is_ok(), "{good} must pass username regex");
+        }
+    }
+
+    #[test]
+    fn password_too_short_fails() {
+        let req = CreateUserRequest { password: "short".to_string(), ..valid_request() };
+        assert!(validate_request(&req).is_err(), "password < 8 chars must fail");
+    }
+
+    #[test]
+    fn password_too_long_fails() {
+        let req = CreateUserRequest { password: "x".repeat(129), ..valid_request() };
+        assert!(validate_request(&req).is_err(), "password > 128 chars must fail");
+    }
+
+    #[test]
+    fn valid_email_passes() {
+        let req = CreateUserRequest {
+            email: Some("alice@example.com".to_string()),
+            ..valid_request()
+        };
+        assert!(validate_request(&req).is_ok());
+    }
+
+    #[test]
+    fn invalid_email_fails() {
+        let req = CreateUserRequest {
+            email: Some("not-an-email".to_string()),
+            ..valid_request()
+        };
+        assert!(validate_request(&req).is_err(), "invalid email must fail");
+    }
+}
