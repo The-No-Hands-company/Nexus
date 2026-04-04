@@ -422,3 +422,90 @@ pub fn mxid(local_part: &str, server_name: &str) -> String {
 pub fn room_id(channel_id: &str, server_name: &str) -> String {
     format!("!{}:{}", channel_id, server_name)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── mxid ─────────────────────────────────────────────────────────────────
+
+    #[test]
+    fn mxid_format_is_at_local_colon_server() {
+        assert_eq!(mxid("alice", "nexus.example.com"), "@alice:nexus.example.com");
+    }
+
+    #[test]
+    fn mxid_preserves_special_chars_in_local_part() {
+        // Local parts can contain dots, underscores, hyphens
+        assert_eq!(mxid("alice.smith", "server.tld"), "@alice.smith:server.tld");
+    }
+
+    #[test]
+    fn mxid_empty_local_part() {
+        // Edge case — empty local part still produces valid format
+        assert_eq!(mxid("", "server.tld"), "@:server.tld");
+    }
+
+    // ── room_id ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn room_id_format_is_bang_channel_colon_server() {
+        let rid = room_id("abc123", "nexus.example.com");
+        assert_eq!(rid, "!abc123:nexus.example.com");
+    }
+
+    #[test]
+    fn room_id_starts_with_bang() {
+        assert!(room_id("any", "server").starts_with('!'));
+    }
+
+    // ── new_event_id ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn event_id_starts_with_dollar() {
+        let id = new_event_id("nexus.example.com");
+        assert!(id.starts_with('$'), "event ID must start with $, got: {id}");
+    }
+
+    #[test]
+    fn event_id_ends_with_server_name() {
+        let server = "nexus.example.com";
+        let id = new_event_id(server);
+        assert!(id.ends_with(server), "event ID must end with server name");
+    }
+
+    #[test]
+    fn event_ids_are_unique() {
+        let server = "nexus.example.com";
+        let id1 = new_event_id(server);
+        let id2 = new_event_id(server);
+        assert_ne!(id1, id2, "event IDs must be unique across calls");
+    }
+
+    #[test]
+    fn event_id_format_is_dollar_base64_colon_server() {
+        // Format: $<base64url>:<server>
+        let id = new_event_id("test.server");
+        assert!(id.contains(':'), "event ID must contain colon separator");
+        let parts: Vec<&str> = id.splitn(2, ':').collect();
+        assert_eq!(parts.len(), 2);
+        assert!(parts[0].starts_with('$'));
+        // Base64 part (after $) should be non-empty
+        assert!(parts[0].len() > 1);
+    }
+
+    // ── FederationTransaction::new ────────────────────────────────────────────
+
+    #[test]
+    fn transaction_new_sets_origin_and_destination() {
+        let txn = FederationTransaction::new("origin.server", "dest.server");
+        assert_eq!(txn.origin, "origin.server");
+        assert_eq!(txn.destination, "dest.server");
+    }
+
+    #[test]
+    fn new_transactions_start_with_empty_pdus() {
+        let txn = FederationTransaction::new("a", "b");
+        assert!(txn.pdus.is_empty());
+    }
+}

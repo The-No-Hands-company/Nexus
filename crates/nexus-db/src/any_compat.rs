@@ -122,3 +122,81 @@ pub fn get_string_vec(row: &AnyRow, col: &str) -> Result<Vec<String>, sqlx::Erro
     }
     serde_json::from_str(&s).map_err(|e| sqlx::Error::Decode(Box::new(e) as _))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── parse_datetime ────────────────────────────────────────────────────────
+    // parse_datetime is private, but we can reach it through get_datetime's
+    // contract by testing the formats it must handle directly.
+
+    fn parse(s: &str) -> Result<DateTime<Utc>, Box<dyn std::error::Error + Send + Sync + 'static>> {
+        parse_datetime(s)
+    }
+
+    #[test]
+    fn rfc3339_with_utc_offset() {
+        let dt = parse("2026-03-15T14:30:00+00:00").unwrap();
+        assert_eq!(dt.year(), 2026);
+        assert_eq!(dt.month(), 3);
+        assert_eq!(dt.day(), 15);
+        assert_eq!(dt.hour(), 14);
+    }
+
+    #[test]
+    fn rfc3339_with_positive_offset() {
+        let dt = parse("2026-01-01T12:00:00+05:30").unwrap();
+        // 12:00 +05:30 = 06:30 UTC
+        assert_eq!(dt.hour(), 6);
+        assert_eq!(dt.minute(), 30);
+    }
+
+    #[test]
+    fn postgres_timestamptz_text_format() {
+        // Postgres TEXT output: space separator, short +00 suffix
+        let dt = parse("2026-02-22 13:04:47.779907+00").unwrap();
+        assert_eq!(dt.year(), 2026);
+        assert_eq!(dt.month(), 2);
+        assert_eq!(dt.day(), 22);
+        assert_eq!(dt.hour(), 13);
+    }
+
+    #[test]
+    fn sqlite_current_timestamp_format() {
+        // SQLite CURRENT_TIMESTAMP: no timezone, space separator
+        let dt = parse("2024-01-15 10:30:00").unwrap();
+        assert_eq!(dt.year(), 2024);
+        assert_eq!(dt.hour(), 10);
+        assert_eq!(dt.minute(), 30);
+        assert_eq!(dt.second(), 0);
+    }
+
+    #[test]
+    fn sqlite_with_fractional_seconds() {
+        let dt = parse("2024-06-20 08:15:33.123456").unwrap();
+        assert_eq!(dt.hour(), 8);
+        assert_eq!(dt.minute(), 15);
+        assert_eq!(dt.second(), 33);
+    }
+
+    #[test]
+    fn invalid_string_returns_error() {
+        assert!(parse("not a timestamp").is_err());
+        assert!(parse("").is_err());
+        assert!(parse("2024-13-45").is_err()); // impossible month/day
+    }
+
+    #[test]
+    fn result_is_always_utc() {
+        // Regardless of input offset, output must be UTC
+        for s in &[
+            "2026-01-01T00:00:00+05:00",
+            "2026-01-01 00:00:00",
+            "2026-01-01T00:00:00+00:00",
+        ] {
+            let dt = parse(s).unwrap();
+            assert_eq!(dt.timezone(), chrono::Utc, "not UTC for input: {s}");
+        }
+    }
+}

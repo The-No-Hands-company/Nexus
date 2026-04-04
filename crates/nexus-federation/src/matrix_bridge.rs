@@ -500,3 +500,108 @@ pub fn mxid_to_username(mxid: &str) -> String {
     let username = without_at.replacen(':', "_", 1).replace('.', ".");
     format!("matrix_{}", username)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── mxid_to_username ──────────────────────────────────────────────────────
+
+    #[test]
+    fn converts_standard_mxid_to_username() {
+        assert_eq!(
+            mxid_to_username("@alice:matrix.org"),
+            "matrix_alice_matrix.org"
+        );
+    }
+
+    #[test]
+    fn handles_mxid_without_leading_at() {
+        // trim_start_matches('@') is idempotent
+        assert_eq!(
+            mxid_to_username("alice:matrix.org"),
+            "matrix_alice_matrix.org"
+        );
+    }
+
+    #[test]
+    fn replaces_only_first_colon() {
+        // Colons after the first (e.g. port numbers) should stay
+        assert_eq!(
+            mxid_to_username("@bot:server.tld:8448"),
+            "matrix_bot_server.tld:8448"
+        );
+    }
+
+    #[test]
+    fn preserves_dots_in_server_name() {
+        // replace('.', '.') is a no-op — dots stay
+        let result = mxid_to_username("@user:my.nexus.server");
+        assert!(result.contains('.'), "dots should be preserved");
+    }
+
+    #[test]
+    fn always_prefixed_with_matrix_underscore() {
+        let result = mxid_to_username("@anyone:anywhere");
+        assert!(result.starts_with("matrix_"));
+    }
+
+    // ── html_escape ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn ampersand_is_escaped() {
+        assert_eq!(html_escape("A & B"), "A &amp; B");
+    }
+
+    #[test]
+    fn angle_brackets_are_escaped() {
+        assert_eq!(html_escape("<script>"), "&lt;script&gt;");
+    }
+
+    #[test]
+    fn double_quote_is_escaped() {
+        assert_eq!(html_escape("say \"hi\""), "say &quot;hi&quot;");
+    }
+
+    #[test]
+    fn plain_text_unchanged() {
+        assert_eq!(html_escape("hello world"), "hello world");
+    }
+
+    #[test]
+    fn multiple_special_chars_all_escaped() {
+        let result = html_escape("<b>bold & \"quoted\"</b>");
+        assert_eq!(result, "&lt;b&gt;bold &amp; &quot;quoted&quot;&lt;/b&gt;");
+    }
+
+    #[test]
+    fn empty_string_stays_empty() {
+        assert_eq!(html_escape(""), "");
+    }
+
+    // ── urlencoded ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn plain_ascii_is_unchanged() {
+        assert_eq!(urlencoded("hello"), "hello");
+    }
+
+    #[test]
+    fn spaces_become_plus_or_percent20() {
+        // form_urlencoded encodes spaces as '+'
+        let r = urlencoded("hello world");
+        assert!(r.contains('+') || r.contains("%20"), "space must be encoded");
+    }
+
+    #[test]
+    fn special_chars_are_percent_encoded() {
+        let r = urlencoded("foo@bar.com");
+        // '@' must be encoded
+        assert!(!r.contains('@'), "@ must be percent-encoded, got: {r}");
+    }
+
+    #[test]
+    fn empty_string_stays_empty() {
+        assert_eq!(urlencoded(""), "");
+    }
+}

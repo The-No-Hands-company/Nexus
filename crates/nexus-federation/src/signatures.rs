@@ -214,3 +214,105 @@ fn sort_keys(value: &Value) -> Value {
         other => other.clone(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // ── canonical_json ────────────────────────────────────────────────────────
+
+    #[test]
+    fn object_keys_are_sorted() {
+        let val = json!({ "z": 1, "a": 2, "m": 3 });
+        let result = canonical_json(&val).unwrap();
+        // Sorted keys: a, m, z
+        let pos_a = result.find("\"a\"").unwrap();
+        let pos_m = result.find("\"m\"").unwrap();
+        let pos_z = result.find("\"z\"").unwrap();
+        assert!(pos_a < pos_m, "a must come before m");
+        assert!(pos_m < pos_z, "m must come before z");
+    }
+
+    #[test]
+    fn nested_object_keys_are_sorted() {
+        let val = json!({ "b": { "z": 1, "a": 2 }, "a": 3 });
+        let result = canonical_json(&val).unwrap();
+        // Outer keys: "a" before "b" (lexicographic)
+        let outer_a = result.find("\"a\":3").unwrap();
+        let outer_b = result.find("\"b\":").unwrap();
+        assert!(outer_a < outer_b, "outer 'a' must sort before 'b'");
+        // Inner nested keys: "a" before "z"
+        let inner_a = result.find("\"a\":2").unwrap();
+        let inner_z = result.find("\"z\":1").unwrap();
+        assert!(inner_a < inner_z, "inner 'a' must sort before 'z'");
+    }
+
+    #[test]
+    fn canonical_json_is_deterministic() {
+        let val = json!({ "z": true, "a": [1, 2, 3], "m": null });
+        let r1 = canonical_json(&val).unwrap();
+        let r2 = canonical_json(&val).unwrap();
+        assert_eq!(r1, r2);
+    }
+
+    #[test]
+    fn same_data_different_key_order_produces_same_canonical() {
+        let v1 = json!({ "z": 1, "a": 2 });
+        let v2 = json!({ "a": 2, "z": 1 });
+        assert_eq!(canonical_json(&v1).unwrap(), canonical_json(&v2).unwrap());
+    }
+
+    #[test]
+    fn arrays_preserve_element_order() {
+        let val = json!({ "items": [3, 1, 2] });
+        let result = canonical_json(&val).unwrap();
+        // Elements must not be sorted — arrays are order-sensitive
+        assert!(result.contains("[3,1,2]"), "array order must be preserved: {result}");
+    }
+
+    #[test]
+    fn primitives_round_trip_unchanged() {
+        for val in &[
+            json!(42),
+            json!("hello"),
+            json!(true),
+            json!(null),
+            json!(3.14),
+        ] {
+            let result = canonical_json(val).unwrap();
+            let reparsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+            assert_eq!(&reparsed, val, "primitive must survive canonical round-trip");
+        }
+    }
+
+    #[test]
+    fn parse_auth_header_valid_nexus_header() {
+        // Must start with "NexusFederation " prefix
+        let header = "NexusFederation origin=\"nexus.example.com\",key=\"ed25519:key1\",sig=\"abc123\"";
+        let result = parse_auth_header(header);
+        assert!(result.is_ok(), "valid header should parse: {result:?}");
+        let parsed = result.unwrap();
+        assert_eq!(parsed.origin, "nexus.example.com");
+        assert_eq!(parsed.sig, "abc123");
+    }
+
+    #[test]
+    fn parse_auth_header_missing_required_fields_errors() {
+        // Missing sig field
+        let bad = "NexusFederation origin=\"nexus.example.com\",key=\"ed25519:key1\"";
+        assert!(parse_auth_header(bad).is_err());
+    }
+
+    #[test]
+    fn parse_auth_header_wrong_prefix_errors() {
+        // Must start with "NexusFederation ", not "X-Nexus-Signature"
+        let bad = "X-Nexus-Signature origin=\"nexus.example.com\",key=\"k\",sig=\"s\"";
+        assert!(parse_auth_header(bad).is_err());
+    }
+
+    #[test]
+    fn parse_auth_header_empty_errors() {
+        assert!(parse_auth_header("").is_err());
+    }
+}
