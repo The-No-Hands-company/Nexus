@@ -97,6 +97,7 @@ base64 = "0.22"
 hex = "0.4"
 mime_guess = "2"
 hmac = "0.12"
+aes-gcm = "0.10"
 
 # Ed25519 signing (federation)
 ed25519-dalek = { version = "2.1", features = ["rand_core"] }

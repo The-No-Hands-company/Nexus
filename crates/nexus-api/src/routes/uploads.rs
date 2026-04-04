@@ -13,6 +13,7 @@ use axum::{
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_db::repository::attachments;
 use serde::Serialize;
+use sha2::Digest;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -155,11 +156,13 @@ async fn upload_file(
     // Sanitize filename
     let safe_filename = sanitize_filename(&filename);
 
-    // Compute SHA-256 for deduplication
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    data.hash(&mut hasher);
-    let hash_hex = format!("{:x}", hasher.finish()); // fast, not crypto — real SHA-256 would need sha2 crate
+    // Compute SHA-256 digest for deduplication (crypto-quality, not DefaultHasher)
+    let hash_hex = {
+        use sha2::{Digest, Sha256};
+        let mut h = Sha256::new();
+        h.update(&data);
+        hex::encode(h.finalize())
+    };
 
     // Build storage key: uploads/{user_id}/{uuid}.{ext}
     let ext = safe_filename
@@ -170,21 +173,16 @@ async fn upload_file(
     let attachment_id = Uuid::new_v4();
     let storage_key = format!("uploads/{}/{}.{}", auth.user_id, attachment_id, ext);
 
-    // Upload to MinIO
+    // Upload to MinIO / local storage
     state
         .storage
         .put_object(&storage_key, data, &content_type)
         .await
         .map_err(|e| NexusError::Internal(e))?;
 
-    // Generate URL
-    let url = state
-        .storage
-        .presigned_get_url(&storage_key, 3600 * 24 * 7) // 7-day presigned URL
-        .await
-        .ok();
-
-    // Persist attachment metadata
+    // Persist attachment metadata — URL is intentionally left empty here.
+    // GET /attachments/:id always generates a fresh presigned URL from
+    // storage_key so no stale URL is ever served.
     let row = attachments::create_attachment(
         &state.db.pool,
         attachment_id,
@@ -203,11 +201,11 @@ async fn upload_file(
     )
     .await?;
 
-    // Mark ready immediately (no async processing for now)
+    // Mark ready immediately; URL is empty — it will be generated fresh on each GET.
     let row = attachments::mark_ready(
         &state.db.pool,
         row.id,
-        url.as_deref().unwrap_or(""),
+        "", // no stored URL; presigned URL generated on demand
         None, // blurhash — would need async image processing
     )
     .await?;
@@ -243,16 +241,17 @@ async fn get_attachment(
             resource: "Attachment".into(),
         })?;
 
-    // Refresh presigned URL if no public URL
-    let url = if row.url.as_deref().unwrap_or("").is_empty() {
-        state
-            .storage
-            .presigned_get_url(&row.storage_key, 3600)
-            .await
-            .ok()
-    } else {
-        row.url.clone()
-    };
+    // Always generate a fresh presigned URL from the storage key.
+    // The URL stored in the DB at upload time may be stale or permanent —
+    // we use the live storage client so private channels' attachments are
+    // always access-controlled and URLs always have a bounded TTL.
+    const PRESIGN_TTL_SECS: u64 = 60 * 60 * 24; // 24 hours
+    let url = state
+        .storage
+        .presigned_get_url(&row.storage_key, PRESIGN_TTL_SECS)
+        .await
+        .ok()
+        .or_else(|| row.url.clone()); // fallback to stored URL if presigning fails
 
     Ok(Json(AttachmentResponse {
         id: row.id,

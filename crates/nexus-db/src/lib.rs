@@ -8,6 +8,7 @@
 //! * **Lite mode** (`sqlite://…`) — embedded SQLite, no external services required.
 
 pub mod any_compat;
+pub mod email_crypto;
 pub mod postgres;
 pub mod redis_pool;
 pub mod repository;

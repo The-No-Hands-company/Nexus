@@ -8,6 +8,10 @@ use uuid::Uuid;
 use crate::select_cols::USER_COLS;
 
 /// Create a new user account.
+///
+/// If `NEXUS__SECURITY__EMAIL_KEY` is set the email is encrypted with
+/// AES-256-GCM before storage and an HMAC-SHA256 digest is written to
+/// `email_hash` for index-based lookups.
 pub async fn create_user(
     pool: &sqlx::AnyPool,
     id: Uuid,
@@ -15,18 +19,23 @@ pub async fn create_user(
     email: Option<&str>,
     password_hash: &str,
 ) -> Result<User, sqlx::Error> {
+    let stored_email = email.map(|e| crate::email_crypto::encrypt(e));
+    let email_hash  = email.and_then(|e| crate::email_crypto::lookup_hash(e));
+
     let q = format!(
-        "INSERT INTO users (id, username, email, password_hash, presence, flags, created_at, updated_at) \
-         VALUES ($1::uuid, $2, $3, $4, 'offline', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) \
+        "INSERT INTO users \
+           (id, username, email, email_hash, password_hash, presence, flags, created_at, updated_at) \
+         VALUES ($1::uuid, $2, $3, $4, $5, 'offline', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP) \
          RETURNING {USER_COLS}"
     );
     sqlx::query_as::<_, User>(&q)
-    .bind(id.to_string())
-    .bind(username)
-    .bind(email)
-    .bind(password_hash)
-    .fetch_one(pool)
-    .await
+        .bind(id.to_string())
+        .bind(username)
+        .bind(stored_email.as_deref())
+        .bind(email_hash.as_deref())
+        .bind(password_hash)
+        .fetch_one(pool)
+        .await
 }
 
 /// Find a user by their unique ID.
@@ -74,12 +83,26 @@ pub async fn find_by_username(pool: &sqlx::AnyPool, username: &str) -> Result<Op
 }
 
 /// Find a user by email.
+///
+/// When at-rest encryption is enabled (key configured) the lookup uses the
+/// `email_hash` index.  Otherwise falls back to the plaintext `email` column
+/// for backward compatibility with unencrypted rows.
 pub async fn find_by_email(pool: &sqlx::AnyPool, email: &str) -> Result<Option<User>, sqlx::Error> {
-    let q = format!("SELECT {USER_COLS} FROM users WHERE LOWER(email) = LOWER($1)");
-    sqlx::query_as::<_, User>(&q)
-        .bind(email)
-        .fetch_optional(pool)
-        .await
+    if let Some(hash) = crate::email_crypto::lookup_hash(email) {
+        // Encrypted path: fast index lookup on the HMAC digest.
+        let q = format!("SELECT {USER_COLS} FROM users WHERE email_hash = $1");
+        sqlx::query_as::<_, User>(&q)
+            .bind(&hash)
+            .fetch_optional(pool)
+            .await
+    } else {
+        // Plaintext path: existing LOWER() comparison.
+        let q = format!("SELECT {USER_COLS} FROM users WHERE LOWER(email) = LOWER($1)");
+        sqlx::query_as::<_, User>(&q)
+            .bind(email)
+            .fetch_optional(pool)
+            .await
+    }
 }
 
 /// Update user profile fields.
