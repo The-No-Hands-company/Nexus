@@ -1,8 +1,10 @@
 import { FormEvent, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useStore } from "../store";
 
 export default function Login() {
+  const { t } = useTranslation();
   const { setSession, serverUrl, setServerUrl } = useStore();
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
@@ -45,25 +47,29 @@ export default function Login() {
           <div className="w-12 h-12 rounded-xl bg-accent-500/20 flex items-center justify-center mx-auto mb-3">
             <span className="text-accent-300 font-bold text-lg">NX</span>
           </div>
-          <h1 className="text-xl font-semibold text-fg">Welcome back</h1>
-          <p className="text-muted text-sm mt-1">Sign in to your Nexus account</p>
+          <h1 className="text-xl font-semibold text-fg">
+            {t("auth.welcomeBack", "Welcome back")}
+          </h1>
+          <p className="text-muted text-sm mt-1">
+            {t("auth.signInSubtitle", "Sign in to your Nexus account")}
+          </p>
         </div>
 
         <form onSubmit={submit} className="bg-bg-800 rounded-xl border border-bg-600/40 p-6 flex flex-col gap-4">
           <div>
             <label className="block text-xs font-semibold text-muted uppercase tracking-wide mb-1">
-              Server URL
+              {t("auth.serverUrl")}
             </label>
             <input
               className="nx-input"
               value={serverUrl}
               onChange={(e) => setServerUrl(e.target.value)}
-              placeholder="http://localhost:8080"
+              placeholder={t("auth.serverUrlPlaceholder")}
             />
           </div>
           <div>
             <label className="block text-xs font-semibold text-muted uppercase tracking-wide mb-1">
-              Username
+              {t("auth.username")}
             </label>
             <input
               className="nx-input"
@@ -75,7 +81,7 @@ export default function Login() {
           </div>
           <div>
             <label className="block text-xs font-semibold text-muted uppercase tracking-wide mb-1">
-              Password
+              {t("auth.password")}
             </label>
             <input
               className="nx-input"
@@ -93,14 +99,14 @@ export default function Login() {
           )}
 
           <button className="nx-btn nx-btn-primary w-full" disabled={loading}>
-            {loading ? "Signing in…" : "Sign In"}
+            {loading ? t("auth.signingIn") : t("auth.signIn")}
           </button>
         </form>
 
         <p className="text-center text-muted text-sm mt-4">
-          No account?{" "}
+          {t("auth.noAccount")}{" "}
           <Link to="/register" className="text-accent-300 hover:underline">
-            Create one
+            {t("auth.createAccount")}
           </Link>
         </p>
       </div>

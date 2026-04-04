@@ -2,9 +2,11 @@ import { useEffect, useRef, useState, type KeyboardEvent, type FormEvent } from 
 import { useParams } from "react-router-dom";
 import clsx from "clsx";
 import { format, isToday, isYesterday } from "date-fns";
+import { useTranslation } from "react-i18next";
 import { useStore, type NxMessage } from "../store";
 
 export default function ChatView() {
+  const { t } = useTranslation();
   const { channelId } = useParams<{ channelId: string }>();
   const {
     session,
@@ -116,7 +118,7 @@ export default function ChatView() {
               disabled={loadingMore}
               className="text-xs text-muted hover:text-fg bg-bg-700 hover:bg-bg-600 rounded px-3 py-1 transition-colors disabled:opacity-50"
             >
-              {loadingMore ? "Loading…" : "Load older messages"}
+              {loadingMore ? t("chat.loadingOlderMessages") : t("chat.loadOlderMessages")}
             </button>
           </div>
         )}
@@ -154,8 +156,11 @@ export default function ChatView() {
         {/* Typing indicator */}
         {typingUsers.length > 0 && (
           <div className="text-xs text-muted italic px-1 pt-1">
-            {typingUsers.join(", ")}{" "}
-            {typingUsers.length === 1 ? "is" : "are"} typing…
+            {typingUsers.length === 1
+              ? t("chat.typing.one", { user: typingUsers[0] })
+              : typingUsers.length === 2
+              ? t("chat.typing.two", { user1: typingUsers[0], user2: typingUsers[1] })
+              : t("chat.typing.many")}
           </div>
         )}
 
@@ -174,7 +179,7 @@ export default function ChatView() {
             <button
               onClick={() => setReplyTo(null)}
               className="text-muted hover:text-fg shrink-0"
-              aria-label="Cancel reply"
+              aria-label={t("chat.cancelReply")}
             >
               ✕
             </button>
@@ -217,7 +222,7 @@ export default function ChatView() {
             type="submit"
             disabled={!draft.trim() || sending}
             className="px-3 py-2.5 bg-accent-500 hover:bg-accent-400 text-white rounded text-sm font-medium disabled:opacity-40 transition-colors shrink-0"
-            aria-label="Send message"
+            aria-label={t("chat.sendMessage")}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
               <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
@@ -397,7 +402,7 @@ function MessageGroup({
             )}
 
             {msg.edited_at && (
-              <span className="text-[10px] text-muted/50 ml-1">(edited)</span>
+              <span className="text-[10px] text-muted/50 ml-1">{t("chat.edited")}</span>
             )}
           </div>
         ))}

@@ -1,8 +1,10 @@
 import { FormEvent, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useStore } from "../store";
 
 export default function Register() {
+  const { t } = useTranslation();
   const { setSession, serverUrl, setServerUrl } = useStore();
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
@@ -46,25 +48,29 @@ export default function Register() {
           <div className="w-12 h-12 rounded-xl bg-accent-500/20 flex items-center justify-center mx-auto mb-3">
             <span className="text-accent-300 font-bold text-lg">NX</span>
           </div>
-          <h1 className="text-xl font-semibold text-fg">Create account</h1>
-          <p className="text-muted text-sm mt-1">No ID required. No phone number. Ever.</p>
+          <h1 className="text-xl font-semibold text-fg">
+            {t("auth.createAccount")}
+          </h1>
+          <p className="text-muted text-sm mt-1">
+            {t("auth.registerSubtitle", "No ID required. No phone number. Ever.")}
+          </p>
         </div>
 
         <form onSubmit={submit} className="bg-bg-800 rounded-xl border border-bg-600/40 p-6 flex flex-col gap-4">
           <div>
             <label className="block text-xs font-semibold text-muted uppercase tracking-wide mb-1">
-              Server URL
+              {t("auth.serverUrl")}
             </label>
             <input
               className="nx-input"
               value={serverUrl}
               onChange={(e) => setServerUrl(e.target.value)}
-              placeholder="http://localhost:8080"
+              placeholder={t("auth.serverUrlPlaceholder")}
             />
           </div>
           <div>
             <label className="block text-xs font-semibold text-muted uppercase tracking-wide mb-1">
-              Username
+              {t("auth.username")}
             </label>
             <input
               className="nx-input"
@@ -78,7 +84,7 @@ export default function Register() {
           </div>
           <div>
             <label className="block text-xs font-semibold text-muted uppercase tracking-wide mb-1">
-              Password
+              {t("auth.password")}
             </label>
             <input
               className="nx-input"
@@ -91,14 +97,14 @@ export default function Register() {
           </div>
           <div>
             <label className="block text-xs font-semibold text-muted uppercase tracking-wide mb-1">
-              Email <span className="text-muted/60 normal-case font-normal">(optional — for password reset only)</span>
+              {t("auth.emailOptional")}
             </label>
             <input
               className="nx-input"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="optional"
+              placeholder={t("common.optional")}
             />
           </div>
 
@@ -109,14 +115,14 @@ export default function Register() {
           )}
 
           <button className="nx-btn nx-btn-primary w-full" disabled={loading}>
-            {loading ? "Creating…" : "Create Account"}
+            {loading ? t("auth.creatingAccount") : t("auth.createAccount")}
           </button>
         </form>
 
         <p className="text-center text-muted text-sm mt-4">
-          Have an account?{" "}
+          {t("auth.alreadyHaveAccount")}{" "}
           <Link to="/login" className="text-accent-300 hover:underline">
-            Sign in
+            {t("auth.signIn")}
           </Link>
         </p>
       </div>

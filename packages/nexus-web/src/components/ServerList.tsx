@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import { useStore } from "../store";
 import clsx from "clsx";
 
 export default function ServerList() {
+  const { t } = useTranslation();
   const { servers, activeServerId, setActiveServer, loadChannels, session, setSession, loadDms } = useStore();
   const navigate = useNavigate();
   const [creating, setCreating] = useState(false);
@@ -36,13 +38,13 @@ export default function ServerList() {
 
   return (
     <nav
-      aria-label="Servers"
+      aria-label={t("nav.servers")}
       className="w-14 bg-bg-900 border-r border-bg-600/40 flex flex-col items-center py-2 shrink-0 overflow-y-auto gap-1"
     >
       {/* Home */}
       <SpaceBtn
         active={homeMode}
-        title="Home / DMs"
+        title={t("server.home")}
         onClick={handleHome}
       >
         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
@@ -84,11 +86,11 @@ export default function ServerList() {
               if (e.key === "Escape") { setCreating(false); setNewName(""); }
             }}
             maxLength={50}
-            placeholder="Name"
+            placeholder={t("server.serverName")}
           />
         </div>
       ) : (
-        <SpaceBtn title="Create a server" onClick={() => setCreating(true)}>
+        <SpaceBtn title={t("server.createServer")} onClick={() => setCreating(true)}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
             <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
           </svg>
@@ -98,7 +100,7 @@ export default function ServerList() {
       {/* Logout */}
       <button
         onClick={() => setSession(null)}
-        title={`Logout (${session?.username})`}
+        title={`${t("server.logout")} (${session?.username})`}
         className="w-8 h-8 rounded-full bg-accent-500/20 flex items-center justify-center text-accent-300 text-xs font-bold hover:bg-red-900/40 hover:text-red-400 transition-colors mt-1"
       >
         {session?.username?.[0]?.toUpperCase() ?? "?"}
@@ -117,7 +119,6 @@ function SpaceBtn({
 }) {
   return (
     <div className="relative w-full flex items-center justify-center">
-      {/* Active indicator */}
       <div className={clsx(
         "absolute left-0 top-1/2 -translate-y-1/2 w-0.5 rounded-r transition-all",
         active ? "h-6 bg-fg" : "h-2 bg-muted opacity-0 group-hover:opacity-100"

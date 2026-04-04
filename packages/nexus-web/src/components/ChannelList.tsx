@@ -1,21 +1,14 @@
 import { useState, type KeyboardEvent } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
 import clsx from "clsx";
 import { useStore } from "../store";
 
 export default function ChannelList() {
+  const { t } = useTranslation();
   const {
-    channels,
-    activeServerId,
-    servers,
-    activeChannelId,
-    setActiveChannel,
-    loadMessages,
-    unread,
-    loadDms,
-    dmChannels,
-    session,
-    createChannel,
+    channels, activeServerId, servers, activeChannelId, setActiveChannel,
+    loadMessages, unread, loadDms, dmChannels, session, createChannel,
   } = useStore();
 
   const navigate = useNavigate();
@@ -51,21 +44,18 @@ export default function ChannelList() {
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") confirmCreate();
-    if (e.key === "Escape") {
-      setCreatingText(false);
-      setNewName("");
-    }
+    if (e.key === "Escape") { setCreatingText(false); setNewName(""); }
   };
 
   // ── Home / DM mode ────────────────────────────────────────────────────────
   if (homeMode) {
     return (
       <nav
-        aria-label="Direct Messages"
+        aria-label={t("nav.directMessages")}
         className="w-56 bg-bg-800 flex flex-col shrink-0 border-r border-bg-600/40 overflow-hidden"
       >
         <div className="px-3 py-2.5 text-sm font-semibold border-b border-bg-600/40 shrink-0">
-          Direct Messages
+          {t("nav.directMessages")}
         </div>
         <div className="flex-1 overflow-y-auto px-2 py-2 flex flex-col gap-px">
           {dmChannels.map((dm) => {
@@ -75,7 +65,7 @@ export default function ChannelList() {
                 ?.filter((r) => r.id !== session?.userId)
                 .map((r) => r.username)
                 .join(", ") ??
-              "Direct Message";
+              t("nav.directMessages");
             const initials = name.slice(0, 2).toUpperCase();
             const active = activeChannelId === dm.id || channelId === dm.id;
             return (
@@ -86,9 +76,7 @@ export default function ChannelList() {
                 aria-current={active ? "page" : undefined}
                 className={clsx(
                   "flex items-center gap-2 px-2 py-1.5 rounded text-sm w-full text-left transition-colors",
-                  active
-                    ? "bg-bg-600 text-fg"
-                    : "text-muted hover:bg-bg-700 hover:text-fg"
+                  active ? "bg-bg-600 text-fg" : "text-muted hover:bg-bg-700 hover:text-fg"
                 )}
               >
                 <div className="w-6 h-6 rounded-full bg-accent-500/30 flex items-center justify-center text-[9px] font-bold text-accent-300 shrink-0">
@@ -103,7 +91,7 @@ export default function ChannelList() {
           })}
           {dmChannels.length === 0 && (
             <p className="text-xs text-muted/60 px-2 py-4 text-center">
-              No direct messages yet
+              {t("chat.beginningOfDm", { name: "" }).replace(" with ", "")}
             </p>
           )}
         </div>
@@ -114,25 +102,24 @@ export default function ChannelList() {
   // ── Server channel mode ───────────────────────────────────────────────────
   return (
     <nav
-      aria-label="Channels"
+      aria-label={t("nav.channels")}
       className="w-56 bg-bg-800 flex flex-col shrink-0 border-r border-bg-600/40 overflow-hidden"
     >
-      {/* Server name header */}
       <div className="px-3 py-2.5 text-sm font-semibold border-b border-bg-600/40 shrink-0 truncate">
-        {activeServer?.name ?? "Server"}
+        {activeServer?.name ?? t("nav.channels")}
       </div>
 
       <div className="flex-1 overflow-y-auto px-2 py-2 flex flex-col gap-px">
         {/* Text channels */}
         <div className="flex items-center px-2 py-1 group">
           <span className="flex-1 text-[10px] text-muted/60 uppercase tracking-widest font-medium select-none">
-            Channels
+            {t("nav.channels")}
           </span>
           <button
             onClick={() => setCreatingText((v) => !v)}
             className="opacity-0 group-hover:opacity-100 text-muted/60 hover:text-fg transition-all p-0.5 rounded"
-            title="Create channel"
-            aria-label="Create text channel"
+            title={t("channel.createTextChannel")}
+            aria-label={t("channel.createTextChannel")}
           >
             <PlusIcon />
           </button>
@@ -144,22 +131,20 @@ export default function ChannelList() {
             <button
               key={ch.id}
               onClick={() => handleChannel(ch.id)}
-              aria-label={`Channel ${ch.name}`}
+              aria-label={t("channel.textChannel", { name: ch.name })}
               aria-current={active ? "page" : undefined}
               className={clsx(
                 "flex items-center gap-2 px-2 py-1.5 rounded text-sm w-full text-left transition-colors",
-                active
-                  ? "bg-bg-600 text-fg"
-                  : "text-muted hover:bg-bg-700 hover:text-fg"
+                active ? "bg-bg-600 text-fg" : "text-muted hover:bg-bg-700 hover:text-fg"
               )}
             >
               <HashIcon />
               <span className="truncate flex-1">{ch.name}</span>
               {ch.is_e2ee && (
-                <span className="text-[9px] text-green-400/80 shrink-0">E2E</span>
+                <span className="text-[9px] text-green-400/80 shrink-0" title={t("channel.encrypted")}>E2E</span>
               )}
               {unread[ch.id] && (
-                <span className="w-2 h-2 rounded-full bg-white shrink-0" aria-label="Unread" />
+                <span className="w-2 h-2 rounded-full bg-white shrink-0" aria-label={t("channel.unread")} />
               )}
             </button>
           );
@@ -173,7 +158,7 @@ export default function ChannelList() {
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               onKeyDown={onKeyDown}
-              placeholder="channel-name"
+              placeholder={t("channel.channelName")}
               maxLength={100}
               className="w-full bg-bg-700 text-sm text-fg rounded px-2 py-1 outline-none focus:ring-1 focus:ring-accent-500 placeholder-muted/50"
             />
@@ -183,13 +168,13 @@ export default function ChannelList() {
                 disabled={!newName.trim()}
                 className="flex-1 text-[11px] bg-accent-500 hover:bg-accent-400 text-white rounded px-2 py-0.5 disabled:opacity-40 transition-colors"
               >
-                Create
+                {t("common.create")}
               </button>
               <button
                 onClick={() => { setCreatingText(false); setNewName(""); }}
                 className="flex-1 text-[11px] bg-bg-600 hover:bg-bg-500 text-muted rounded px-2 py-0.5 transition-colors"
               >
-                Cancel
+                {t("common.cancel")}
               </button>
             </div>
           </div>
@@ -201,7 +186,7 @@ export default function ChannelList() {
             <div className="h-px bg-bg-600/40 mx-2 my-1.5" />
             <div className="px-2 py-1">
               <span className="text-[10px] text-muted/60 uppercase tracking-widest font-medium select-none">
-                Voice
+                {t("nav.voice")}
               </span>
             </div>
             {voiceChannels.map((ch) => {
@@ -209,13 +194,11 @@ export default function ChannelList() {
               return (
                 <button
                   key={ch.id}
-                  aria-label={`Voice channel ${ch.name}`}
+                  aria-label={t("channel.voiceChannel", { name: ch.name })}
                   aria-current={active ? "page" : undefined}
                   className={clsx(
                     "flex items-center gap-2 px-2 py-1.5 rounded text-sm w-full text-left transition-colors",
-                    active
-                      ? "bg-bg-600 text-fg"
-                      : "text-muted hover:bg-bg-700 hover:text-fg"
+                    active ? "bg-bg-600 text-fg" : "text-muted hover:bg-bg-700 hover:text-fg"
                   )}
                 >
                   <MicIcon />
