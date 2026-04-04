@@ -226,10 +226,23 @@ fn build_cors_layer() -> tower_http::cors::CorsLayer {
         }
     }
 
-    // Default: permissive (safe because auth is JWT-in-header, not cookie-based)
+    // Default: restrictive — deny cross-origin requests unless an explicit
+    // allow-list is configured. This is the right default for production.
+    //
+    // To allow all origins during local development or for a fully public API,
+    // set: NEXUS_CORS_ORIGINS=*
+    //
+    // Note: Nexus uses JWT bearer tokens, not cookies, so CORS cannot protect
+    // against CSRF on its own. However, a restrictive default prevents the
+    // browser from forwarding authentication tokens to cross-origin endpoints
+    // from pages the user did not explicitly navigate to.
+    tracing::warn!(
+        "NEXUS_CORS_ORIGINS is not set. Cross-origin requests will be denied by default. \
+         Set NEXUS_CORS_ORIGINS=* for a fully public API, or list allowed origins."
+    );
     CorsLayer::new()
-        .allow_origin(tower_http::cors::Any)
         .allow_methods(tower_http::cors::Any)
         .allow_headers(tower_http::cors::Any)
+        // No .allow_origin() call = browsers block cross-origin requests
 }
 

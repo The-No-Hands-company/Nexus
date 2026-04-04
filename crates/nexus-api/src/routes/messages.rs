@@ -23,7 +23,7 @@ use serde::Deserialize;
 use std::{collections::HashMap, sync::{Arc, OnceLock}};
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
 
 /// Message routes.
 pub fn router() -> Router<Arc<AppState>> {
@@ -135,10 +135,28 @@ impl ScyllaReadStrategy {
 async fn send_message(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Path(channel_id): Path<Uuid>,
     Json(body): Json<CreateMessageRequest>,
 ) -> NexusResult<Json<serde_json::Value>> {
     validate_request(&body)?;
+
+    // ── Rate limiting: 30 messages per user per 10 seconds ─────────────────
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:msg:user:{}", auth.user_id),
+        30,
+        10,
+    )
+    .await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:msg:ip:{ip}"),
+        60,
+        10,
+    )
+    .await?;
 
     // Verify channel exists
     let channel = channels::find_by_id(&state.db.pool, channel_id)

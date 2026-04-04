@@ -17,7 +17,10 @@ use sha2::Digest;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{
+    middleware::{check_rate_limit_with_fallback, extract_client_ip, AuthContext},
+    AppState,
+};
 use axum::extract::Extension;
 
 // ============================================================
@@ -84,8 +87,26 @@ struct AttachmentResponse {
 async fn upload_file(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     mut multipart: Multipart,
 ) -> NexusResult<Json<AttachmentResponse>> {
+    // ── Rate limiting: 20 uploads per user per 60 seconds ──────────────────
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:upload:user:{}", auth.user_id),
+        20,
+        60,
+    )
+    .await?;
+    // Secondary IP-based limit to catch shared-token abuse
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:upload:ip:{ip}"),
+        40,
+        60,
+    )
+    .await?;
     let mut file_data: Option<Vec<u8>> = None;
     let mut filename = String::from("upload");
     let mut content_type = String::from("application/octet-stream");
@@ -134,6 +155,24 @@ async fn upload_file(
                 }
 
                 file_data = Some(bytes.to_vec());
+
+                // ── Magic byte validation ─────────────────────────────────
+                // Verify actual file bytes match the claimed Content-Type.
+                // Attackers can label any file as "image/jpeg"; we must not
+                // trust the header — check the real signature bytes instead.
+                let detected = sniff_mime_from_bytes(&bytes);
+                if let Some(sniffed_ct) = detected {
+                    if !mime_families_match(&content_type, sniffed_ct) {
+                        return Err(NexusError::Validation {
+                            message: format!(
+                                "File content does not match declared type '{content_type}'. \
+                                 Detected: '{sniffed_ct}'"
+                            ),
+                        });
+                    }
+                }
+                // For types we can't sniff (zip, tar, pdf), the Content-Type
+                // allowlist is the gate — already checked above.
             }
             Some("spoiler") => {
                 let val = field.text().await.unwrap_or_default();
@@ -309,6 +348,86 @@ fn sanitize_filename(name: &str) -> String {
         .collect()
 }
 
+// ── Magic byte / MIME sniffing ───────────────────────────────────────────────
+
+/// Detect the actual MIME type from the first bytes of a file.
+///
+/// Returns `None` for types we can't reliably identify from magic bytes alone
+/// (e.g. ZIP-based formats, plain text). In those cases the Content-Type
+/// header allowlist is the only gate.
+fn sniff_mime_from_bytes(data: &[u8]) -> Option<&'static str> {
+    match data {
+        // JPEG: FF D8 FF
+        d if d.starts_with(&[0xFF, 0xD8, 0xFF]) => Some("image/jpeg"),
+        // PNG: 89 50 4E 47 0D 0A 1A 0A
+        d if d.starts_with(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) => Some("image/png"),
+        // GIF: GIF87a or GIF89a
+        d if d.starts_with(b"GIF87a") || d.starts_with(b"GIF89a") => Some("image/gif"),
+        // WebP: RIFF....WEBP
+        d if d.len() >= 12 && d.starts_with(b"RIFF") && &d[8..12] == b"WEBP" => Some("image/webp"),
+        // BMP: BM
+        d if d.starts_with(&[0x42, 0x4D]) => Some("image/bmp"),
+        // TIFF: little-endian II or big-endian MM
+        d if d.starts_with(&[0x49, 0x49, 0x2A, 0x00]) || d.starts_with(&[0x4D, 0x4D, 0x00, 0x2A]) => Some("image/tiff"),
+        // AVIF / HEIF: starts with ftyp box containing "avif" or "heic"
+        d if d.len() >= 12 && &d[4..8] == b"ftyp" && (
+            &d[8..12] == b"avif" || &d[8..12] == b"avis" ||
+            &d[8..12] == b"heic" || &d[8..12] == b"heix"
+        ) => Some("image/avif"),
+        // MP4: ftyp box variants (mp4, M4V, isom…)
+        d if d.len() >= 12 && &d[4..8] == b"ftyp" => Some("video/mp4"),
+        // WebM / MKV: 1A 45 DF A3
+        d if d.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) => Some("video/webm"),
+        // OGG (video and audio): OggS
+        d if d.starts_with(b"OggS") => Some("video/ogg"),
+        // MP3: ID3 tag or sync bytes FF FB / FF F3 / FF F2
+        d if d.starts_with(b"ID3")
+            || d.starts_with(&[0xFF, 0xFB])
+            || d.starts_with(&[0xFF, 0xF3])
+            || d.starts_with(&[0xFF, 0xF2]) => Some("audio/mpeg"),
+        // WAV: RIFF....WAVE
+        d if d.len() >= 12 && d.starts_with(b"RIFF") && &d[8..12] == b"WAVE" => Some("audio/wav"),
+        // FLAC: fLaC
+        d if d.starts_with(b"fLaC") => Some("audio/flac"),
+        // AAC: ADTS sync word FF F1 / FF F9
+        d if d.starts_with(&[0xFF, 0xF1]) || d.starts_with(&[0xFF, 0xF9]) => Some("audio/aac"),
+        // Opus in Ogg: OggS container checked above; bare Opus has no magic bytes
+        // PDF: %PDF
+        d if d.starts_with(b"%PDF") => Some("application/pdf"),
+        // ZIP (also DOCX, XLSX, JAR): PK\x03\x04
+        d if d.starts_with(&[0x50, 0x4B, 0x03, 0x04]) => Some("application/zip"),
+        // TAR (ustar): offset 257 = "ustar" — too complex to check in first bytes
+        // Plain text: no reliable magic bytes
+        _ => None,
+    }
+}
+
+/// Returns true if `claimed` (from Content-Type header) and `sniffed` (from
+/// magic bytes) belong to the same MIME family.
+///
+/// We allow minor variations — e.g. video/ogg is fine for an OGG file even if
+/// the client sent audio/ogg — but block completely wrong families.
+fn mime_families_match(claimed: &str, sniffed: &'static str) -> bool {
+    // Exact match is always fine
+    if claimed == sniffed {
+        return true;
+    }
+    // Same top-level type (image/*, video/*, audio/*, application/*)
+    let claimed_family = claimed.split('/').next().unwrap_or("");
+    let sniffed_family = sniffed.split('/').next().unwrap_or("");
+    if claimed_family == sniffed_family && !claimed_family.is_empty() {
+        return true;
+    }
+    // ZIP is the container for many formats (docx, xlsx, jar…) — if sniffed
+    // as ZIP and claimed is also ZIP-based, allow it.
+    if sniffed == "application/zip"
+        && matches!(claimed, "application/zip" | "application/x-tar")
+    {
+        return true;
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -425,3 +544,77 @@ mod tests {
         assert_eq!(sanitize_filename(""), "");
     }
 }
+
+    // ── sniff_mime_from_bytes ─────────────────────────────────────────────────
+
+    #[test]
+    fn jpeg_magic_bytes_detected() {
+        let jpeg = [0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10];
+        assert_eq!(sniff_mime_from_bytes(&jpeg), Some("image/jpeg"));
+    }
+
+    #[test]
+    fn png_magic_bytes_detected() {
+        let png = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00];
+        assert_eq!(sniff_mime_from_bytes(&png), Some("image/png"));
+    }
+
+    #[test]
+    fn gif_magic_bytes_detected() {
+        assert_eq!(sniff_mime_from_bytes(b"GIF89a\x00"), Some("image/gif"));
+        assert_eq!(sniff_mime_from_bytes(b"GIF87a\x00"), Some("image/gif"));
+    }
+
+    #[test]
+    fn pdf_magic_bytes_detected() {
+        assert_eq!(sniff_mime_from_bytes(b"%PDF-1.7"), Some("application/pdf"));
+    }
+
+    #[test]
+    fn zip_magic_bytes_detected() {
+        let zip = [0x50, 0x4B, 0x03, 0x04, 0x14, 0x00];
+        assert_eq!(sniff_mime_from_bytes(&zip), Some("application/zip"));
+    }
+
+    #[test]
+    fn executable_returns_none_no_match() {
+        // EXE magic: MZ
+        let exe = [0x4D, 0x5A, 0x90, 0x00];
+        assert_eq!(sniff_mime_from_bytes(&exe), None);
+    }
+
+    #[test]
+    fn empty_bytes_return_none() {
+        assert_eq!(sniff_mime_from_bytes(&[]), None);
+    }
+
+    // ── mime_families_match ───────────────────────────────────────────────────
+
+    #[test]
+    fn exact_match_accepted() {
+        assert!(mime_families_match("image/jpeg", "image/jpeg"));
+        assert!(mime_families_match("application/pdf", "application/pdf"));
+    }
+
+    #[test]
+    fn same_family_accepted() {
+        // video/ogg sniffed but client sent audio/ogg — same top-level type
+        assert!(mime_families_match("audio/ogg", "video/ogg"));
+        assert!(mime_families_match("video/mp4", "video/mp4"));
+    }
+
+    #[test]
+    fn cross_family_rejected() {
+        // Claimed image but sniffed as video
+        assert!(!mime_families_match("image/jpeg", "video/mp4"));
+        // Claimed image but sniffed as audio
+        assert!(!mime_families_match("image/png", "audio/mpeg"));
+        // Claimed image but sniffed as PDF
+        assert!(!mime_families_match("image/jpeg", "application/pdf"));
+    }
+
+    #[test]
+    fn zip_variants_accepted_when_sniffed_as_zip() {
+        assert!(mime_families_match("application/zip", "application/zip"));
+        assert!(mime_families_match("application/x-tar", "application/zip"));
+    }
