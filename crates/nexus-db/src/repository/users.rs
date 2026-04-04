@@ -272,3 +272,59 @@ pub async fn find_remote_by_username_and_server(
         .fetch_optional(pool)
         .await
 }
+
+/// List all local (non-remote) users with pagination for the admin dashboard.
+pub async fn list_users(
+    pool: &sqlx::AnyPool,
+    limit: i64,
+    offset: i64,
+    search: Option<&str>,
+) -> Result<Vec<User>, sqlx::Error> {
+    use crate::select_cols::USER_COLS;
+    let q = if let Some(q) = search {
+        let pattern = format!("%{}%", q.replace('%', "\\%").replace('_', "\\_"));
+        let sql = format!(
+            "SELECT {USER_COLS} FROM users \
+             WHERE is_remote = FALSE AND (username ILIKE $1 OR display_name ILIKE $1) \
+             ORDER BY created_at DESC LIMIT $2 OFFSET $3"
+        );
+        sqlx::query_as::<_, User>(&sql)
+            .bind(pattern)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(pool)
+            .await?
+    } else {
+        let sql = format!(
+            "SELECT {USER_COLS} FROM users \
+             WHERE is_remote = FALSE \
+             ORDER BY created_at DESC LIMIT $1 OFFSET $2"
+        );
+        sqlx::query_as::<_, User>(&sql)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(pool)
+            .await?
+    };
+    Ok(q)
+}
+
+/// Set specific flag bits on a user account (OR in the bits).
+pub async fn add_user_flags(pool: &sqlx::AnyPool, id: Uuid, flags: i64) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE users SET flags = flags | $1, updated_at = NOW() WHERE id = $2::uuid")
+        .bind(flags)
+        .bind(id.to_string())
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Clear specific flag bits on a user account (AND NOT the bits).
+pub async fn remove_user_flags(pool: &sqlx::AnyPool, id: Uuid, flags: i64) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE users SET flags = flags & ~$1, updated_at = NOW() WHERE id = $2::uuid")
+        .bind(flags)
+        .bind(id.to_string())
+        .execute(pool)
+        .await?;
+    Ok(())
+}

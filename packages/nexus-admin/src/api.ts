@@ -177,6 +177,7 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
 
 export const api = {
   // ── Instance health ────────────────────────────────────────────────────────
+  overview: () => apiFetch<InstanceOverview>("/admin/overview"),
   health: () => apiFetch<HealthCheck>("/health"),
 
   // ── User management ────────────────────────────────────────────────────────
@@ -204,6 +205,8 @@ export const api = {
     ).toString() : "";
     return apiFetch<{ servers: AdminServer[]; total: number }>(`/admin/servers${qs ? `?${qs}` : ""}`);
   },
+  deleteServer: (id: string) =>
+    apiFetch<{ deleted: boolean }>(`/admin/servers/${id}`, { method: "DELETE" }),
 
   // ── Federation ─────────────────────────────────────────────────────────────
   federationStatus: () => apiFetch<FederationStatus>("/admin/federation/status"),
