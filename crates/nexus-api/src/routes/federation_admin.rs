@@ -236,7 +236,7 @@ async fn update_identity(
     require_instance_admin(&state.db.pool, auth.user_id).await?;
 
     // Rate limit identity updates
-    let ip = extract_client_ip(&headers);
+    let _ip = extract_client_ip(&headers);
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:fedadmin:user:{}:identity", auth.user_id),
@@ -344,7 +344,7 @@ async fn add_peer(
     require_instance_admin(&state.db.pool, auth.user_id).await?;
 
     // Rate limit peering attempts (external HTTP calls)
-    let ip = extract_client_ip(&headers);
+    let _ip = extract_client_ip(&headers);
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:fedadmin:user:{}:add_peer", auth.user_id),
@@ -556,7 +556,7 @@ async fn block_peer(
     require_instance_admin(&state.db.pool, auth.user_id).await?;
 
     // Rate limit block operations
-    let ip = extract_client_ip(&headers);
+    let _ip = extract_client_ip(&headers);
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:fedadmin:user:{}:block", auth.user_id),
