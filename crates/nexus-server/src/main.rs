@@ -197,6 +197,37 @@ async fn run_server(
         );
     }
 
+    // ── Startup security validation ───────────────────────────────────────────
+    // Fail fast on insecure configurations that would silently weaken security.
+    {
+        let jwt_len = config.auth.jwt_secret.len();
+        if jwt_len < 32 {
+            tracing::error!(
+                length = jwt_len,
+                required = 32,
+                "JWT secret is too short — tokens can be brute-forced. \
+                 Generate a secure secret: openssl rand -hex 32"
+            );
+            anyhow::bail!(
+                "JWT secret must be at least 32 bytes ({jwt_len} given). \
+                 Set NEXUS__AUTH__JWT_SECRET or JWT_SECRET to a cryptographically \
+                 random value: `openssl rand -hex 32`"
+            );
+        }
+        if config.auth.jwt_secret == "change-me"
+            || config.auth.jwt_secret == "secret"
+            || config.auth.jwt_secret == "nexus"
+            || config.auth.jwt_secret.starts_with("dev-")
+        {
+            anyhow::bail!(
+                "JWT secret looks like a placeholder value ('{}...'). \
+                 Set a random secret: `openssl rand -hex 32`",
+                &config.auth.jwt_secret[..config.auth.jwt_secret.len().min(8)]
+            );
+        }
+        tracing::info!(length = jwt_len, "JWT secret validated");
+    }
+
     // ── Database ──────────────────────────────────────────────────────────────
     let db = Database::connect(config).await?;
     db.migrate().await?;

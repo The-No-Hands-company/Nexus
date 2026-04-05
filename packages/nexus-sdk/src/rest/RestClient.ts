@@ -40,7 +40,8 @@ export class RestClient {
   async request<T = unknown>(
     method: string,
     path: string,
-    body?: unknown
+    body?: unknown,
+    _retries = 3
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
     const headers: Record<string, string> = {
@@ -54,6 +55,16 @@ export class RestClient {
       headers,
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
+
+    // Handle rate limiting with automatic backoff respecting Retry-After header.
+    // Without this, bot code that hits rate limits would throw immediately and
+    // require manual retry logic in every command handler.
+    if (res.status === 429 && _retries > 0) {
+      const retryAfter = parseFloat(res.headers.get("Retry-After") ?? "1");
+      const waitMs = Math.min(Math.ceil(retryAfter * 1000), 30_000); // cap at 30s
+      await new Promise((r) => setTimeout(r, waitMs));
+      return this.request<T>(method, path, body, _retries - 1);
+    }
 
     if (res.status === 204) {
       return undefined as T;

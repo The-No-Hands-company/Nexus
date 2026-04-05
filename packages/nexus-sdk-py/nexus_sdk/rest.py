@@ -78,10 +78,15 @@ class RestClient:
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
-    async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+    async def _request(self, method: str, path: str, _retries: int = 3, **kwargs: Any) -> Any:
         if "json" in kwargs and kwargs["json"] is not None:
             kwargs["json"] = _to_dict(kwargs["json"])
         resp = await self._client.request(method, path, **kwargs)
+        if resp.status_code == 429 and _retries > 0:
+            import asyncio as _asyncio
+            retry_after = float(resp.headers.get("Retry-After", "1"))
+            await _asyncio.sleep(min(retry_after, 30.0))
+            return await self._request(method, path, _retries=_retries - 1, **kwargs)
         if not resp.is_success:
             try:
                 msg = resp.json().get("error", resp.text)
