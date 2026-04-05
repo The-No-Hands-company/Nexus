@@ -22,7 +22,7 @@ use rand::Rng;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
 
 /// Bot application routes.
 pub fn router() -> Router<Arc<AppState>> {
@@ -124,8 +124,23 @@ async fn get_application(
 async fn create_application(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<CreateBotRequest>,
 ) -> NexusResult<Json<(BotApplication, BotToken)>> {
+    // Rate limiting: 5 bot apps per hour per user
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:bot:create:{}", auth.user_id),
+        5,
+        3600,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:bot:create:ip:{ip}"),
+        10,
+        3600,
+    ).await?;
     let app_id = snowflake::generate_id();
     let raw_token = generate_bot_token();
     let token_hash = hash_token(&raw_token);
@@ -242,9 +257,24 @@ struct InstallBotBody {
 async fn install_bot(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Path(server_id): Path<Uuid>,
     Json(body): Json<InstallBotBody>,
 ) -> NexusResult<Json<BotServerInstall>> {
+    // Rate limiting: 10 bot installs per hour per user
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:bot:install:{}", auth.user_id),
+        10,
+        3600,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:bot:install:ip:{ip}"),
+        20,
+        3600,
+    ).await?;
     // Verify bot exists
     let _bot = bots::get_bot(&state.db.pool, body.bot_id)
         .await?

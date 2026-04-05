@@ -88,9 +88,24 @@ async fn get_channel_webhooks(
 async fn create_incoming_webhook(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Path(channel_id): Path<Uuid>,
     Json(body): Json<CreateIncomingWebhookRequest>,
 ) -> NexusResult<Json<Webhook>> {
+    // Rate limiting: 10 webhook creates per hour per user
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:webhook:create:{}", auth.user_id),
+        10,
+        3600,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:webhook:create:ip:{ip}"),
+        20,
+        3600,
+    ).await?;
     // Look up the channel to get server_id
     let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?

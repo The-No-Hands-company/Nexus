@@ -29,7 +29,7 @@ use nexus_db::repository::keystore;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -76,8 +76,23 @@ pub fn router() -> Router<Arc<AppState>> {
 async fn register_device(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<RegisterDeviceRequest>,
 ) -> NexusResult<Json<Device>> {
+    // Rate limiting: 5 device registrations per day per user
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:e2ee:device:{}", auth.user_id),
+        5,
+        86400,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:e2ee:device:ip:{ip}"),
+        10,
+        86400,
+    ).await?;
     // Validate key material before persisting
     validate_identity_key(&body.identity_key).map_err(|e| NexusError::Validation {
         message: format!("identity_key: {e}"),

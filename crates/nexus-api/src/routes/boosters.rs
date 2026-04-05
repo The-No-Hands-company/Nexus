@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
 
 // Boost count thresholds
 const TIER1_THRESHOLD: i64 = 2;
@@ -148,8 +148,23 @@ fn perks(tier: i16, vanity_code: Option<String>) -> BoostTierInfo {
 async fn add_boost(
     State(state): State<Arc<AppState>>,
     Extension(auth): Extension<AuthContext>,
+    headers: axum::http::HeaderMap,
     Path(server_id): Path<Uuid>,
 ) -> NexusResult<Json<BoosterEntry>> {
+    // Rate limiting: 2 boosts per server per day per user (economic abuse prevention)
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:boost:{server_id}:{}", auth.user_id),
+        2,
+        86400,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:boost:ip:{ip}"),
+        5,
+        86400,
+    ).await?;
     let used_slots: Vec<(i16,)> = sqlx::query_as(
         r#"SELECT slot FROM server_boosters
            WHERE user_id = $1::uuid AND server_id = $2::uuid
@@ -206,8 +221,23 @@ async fn add_boost(
 async fn remove_boost(
     State(state): State<Arc<AppState>>,
     Extension(auth): Extension<AuthContext>,
+    headers: axum::http::HeaderMap,
     Path((server_id, slot)): Path<(Uuid, i16)>,
 ) -> NexusResult<Json<serde_json::Value>> {
+    // Rate limiting: 10 boost removals per day per user
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:boost:remove:{}", auth.user_id),
+        10,
+        86400,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:boost:remove:ip:{ip}"),
+        20,
+        86400,
+    ).await?;
     let result = sqlx::query(
         r#"DELETE FROM server_boosters
            WHERE user_id = $1::uuid AND server_id = $2::uuid AND slot = $3"#,
