@@ -325,9 +325,26 @@ async fn list_members(
 /// POST /api/v1/servers/:server_id/join
 async fn join_server(
     Extension(auth): Extension<AuthContext>,
+    headers: axum::http::HeaderMap,
     State(state): State<Arc<AppState>>,
     Path(server_id): Path<Uuid>,
 ) -> NexusResult<Json<serde_json::Value>> {
+    // Rate limiting: 10 joins per hour per user, 20 per IP
+    // Protects against rapid join/leave cycles and spam joins
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:join:user:{}", auth.user_id),
+        10,
+        3600,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:join:ip:{ip}"),
+        20,
+        3600,
+    ).await?;
+
     // Check server exists and is public (or user has invite)
     let server = servers::find_by_id(&state.db.pool, server_id)
         .await?
