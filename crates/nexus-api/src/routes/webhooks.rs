@@ -4,11 +4,12 @@
 //! (No auth required — token in URL path authenticates the request.)
 
 use axum::{
-    extract::{Extension, Path, State},
+    extract::{ConnectInfo, Extension, Path, State},
     middleware,
     routing::{get, post},
     Json, Router,
 };
+use std::net::SocketAddr;
 use nexus_common::{
     error::{NexusError, NexusResult},
     gateway_event::GatewayEvent,
@@ -24,7 +25,7 @@ use rand::Rng;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{middleware::{check_rate_limit_with_fallback, AuthContext}, AppState};
 
 /// Webhook routes — authenticated management + unauthenticated execution.
 pub fn router() -> Router<Arc<AppState>> {
@@ -280,9 +281,25 @@ async fn get_webhook_public(
 /// POST /api/v1/webhooks/{webhook_id}/{token} — Execute a webhook (post a message).
 async fn execute_webhook(
     State(state): State<Arc<AppState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Path((webhook_id, token)): Path<(Uuid, String)>,
     Json(body): Json<ExecuteWebhookRequest>,
 ) -> NexusResult<axum::http::StatusCode> {
+    // Rate limiting: 30 webhook executions per minute per webhook, 60 per IP
+    // This protects against spam through compromised webhooks
+    let ip = addr.ip().to_string();
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:webhook:id:{}", webhook_id),
+        30,
+        60,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:webhook:ip:{ip}"),
+        60,
+        60,
+    ).await?;
     // Validate token
     let wh = webhooks::get_webhook_by_token(&state.db.pool, webhook_id, &token)
         .await?
