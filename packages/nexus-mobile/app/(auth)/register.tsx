@@ -4,45 +4,23 @@ import {
   KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator,
 } from "react-native";
 import { Link } from "expo-router";
-import { useStore } from "../../src/store";
+import { store } from "../lib/store";
 
 export default function RegisterScreen() {
-  const { setSession } = useStore();
   const [serverUrl, setServerUrl] = useState("http://localhost:8080");
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [email, setEmail] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [username, setUsername]   = useState("");
+  const [password, setPassword]   = useState("");
+  const [email, setEmail]         = useState("");
+  const [error, setError]         = useState<string | null>(null);
+  const [loading, setLoading]     = useState(false);
 
   async function submit() {
     if (!username.trim() || !password) return;
     setError(null);
     setLoading(true);
     try {
-      const base = serverUrl.replace(/\/$/, "");
-      const res = await fetch(`${base}/api/v1/auth/register`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          username: username.trim(),
-          password,
-          email: email.trim() || undefined,
-        }),
-      });
-      if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || `HTTP ${res.status}`);
-      }
-      const body = await res.json();
-      setSession({
-        accessToken: body.access_token,
-        refreshToken: body.refresh_token ?? "",
-        username: body.user?.username ?? username.trim(),
-        userId: body.user?.id ?? "",
-        avatar: body.user?.avatar ?? null,
-        serverUrl: base,
-      });
+      store.api.setBaseUrl(serverUrl.replace(/\/$/, "") + "/api/v1");
+      await store.register(username.trim(), password, email.trim() || undefined);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -124,19 +102,15 @@ export default function RegisterScreen() {
             onPress={submit}
             disabled={loading}
           >
-            {loading ? (
-              <ActivityIndicator color="#062020" />
-            ) : (
-              <Text style={s.btnText}>Create Account</Text>
-            )}
+            {loading
+              ? <ActivityIndicator color="#062020" />
+              : <Text style={s.btnText}>Create Account</Text>}
           </Pressable>
         </View>
 
         <Text style={s.footer}>
           Have an account?{" "}
-          <Link href="/(auth)/login" style={s.link}>
-            Sign in
-          </Link>
+          <Link href="/(auth)/login" style={s.link}>Sign in</Link>
         </Text>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -152,37 +126,37 @@ const labelStyle = {
 };
 
 const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#030a14" },
-  scroll: { flexGrow: 1, justifyContent: "center", padding: 20 },
-  logoRow: { alignItems: "center", marginBottom: 28 },
-  logoBox: {
+  root:      { flex: 1, backgroundColor: "#030a14" },
+  scroll:    { flexGrow: 1, justifyContent: "center", padding: 20 },
+  logoRow:   { alignItems: "center", marginBottom: 28 },
+  logoBox:   {
     width: 52, height: 52, borderRadius: 14,
     backgroundColor: "rgba(39,201,165,0.15)",
     alignItems: "center", justifyContent: "center", marginBottom: 12,
   },
-  logoText: { color: "#27c9a5", fontWeight: "700", fontSize: 18 },
-  title: { color: "#d6f4ff", fontSize: 22, fontWeight: "600" },
-  subtitle: { color: "#7890b0", fontSize: 14, marginTop: 4, textAlign: "center" },
-  card: {
+  logoText:  { color: "#27c9a5", fontWeight: "700", fontSize: 18 },
+  title:     { color: "#d6f4ff", fontSize: 22, fontWeight: "600" },
+  subtitle:  { color: "#7890b0", fontSize: 14, marginTop: 4, textAlign: "center" },
+  card:      {
     backgroundColor: "#0b1a30", borderRadius: 16,
     padding: 20, borderWidth: 1, borderColor: "rgba(255,255,255,0.06)",
   },
-  input: {
+  input:     {
     backgroundColor: "#112544", color: "#d6f4ff", borderRadius: 10,
     paddingHorizontal: 14, paddingVertical: 12, fontSize: 15,
     borderWidth: 1, borderColor: "rgba(255,255,255,0.08)",
   },
-  errorBox: {
+  errorBox:  {
     marginTop: 12, backgroundColor: "rgba(239,68,68,0.1)",
     borderRadius: 8, padding: 10, borderWidth: 1, borderColor: "rgba(239,68,68,0.3)",
   },
   errorText: { color: "#f87171", fontSize: 13 },
-  btn: {
+  btn:       {
     marginTop: 20, backgroundColor: "#27c9a5", borderRadius: 10,
     paddingVertical: 14, alignItems: "center",
   },
   btnDisabled: { opacity: 0.6 },
-  btnText: { color: "#062020", fontWeight: "700", fontSize: 16 },
-  footer: { color: "#7890b0", textAlign: "center", marginTop: 20, fontSize: 14 },
-  link: { color: "#27c9a5" },
+  btnText:   { color: "#062020", fontWeight: "700", fontSize: 16 },
+  footer:    { color: "#7890b0", textAlign: "center", marginTop: 20, fontSize: 14 },
+  link:      { color: "#27c9a5" },
 });

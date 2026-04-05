@@ -298,3 +298,7 @@ export { NexusApi };
   getBaseUrl(): string {
     return this.baseUrl;
   }
+
+  setBaseUrl(url: string): void {
+    this.baseUrl = url;
+  }
