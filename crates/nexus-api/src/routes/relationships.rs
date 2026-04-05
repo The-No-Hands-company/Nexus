@@ -20,7 +20,7 @@
 //!    `PUT /_nexus/federation/v1/friend_request`.
 
 use axum::{
-    extract::{Extension, Path, Query, State},
+    extract::{Extension, HeaderMap, Path, Query, State},
     middleware,
     routing::get,
     Json, Router,
@@ -37,7 +37,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -184,9 +184,25 @@ async fn list_relationships(
 /// Accepts both `username` (local) and `username@server.tld` (federated).
 async fn send_friend_request(
     Extension(auth): Extension<AuthContext>,
+    headers: HeaderMap,
     State(state): State<Arc<AppState>>,
     Json(body): Json<SendFriendRequest>,
 ) -> NexusResult<Json<RelationshipResponse>> {
+    // Rate limiting: 20 friend requests per hour per user, 40 per IP
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:friendreq:user:{}", auth.user_id),
+        20,
+        3600,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:friendreq:ip:{ip}"),
+        40,
+        3600,
+    ).await?;
+
     // Detect federated username (`user@server.tld`)
     if let Some((target_username, target_server)) = parse_federated_username(&body.username) {
         return send_federated_friend_request(&auth, &state, target_username, target_server).await;
@@ -488,9 +504,25 @@ async fn delete_relationship(
 /// GET /api/v1/users/search?q=<prefix> — search users by username prefix.
 async fn search_users(
     Extension(auth): Extension<AuthContext>,
+    headers: HeaderMap,
     State(state): State<Arc<AppState>>,
     Query(params): Query<SearchQuery>,
 ) -> NexusResult<Json<Vec<UserBrief>>> {
+    // Rate limiting: 60 searches per minute per user
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:search:user:{}", auth.user_id),
+        60,
+        60,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:search:ip:{ip}"),
+        120,
+        60,
+    ).await?;
+
     if params.q.len() < 2 {
         return Err(NexusError::Validation {
             message: "Search query must be at least 2 characters".into(),
