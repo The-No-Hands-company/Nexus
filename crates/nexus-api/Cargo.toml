@@ -39,6 +39,7 @@ aes-gcm = { workspace = true }
 meilisearch-sdk = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-config = { workspace = true }
+base64 = { workspace = true }
 metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
 totp-rs = { workspace = true }

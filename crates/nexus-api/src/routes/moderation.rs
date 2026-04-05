@@ -25,7 +25,10 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{middleware::AuthContext, AppState};
-use crate::middleware::{HeaderMap, check_rate_limit_with_fallback, extract_client_ip, USER_AGENT};
+use crate::middleware::{check_rate_limit_with_fallback, extract_client_ip};
+use axum::http::HeaderMap;
+
+const USER_AGENT: &str = "user-agent";
 
 /// All moderation routes (require authentication).
 pub fn router() -> Router<Arc<AppState>> {

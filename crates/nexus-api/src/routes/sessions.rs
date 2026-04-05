@@ -8,6 +8,7 @@
 use axum::{
     extract::{Extension, Path, State},
     http::StatusCode,
+    http::HeaderMap,
     middleware,
     routing::{delete, get},
     Json, Router,
@@ -19,7 +20,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{
-    middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip, HeaderMap},
+    middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip},
     AppState,
 };
 
@@ -60,6 +61,7 @@ async fn list_sessions(
 async fn revoke_session(
     Extension(auth_ctx): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(session_id_str): Path<String>,
 ) -> NexusResult<StatusCode> {
     // Rate limiting: 10 session revocations per user per 5 minutes
@@ -99,6 +101,7 @@ async fn revoke_session(
 async fn revoke_all_sessions(
     Extension(auth_ctx): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
 ) -> NexusResult<Json<RevokedCountResponse>> {
     // Rate limiting: 5 bulk session revocations per user per hour (high impact operation)
     let ip = extract_client_ip(&headers);

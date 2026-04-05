@@ -272,7 +272,7 @@ impl PushSender {
         let ecdh_secret = EphemeralSecret::random(&mut OsRng);
         // Re-derive using sender_priv for the same keypair
         let ecdh_point = {
-            use p256::elliptic_curve::ecdh::DiffieHellman;
+            use p256::ecdh::diffie_hellman;
             sender_priv.diffie_hellman(&recipient_pub)
         };
         let shared_secret = ecdh_point.raw_secret_bytes();

@@ -16,7 +16,6 @@ use nexus_common::{
     gateway_event::GatewayEvent,
 };
 use nexus_db::{repository::{audit_log, channels}, select_cols::CHANNEL_COLS_C};
-use nexus_common::snowflake;
 use serde::Deserialize;
 use sqlx::Row;
 use std::collections::{HashMap, HashSet};

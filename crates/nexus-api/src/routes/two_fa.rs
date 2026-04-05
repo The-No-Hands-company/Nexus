@@ -10,6 +10,7 @@
 
 use axum::{
     extract::{Extension, State},
+    http::HeaderMap,
     middleware,
     routing::{get, post},
     Json, Router,
@@ -25,7 +26,7 @@ use chrono::{Duration, Utc};
 
 use crate::{
     auth,
-    middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip, HeaderMap},
+    middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip},
     AppState,
 };
 
@@ -112,6 +113,7 @@ struct SetupResponse {
 async fn setup(
     Extension(auth_ctx): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
 ) -> NexusResult<Json<SetupResponse>> {
     // Rate limiting: 5 TOTP setup attempts per user per hour (prevents enumeration)
     let ip = extract_client_ip(&headers);
@@ -184,6 +186,7 @@ struct EnableBody {
 async fn enable(
     Extension(auth_ctx): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(body): Json<EnableBody>,
 ) -> NexusResult<()> {
     // Rate limiting: 10 TOTP enable attempts per user per 10 minutes (prevents brute force on verification code)
@@ -246,6 +249,7 @@ struct DisableBody {
 async fn disable(
     Extension(auth_ctx): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(body): Json<DisableBody>,
 ) -> NexusResult<()> {
     // Rate limiting: 10 TOTP disable attempts per user per 10 minutes
@@ -333,6 +337,7 @@ pub(crate) struct AuthResponse {
 /// Exchange an MFA challenge token + TOTP code for a full token pair.
 async fn verify_mfa(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(body): Json<VerifyMfaBody>,
 ) -> NexusResult<Json<AuthResponse>> {
     // CRITICAL: Rate limiting on MFA verification to prevent brute force attacks
@@ -463,6 +468,7 @@ struct RegenerateResponse {
 async fn regenerate_backup_codes(
     Extension(auth_ctx): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(body): Json<RegenerateBody>,
 ) -> NexusResult<Json<RegenerateResponse>> {
     // Rate limiting: 3 backup code regenerations per user per hour
