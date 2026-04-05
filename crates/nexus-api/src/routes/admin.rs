@@ -18,12 +18,14 @@ use nexus_common::{
     error::{NexusError, NexusResult},
     models::user::user_flags,
 };
+use nexus_db::repository::audit_log;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{middleware::AuthContext, AppState};
+use nexus_common::snowflake;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -182,6 +184,19 @@ async fn delete_server(
     if affected == 0 {
         return Err(NexusError::NotFound { resource: "Server".into() });
     }
+
+    // Write audit log entry
+    let _ = audit_log::write_entry(
+        &state.db.pool,
+        snowflake::generate_id(),
+        server_id,
+        Some(auth.user_id),
+        "SERVER_DELETE",
+        Some("server"),
+        Some(server_id),
+        &serde_json::json!({ "affected_rows": affected }),
+        Some("Instance admin permanently deleted server and all associated data"),
+    ).await;
 
     tracing::warn!(admin = %auth.user_id, server = %server_id, "Admin deleted server");
     Ok(Json(serde_json::json!({ "deleted": true })))
