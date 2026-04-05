@@ -1,58 +1,115 @@
-# Dependencies
-/target/
-node_modules/
-
-# Environment (contains secrets)
+# ── Secrets & environment ─────────────────────────────────────────────────────
 .env
 .env.local
+.env.*.local
 .env.production
 .env.prod
 .env.staging
+.env.test
+*.secret
+secrets/
+*.pem
+*.p12
+*.pfx
+*.crt
+*.cert
+*.key
+!*.pub.key
 
-# IDE
+# ── Rust ──────────────────────────────────────────────────────────────────────
+target/
+**/target/
+# Library crates should NOT commit Cargo.lock (apps/binaries should)
+# Cargo.lock is gitignored per-package where appropriate
+
+# ── Node / JS / TS ────────────────────────────────────────────────────────────
+node_modules/
+**/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp
+.pnp.js
+
+# ── Build output ──────────────────────────────────────────────────────────────
+dist/
+build/
+out/
+.next/
+.nuxt/
+.output/
+*.tsbuildinfo
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
 .idea/
 .vscode/settings.json
+.vscode/launch.json
+.vscode/tasks.json
 *.swp
 *.swo
 *~
+.fleet/
 
-# OS
+# ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
 Thumbs.db
+ehthumbs.db
+Desktop.ini
 
-# Build artifacts
+# ── Docker runtime data ───────────────────────────────────────────────────────
+docker-data/
+postgres-data/
+redis-data/
+minio-data/
+
+# ── Test & coverage ───────────────────────────────────────────────────────────
+coverage/
+*.lcov
+.nyc_output/
+lcov.info
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.eggs/
+*.egg
+
+# ── Mobile ────────────────────────────────────────────────────────────────────
+*.apk
+*.aab
+*.ipa
+
+# ── Tauri desktop build output ────────────────────────────────────────────────
+crates/nexus-desktop/dist/
+crates/nexus-desktop/src-tauri/target/
+
+# ── Personal deploy configs ───────────────────────────────────────────────────
+# Usage: cp deploy/fly.toml deploy/fly.personal.toml → edit → deploy
+deploy/*.personal.toml
+deploy/*.personal.yml
+deploy/*.personal.yaml
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
 *.exe
 *.dll
 *.so
 *.dylib
-
-# Logs
-*.log
-
-# Docker data (if using local volumes)
-docker-data/
-
-# Coverage reports
-coverage/
-*.lcov
-
-# Tauri
-client/src-tauri/target/
-client/dist/
-crates/*/target/
-
-# Rust build artifacts
-packages/*/target/
-target/
-
-# Mobile
-*.apk
-*.ipa
-../../.vs/
+*.snap
 .vs/
-
-# Personal deployment configs (your private instance — never commit these)
-# Usage: cp deploy/fly.toml deploy/fly.personal.toml  →  edit  →  fly deploy -c deploy/fly.personal.toml
-deploy/*.personal.toml
-deploy/*.personal.yml
-deploy/*.personal.yaml
+*.iml
+nexus.db
+nexus.db-*
+*.db-shm
+*.db-wal

@@ -1,0 +1,17 @@
+node_modules/
+dist/
+build/
+.vite/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+src-tauri/target/
+src-tauri/WixTools/
+# Tauri bundle output
+src-tauri/target/release/bundle/
+*.dmg
+*.msi
+*.deb
+*.rpm
+*.AppImage
