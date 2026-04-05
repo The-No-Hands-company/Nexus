@@ -315,6 +315,21 @@ async fn delete_attachment(
     State(state): State<Arc<AppState>>,
     Path(id): Path<Uuid>,
 ) -> NexusResult<Json<serde_json::Value>> {
+    // Rate limiting: 30 attachment deletions per user per 5 minutes
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:attachment_delete:user:{}", auth.user_id),
+        30,
+        300,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:attachment_delete:ip:{ip}"),
+        50,
+        300,
+    ).await?;
+
     // Find the attachment first to get the storage key
     let row = attachments::find_by_id(&state.db.pool, id)
         .await?

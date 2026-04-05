@@ -18,7 +18,10 @@ use serde::Serialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{
+    middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip, HeaderMap},
+    AppState,
+};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -59,6 +62,21 @@ async fn revoke_session(
     State(state): State<Arc<AppState>>,
     Path(session_id_str): Path<String>,
 ) -> NexusResult<StatusCode> {
+    // Rate limiting: 10 session revocations per user per 5 minutes
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:session_revoke:user:{}", auth_ctx.user_id),
+        10,
+        300,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:session_revoke:ip:{ip}"),
+        20,
+        300,
+    ).await?;
+
     let session_id: Uuid = session_id_str
         .parse()
         .map_err(|_| NexusError::Validation { message: "Invalid session ID format".into() })?;
@@ -82,6 +100,21 @@ async fn revoke_all_sessions(
     Extension(auth_ctx): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
 ) -> NexusResult<Json<RevokedCountResponse>> {
+    // Rate limiting: 5 bulk session revocations per user per hour (high impact operation)
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:session_revoke_all:user:{}", auth_ctx.user_id),
+        5,
+        3600,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:session_revoke_all:ip:{ip}"),
+        10,
+        3600,
+    ).await?;
+
     // Use the JTI from the access token claims to exclude the current session.
     let current_session_id = auth_ctx.session_id.unwrap_or(Uuid::nil());
 

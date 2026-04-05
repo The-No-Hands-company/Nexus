@@ -23,7 +23,11 @@ use totp_rs::{Algorithm, Secret, TOTP};
 
 use chrono::{Duration, Utc};
 
-use crate::{auth, middleware::AuthContext, AppState};
+use crate::{
+    auth,
+    middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip, HeaderMap},
+    AppState,
+};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -109,6 +113,21 @@ async fn setup(
     Extension(auth_ctx): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
 ) -> NexusResult<Json<SetupResponse>> {
+    // Rate limiting: 5 TOTP setup attempts per user per hour (prevents enumeration)
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:2fa:setup:user:{}", auth.user_id),
+        5,
+        3600,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:2fa:setup:ip:{ip}"),
+        10,
+        3600,
+    ).await?;
+
     let user = users::find_by_id(&state.db.pool, auth_ctx.user_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "User".into() })?;
@@ -167,6 +186,21 @@ async fn enable(
     State(state): State<Arc<AppState>>,
     Json(body): Json<EnableBody>,
 ) -> NexusResult<()> {
+    // Rate limiting: 10 TOTP enable attempts per user per 10 minutes (prevents brute force on verification code)
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:2fa:enable:user:{}", auth.user_id),
+        10,
+        600,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:2fa:enable:ip:{ip}"),
+        20,
+        600,
+    ).await?;
+
     let user = users::find_by_id(&state.db.pool, auth_ctx.user_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "User".into() })?;
@@ -214,6 +248,21 @@ async fn disable(
     State(state): State<Arc<AppState>>,
     Json(body): Json<DisableBody>,
 ) -> NexusResult<()> {
+    // Rate limiting: 10 TOTP disable attempts per user per 10 minutes
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:2fa:disable:user:{}", auth.user_id),
+        10,
+        600,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:2fa:disable:ip:{ip}"),
+        20,
+        600,
+    ).await?;
+
     let user = users::find_by_id(&state.db.pool, auth_ctx.user_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "User".into() })?;
@@ -286,6 +335,22 @@ async fn verify_mfa(
     State(state): State<Arc<AppState>>,
     Json(body): Json<VerifyMfaBody>,
 ) -> NexusResult<Json<AuthResponse>> {
+    // CRITICAL: Rate limiting on MFA verification to prevent brute force attacks
+    // 5 attempts per user per 5 minutes (stricter than other endpoints)
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:2fa:verify:user:{}", body.user_id),
+        5,
+        300,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:2fa:verify:ip:{ip}"),
+        10,
+        300,
+    ).await?;
+
     let config = nexus_common::config::get();
 
     // Validate the challenge token
@@ -400,6 +465,21 @@ async fn regenerate_backup_codes(
     State(state): State<Arc<AppState>>,
     Json(body): Json<RegenerateBody>,
 ) -> NexusResult<Json<RegenerateResponse>> {
+    // Rate limiting: 3 backup code regenerations per user per hour
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:2fa:regen:user:{}", auth.user_id),
+        3,
+        3600,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:2fa:regen:ip:{ip}"),
+        5,
+        3600,
+    ).await?;
+
     let user = users::find_by_id(&state.db.pool, auth_ctx.user_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "User".into() })?;
