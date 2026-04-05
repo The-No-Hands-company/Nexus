@@ -7,7 +7,7 @@
 //! GET    /channels/:id/e2ee                        — Get channel E2EE config
 
 use axum::{
-    extract::{Extension, Path, Query, State},
+    extract::{Extension, HeaderMap, Path, Query, State},
     middleware,
     routing::get,
     Json, Router,
@@ -21,7 +21,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
 use nexus_common::gateway_event::GatewayEvent;
 
 pub fn router() -> Router<Arc<AppState>> {
@@ -72,9 +72,25 @@ async fn list_encrypted_messages(
 async fn send_encrypted_message(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(channel_id): Path<Uuid>,
     Json(body): Json<SendEncryptedMessageRequest>,
 ) -> NexusResult<Json<EncryptedMessage>> {
+    // ── Rate limiting: 20 encrypted messages per user per minute ───────────
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:e2ee:user:{}", auth.user_id),
+        20,  // 20 messages
+        60,  // per minute
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:e2ee:ip:{ip}"),
+        50,  // 50 per IP
+        60,
+    ).await?;
+
     // Verify ciphertext_map is a JSON object
     if !body.ciphertext_map.is_object() {
         return Err(NexusError::Validation {
