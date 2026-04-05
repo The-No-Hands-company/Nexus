@@ -4,6 +4,7 @@ import { useStore } from "../store";
 import { useGateway } from "../gateway";
 import { usePushNotifications } from "../hooks/usePushNotifications";
 import ServerList from "../components/ServerList";
+import { useVoice } from "../hooks/useVoice";
 import ChannelList from "../components/ChannelList";
 import ChatView from "../components/ChatView";
 
@@ -13,6 +14,7 @@ const JoinServerModal = lazy(() => import("../components/JoinServerModal"));
 export default function MainLayout() {
   const { session, loadServers, setSession } = useStore();
   const [showSettings, setShowSettings] = useState(false);
+  const voice = useVoice();
   const [showJoin, setShowJoin]         = useState(false);
 
   // Real-time WebSocket gateway
@@ -81,7 +83,7 @@ export default function MainLayout() {
       />
 
       {/* Column 2 — channel list */}
-      <ChannelList />
+      <ChannelList voice={voice} />
 
       {/* Column 3 — main chat */}
       <div className="flex flex-col flex-1 min-w-0">
