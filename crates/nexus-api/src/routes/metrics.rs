@@ -46,12 +46,27 @@ async fn metrics_handler(
     // ── Access check ──────────────────────────────────────────────────────
     if let Ok(expected_token) = std::env::var("NEXUS_METRICS_TOKEN") {
         // Token-gated: any IP is allowed if the bearer token matches.
+        // Use constant-time comparison to prevent timing-oracle attacks where
+        // an attacker measures response latency to brute-force the token.
         let provided = headers
             .get(header::AUTHORIZATION)
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.strip_prefix("Bearer "))
             .unwrap_or("");
-        if provided != expected_token {
+
+        // Pad both sides to equal length before comparing, then use XOR
+        // accumulation so the comparison takes the same time regardless of
+        // where the strings differ.
+        let expected_bytes = expected_token.as_bytes();
+        let provided_bytes = provided.as_bytes();
+        let max_len = expected_bytes.len().max(provided_bytes.len()).max(1);
+        let mut diff: u8 = (expected_bytes.len() != provided_bytes.len()) as u8;
+        for i in 0..max_len {
+            let e = *expected_bytes.get(i).unwrap_or(&0);
+            let p = *provided_bytes.get(i).unwrap_or(&0);
+            diff |= e ^ p;
+        }
+        if diff != 0 {
             return Err((
                 StatusCode::UNAUTHORIZED,
                 "Provide Authorization: Bearer <NEXUS_METRICS_TOKEN>",

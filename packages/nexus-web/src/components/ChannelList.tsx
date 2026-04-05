@@ -3,8 +3,10 @@ import { useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import clsx from "clsx";
 import { useStore } from "../store";
+import VoiceBar from "./VoiceBar";
+import type { UseVoiceReturn } from "../hooks/useVoice";
 
-export default function ChannelList() {
+export default function ChannelList({ voice }: { voice?: UseVoiceReturn }) {
   const { t } = useTranslation();
   const {
     channels, activeServerId, servers, activeChannelId, setActiveChannel,
@@ -12,6 +14,8 @@ export default function ChannelList() {
   } = useStore();
 
   const navigate = useNavigate();
+  const joinVoice = voice?.joinVoice;
+  const voiceChannelId = voice?.channelId;
   const { channelId } = useParams<{ channelId: string }>();
   const [creatingText, setCreatingText] = useState(false);
   const [newName, setNewName] = useState("");
@@ -194,21 +198,28 @@ export default function ChannelList() {
               return (
                 <button
                   key={ch.id}
+                  onClick={() => joinVoice?.(ch.id)}
                   aria-label={t("channel.voiceChannel", { name: ch.name })}
-                  aria-current={active ? "page" : undefined}
+                  aria-current={voiceChannelId === ch.id ? "page" : undefined}
                   className={clsx(
                     "flex items-center gap-2 px-2 py-1.5 rounded text-sm w-full text-left transition-colors",
-                    active ? "bg-bg-600 text-fg" : "text-muted hover:bg-bg-700 hover:text-fg"
+                    voiceChannelId === ch.id
+                      ? "bg-green-900/30 text-green-300"
+                      : active ? "bg-bg-600 text-fg" : "text-muted hover:bg-bg-700 hover:text-fg"
                   )}
                 >
                   <MicIcon />
                   <span className="truncate flex-1">{ch.name}</span>
+                  {voiceChannelId === ch.id && (
+                    <span className="text-[9px] font-bold text-green-400">LIVE</span>
+                  )}
                 </button>
               );
             })}
           </>
         )}
       </div>
+      {voice && <VoiceBar voice={voice} />}
     </nav>
   );
 }

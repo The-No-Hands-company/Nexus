@@ -141,10 +141,18 @@ async fn process_import_job(
 
     let mut imported = 0i32;
     for item in items {
-        let content = item.content.trim();
-        if content.is_empty() {
+        let raw_content = item.content.trim().to_string();
+        if raw_content.is_empty() {
             continue;
         }
+        // Cap imported messages at the same limit as regular messages (4000 chars).
+        // Imported data from third-party platforms may contain arbitrarily long
+        // text; silently truncating is better than rejecting the entire job.
+        let content = if raw_content.len() > 4000 {
+            &raw_content[..4000]
+        } else {
+            &raw_content
+        };
 
         let target_channel = if let Some(name) = item.channel_name.as_deref() {
             if let Some(cid) = channel_cache.get(name).copied() {

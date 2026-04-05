@@ -95,3 +95,7 @@ pub mod sustainability;
 
 /// Web Push notification subscription management
 pub mod push;
+pub mod admin;
+
+/// Instance-admin user management (list, suspend, disable)
+pub mod admin_users;

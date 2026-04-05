@@ -150,6 +150,8 @@ pub fn build_router(state: AppState) -> Router {
         .merge(routes::sustainability::router())                  // governance, protocol versions, security audits, tutorials
         // v0.8.5 Federation UX — admin management + cross-instance search
         .merge(routes::federation_admin::router())                // federation admin panel API
+        .merge(routes::admin::router())                            // instance admin: users, servers, overview
+        .merge(routes::admin_users::router())                     // instance-admin user/server management
         .merge(routes::push::router())                             // Web Push subscriptions + VAPID key
         // Make Arc<AppState> available as an Axum Extension so that
         // `combined_auth_middleware` can perform DB lookups for bot tokens

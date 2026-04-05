@@ -298,40 +298,66 @@ async fn execute_webhook(
             message: "content or embeds must be provided".into(),
         });
     }
+    if content.len() > 4000 {
+        return Err(NexusError::Validation {
+            message: "Webhook message content exceeds 4000 characters".into(),
+        });
+    }
 
-    // Create the message as a "webhook" author
-    let msg_id = snowflake::generate_id();
     let display_name = body.username.as_deref().unwrap_or(&wh.name);
+    // Sanitize display name: strip dangerous formatting
+    let display_name = display_name.trim().chars().take(80).collect::<String>();
+    let display_name = if display_name.is_empty() { wh.name.clone() } else { display_name };
 
-    // Build a stub message record — in production this would go through the
-    // full message creation pipeline including thread resolution, embeds, etc.
-    let message = messages::create_message(
+    // Parse @mentions from content so unread badge counts stay correct
+    let mentions = nexus_common::validation::parse_mentions_from_content(&content);
+
+    let msg_id = nexus_common::snowflake::generate_id();
+    let message = nexus_db::repository::messages::create_message(
         &state.db.pool,
         msg_id,
         channel_id,
-        // Use webhook UUID as pseudo user_id
+        // Webhooks use their own UUID as the pseudo-author so messages are
+        // correctly attributed and can be fetched by webhook_id in audit trails.
         webhook_id,
         &content,
-        0,    // message_type: normal
-        None, // reference_message_id
+        0,    // message_type: 0 = Default
+        None, // reference_message_id (webhooks don't reply)
         None, // reference_channel_id
-        &[],  // mentions
-        &[],  // mention_roles
-        false, // mention_everyone
+        &mentions,
+        &[],  // mention_roles (webhooks don't resolve role mentions)
+        content.contains("@everyone") || content.contains("@here"),
     )
     .await?;
 
-    // Broadcast MESSAGE_CREATE via the gateway
+    // Build the full MESSAGE_CREATE payload that clients expect — including
+    // the webhook author fields so clients render the custom name/avatar.
+    let gateway_payload = serde_json::json!({
+        "id":           message.id,
+        "channel_id":   channel_id,
+        "author": {
+            "id":           webhook_id,
+            "username":     &display_name,
+            "avatar":       body.avatar_url,
+            "discriminator":"0000",
+            "bot":          true,
+            "webhook_id":   webhook_id,
+        },
+        "content":      &content,
+        "embeds":       body.embeds.unwrap_or_default(),
+        "attachments":  [],
+        "mentions":     mentions.iter().map(|u| u.to_string()).collect::<Vec<_>>(),
+        "mention_roles": [],
+        "mention_everyone": message.mention_everyone,
+        "pinned":       false,
+        "tts":          false,
+        "type":         0,
+        "created_at":   message.created_at,
+    });
+
     let _ = state.gateway_tx.send(GatewayEvent {
         event_type: nexus_common::gateway_event::event_types::MESSAGE_CREATE.to_string(),
-        data: serde_json::json!({
-            "message_id": message.id,
-            "channel_id": channel_id,
-            "webhook_id": webhook_id,
-            "username": display_name,
-            "avatar_url": body.avatar_url,
-            "content": &content,
-        }),
+        data: gateway_payload,
         server_id: wh.server_id,
         channel_id: Some(channel_id),
         user_id: None,

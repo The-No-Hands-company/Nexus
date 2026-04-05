@@ -275,3 +275,26 @@ class NexusApi {
 
 export const api = new NexusApi();
 export { NexusApi };
+
+  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    await this.request("POST", "/users/@me/change-password", {
+      current_password: currentPassword,
+      new_password: newPassword,
+    });
+  }
+
+  async sendTyping(channelId: string): Promise<void> {
+    await this.request("POST", `/channels/${channelId}/typing`).catch(() => {});
+  }
+
+  async joinServer(inviteCode: string): Promise<Server> {
+    return this.request("POST", `/invites/${inviteCode}/join`);
+  }
+
+  async getServerMembers(serverId: string): Promise<ServerMember[]> {
+    return this.request("GET", `/servers/${serverId}/members`);
+  }
+
+  getBaseUrl(): string {
+    return this.baseUrl;
+  }

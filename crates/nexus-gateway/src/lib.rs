@@ -395,9 +395,35 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
     let mut authenticated = false;
     let mut user_id: Option<uuid::Uuid> = None;
 
+    // Clients must send Identify within 10 seconds of receiving Hello.
+    // Unauthenticated connections that stall indefinitely would accumulate,
+    // exhausting file descriptors and memory.
+    const IDENTIFY_TIMEOUT_SECS: u64 = 10;
+    const MAX_FRAME_BYTES: usize = 64 * 1024; // 64 KiB — enough for any valid op
+
+    let identify_deadline = tokio::time::Instant::now()
+        + tokio::time::Duration::from_secs(IDENTIFY_TIMEOUT_SECS);
+
     while let Some(Ok(msg)) = receiver.next().await {
+        // Enforce Identify timeout: drop unauthenticated connections that
+        // haven't sent Identify within the deadline.
+        if !authenticated && tokio::time::Instant::now() > identify_deadline {
+            tracing::warn!(session = %session_id, "Gateway: Identify timeout — closing unauthenticated connection");
+            break;
+        }
+
         match msg {
             Message::Text(text) => {
+                // Reject oversized frames before deserialization to prevent
+                // memory exhaustion and ReDoS on malicious JSON.
+                if text.len() > MAX_FRAME_BYTES {
+                    tracing::warn!(
+                        session = %session_id,
+                        bytes = text.len(),
+                        "Gateway: oversized frame rejected"
+                    );
+                    continue;
+                }
                 let Ok(gateway_msg) = serde_json::from_str::<GatewayMessage>(&text) else {
                     continue;
                 };
