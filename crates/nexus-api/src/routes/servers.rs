@@ -249,6 +249,19 @@ async fn update_server(
     )
     .await?;
 
+    let _ = audit_log::write_entry(
+        &state.db.pool,
+        snowflake::generate_id(),
+        server_id,
+        Some(auth.user_id),
+        "SERVER_UPDATE",
+        Some("server"),
+        None,
+        &serde_json::json!({ "name": body.name, "is_public": body.is_public, "require_2fa": body.require_2fa }),
+        None,
+    )
+    .await;
+
     Ok(Json(updated.into()))
 }
 
@@ -269,6 +282,19 @@ async fn delete_server(
     }
 
     servers::delete_server(&state.db.pool, server_id).await?;
+
+    let _ = audit_log::write_entry(
+        &state.db.pool,
+        snowflake::generate_id(),
+        server_id,
+        Some(auth.user_id),
+        "SERVER_DELETE",
+        Some("server"),
+        None,
+        &serde_json::json!({ "name": server.name }),
+        None,
+    )
+    .await;
 
     tracing::info!(server_id = %server_id, "Server deleted");
 
