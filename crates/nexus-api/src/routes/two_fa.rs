@@ -18,7 +18,7 @@ use axum::{
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_db::repository::{sessions, two_fa, users};
 use rand::Rng;
-use rand::distr::Distribution;
+use rand::distr::{Alphanumeric, Distribution};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use totp_rs::{Algorithm, Secret, TOTP};
