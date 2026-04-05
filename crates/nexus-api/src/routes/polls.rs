@@ -10,7 +10,7 @@
 //! POST   /channels/:id/polls/:poll_id/end             — End early (MANAGE_MESSAGES)
 
 use axum::{
-    extract::{Extension, Path, State},
+    extract::{Extension, HeaderMap, Path, State},
     middleware,
     routing::{get, post},
     Json, Router,
@@ -28,7 +28,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
 
 // ============================================================
 // Router
@@ -255,9 +255,25 @@ async fn list_polls(
 async fn create_poll(
     State(state): State<Arc<AppState>>,
     Extension(ctx): Extension<AuthContext>,
+    headers: HeaderMap,
     Path(channel_id): Path<Uuid>,
     Json(body): Json<CreatePollRequest>,
 ) -> NexusResult<Json<Poll>> {
+    // Rate limiting: 10 polls per hour per user, 20 per IP
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:polls:user:{}", ctx.user_id),
+        10,
+        3600,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:polls:ip:{ip}"),
+        20,
+        3600,
+    ).await?;
+
     if body.question.trim().is_empty() {
         return Err(NexusError::Validation { message: "Poll question cannot be empty".into() });
     }
@@ -320,9 +336,25 @@ async fn create_poll(
 async fn cast_vote(
     State(state): State<Arc<AppState>>,
     Extension(ctx): Extension<AuthContext>,
+    headers: HeaderMap,
     Path((channel_id, poll_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<VoteRequest>,
 ) -> NexusResult<Json<serde_json::Value>> {
+    // Rate limiting: 30 votes per minute per user (prevents vote spam)
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:vote:user:{}", ctx.user_id),
+        30,
+        60,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:vote:ip:{ip}"),
+        60,
+        60,
+    ).await?;
+
     if body.option_indices.is_empty() {
         return Err(NexusError::Validation { message: "option_indices must not be empty".into() });
     }
