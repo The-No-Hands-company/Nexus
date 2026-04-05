@@ -1,7 +1,7 @@
 //! Server (guild) routes — create, join, leave, manage.
 
 use axum::{
-    extract::{Extension, Path, State},
+    extract::{Extension, HeaderMap, Path, State},
     http::StatusCode,
     middleware,
     routing::{get, patch, post},
@@ -69,6 +69,7 @@ async fn list_my_servers(
 /// POST /api/v1/servers — Create a new server.
 async fn create_server(
     Extension(auth): Extension<AuthContext>,
+    headers: HeaderMap,
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateServerRequest>,
 ) -> NexusResult<Json<ServerResponse>> {
@@ -86,6 +87,22 @@ async fn create_server(
             ),
         });
     }
+
+    // Rate limit server creation to 3 per hour per user.
+    // This is to prevent abuse and ensure that server creation is not too expensive.
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:server:create:user:{}", auth.user_id),
+        3,  // 3 creates per user
+        3600, // per hour
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:server:create:ip:{ip}"),
+        5,  // 5 per IP
+        3600,
+    ).await?;
 
     let server_id = snowflake::generate_id();
     let is_public = body.is_public.unwrap_or(false);
