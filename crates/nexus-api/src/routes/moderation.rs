@@ -176,6 +176,7 @@ struct ReasonBody {
 async fn kick_member(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path((server_id, target_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<ReasonBody>,
 ) -> NexusResult<Json<serde_json::Value>> {
@@ -257,6 +258,7 @@ struct BanBody {
 async fn ban_member(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path((server_id, target_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<BanBody>,
 ) -> NexusResult<Json<moderation::BanRow>> {
@@ -334,6 +336,7 @@ async fn ban_member(
 async fn unban_member(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path((server_id, target_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<ReasonBody>,
 ) -> NexusResult<Json<serde_json::Value>> {
@@ -410,6 +413,7 @@ struct TimeoutBody {
 async fn set_timeout(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path((server_id, target_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<TimeoutBody>,
 ) -> NexusResult<Json<serde_json::Value>> {
@@ -514,6 +518,7 @@ async fn set_timeout(
 async fn lift_timeout(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path((server_id, target_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<serde_json::Value>> {
     let server = get_server_or_404(&state.db.pool, server_id).await?;
@@ -662,6 +667,7 @@ struct ResolveReportBody {
 async fn resolve_report(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path((server_id, report_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<ResolveReportBody>,
 ) -> NexusResult<Json<serde_json::Value>> {
@@ -719,6 +725,7 @@ async fn resolve_report(
 async fn dismiss_report(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path((server_id, report_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<serde_json::Value>> {
         // Rate limiting: 20 report dismissals per user per 5 minutes
@@ -799,6 +806,7 @@ struct AddFilterBody {
 async fn add_word_filter(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path(server_id): Path<Uuid>,
     Json(body): Json<AddFilterBody>,
 ) -> NexusResult<Json<moderation::WordFilter>> {
@@ -878,6 +886,7 @@ async fn add_word_filter(
 async fn remove_word_filter(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Path((server_id, filter_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<serde_json::Value>> {
         // Rate limiting: 10 word filter changes per user per 5 minutes

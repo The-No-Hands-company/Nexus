@@ -387,7 +387,7 @@ async fn send_message(
                 if mentioned_uid == author_id {
                     continue; // never self-ping
                 }
-                let payload = nexus_api::push_sender::PushPayload {
+                let payload = crate::push_sender::PushPayload {
                     title: format!("{} mentioned you", author_name),
                     body: content_preview.clone(),
                     icon: Some("/icon-192.png".into()),
@@ -426,7 +426,7 @@ async fn send_message(
                     let Ok(recipient_uid) = uid_str.parse::<Uuid>() else { continue };
                     // Skip if already notified via @mention above
                     if mentions_copy.contains(&recipient_uid) { continue; }
-                    let payload = nexus_api::push_sender::PushPayload {
+                    let payload = crate::push_sender::PushPayload {
                         title: format!("Message from {}", author_name),
                         body: content_preview.clone(),
                         icon: Some("/icon-192.png".into()),
@@ -477,7 +477,7 @@ async fn send_message(
                     }
                 };
 
-                let payload = nexus_api::push_sender::PushPayload {
+                let payload = crate::push_sender::PushPayload {
                     title: author_name,
                     body: content_preview,
                     icon: Some("/icon-192.png".into()),
