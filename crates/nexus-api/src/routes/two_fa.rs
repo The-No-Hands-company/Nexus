@@ -81,7 +81,7 @@ fn generate_raw_backup_codes() -> Vec<String> {
     let mut rng = OsRng;
     (0..BACKUP_CODE_COUNT)
         .map(|_| {
-            rng
+            (&mut rng)
                 .sample_iter(Alphanumeric)
                 .take(BACKUP_CODE_LEN)
                 .map(char::from)

@@ -54,8 +54,8 @@ fn generate_invite_code() -> String {
     use rand::distr::Alphanumeric;
     use rand::distr::Distribution;
     use rand::Rng;
-    use rand::rngs::OsRng;
-    OsRng
+    let mut rng = OsRng;
+    (&mut rng)
         .sample_iter(Alphanumeric)
         .take(12)
         .map(|c| (c as char).to_uppercase().next().unwrap_or(c as char))
