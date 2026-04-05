@@ -319,12 +319,23 @@ async fn verify_mfa(
     headers: HeaderMap,
     Json(body): Json<VerifyMfaBody>,
 ) -> NexusResult<Json<AuthResponse>> {
+    let config = nexus_common::config::get();
+
+    // Validate the challenge token first to get the user_id
+    let claims = auth::validate_token(&body.mfa_token, &config.auth.jwt_secret)
+        .map_err(|_| NexusError::InvalidToken)?;
+    if claims.token_type != "mfa_challenge" {
+        return Err(NexusError::InvalidToken);
+    }
+
+    let user_id: uuid::Uuid = claims.sub.parse().map_err(|_| NexusError::InvalidToken)?;
+
     // CRITICAL: Rate limiting on MFA verification to prevent brute force attacks
     // 5 attempts per user per 5 minutes (stricter than other endpoints)
     let ip = extract_client_ip(&headers);
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
-        format!("rl:2fa:verify:user:{}", body.user_id),
+        format!("rl:2fa:verify:user:{}", user_id),
         5,
         300,
     ).await?;
@@ -334,17 +345,6 @@ async fn verify_mfa(
         10,
         300,
     ).await?;
-
-    let config = nexus_common::config::get();
-
-    // Validate the challenge token
-    let claims = auth::validate_token(&body.mfa_token, &config.auth.jwt_secret)
-        .map_err(|_| NexusError::InvalidToken)?;
-    if claims.token_type != "mfa_challenge" {
-        return Err(NexusError::InvalidToken);
-    }
-
-    let user_id: uuid::Uuid = claims.sub.parse().map_err(|_| NexusError::InvalidToken)?;
 
     let user = users::find_by_id(&state.db.pool, user_id)
         .await?
