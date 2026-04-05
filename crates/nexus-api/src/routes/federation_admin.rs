@@ -353,7 +353,7 @@ async fn add_peer(
     ).await?;
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
-        format!("rl:fedadmin:ip:{ip}:add_peer"),
+        format!("rl:fedadmin:ip:{_ip}:add_peer"),
         20,   // 20 per IP
         300,
     ).await?;
