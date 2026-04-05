@@ -4,6 +4,8 @@
 
 export const DEFAULT_API_BASE = "http://localhost:8080/api/v1";
 
+// ── Types ─────────────────────────────────────────────────────────────────────
+
 export interface AuthTokens {
   accessToken: string;
   refreshToken: string;
@@ -16,6 +18,9 @@ export interface User {
   displayName?: string;
   avatar?: string;
   email?: string;
+  presence?: string;
+  status?: string;
+  bio?: string;
   createdAt: string;
 }
 
@@ -106,6 +111,8 @@ export interface ServerMember {
   roles: string[];
 }
 
+// ── API client ────────────────────────────────────────────────────────────────
+
 class NexusApi {
   private baseUrl: string;
   private _accessToken: string | null = null;
@@ -115,11 +122,10 @@ class NexusApi {
     this.baseUrl = baseUrl;
   }
 
-  private headers(): Record<string, string> {
-    const h: Record<string, string> = { "Content-Type": "application/json" };
-    if (this._accessToken) h["Authorization"] = "Bearer " + this._accessToken;
-    return h;
-  }
+  // ── Config ──────────────────────────────────────────────────────────────────
+
+  getBaseUrl(): string { return this.baseUrl; }
+  setBaseUrl(url: string): void { this.baseUrl = url; }
 
   setTokens(access: string, refresh: string) {
     this._accessToken = access;
@@ -132,6 +138,14 @@ class NexusApi {
   }
 
   get hasToken(): boolean { return !!this._accessToken; }
+
+  // ── Core ────────────────────────────────────────────────────────────────────
+
+  private headers(): Record<string, string> {
+    const h: Record<string, string> = { "Content-Type": "application/json" };
+    if (this._accessToken) h["Authorization"] = "Bearer " + this._accessToken;
+    return h;
+  }
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const opts: RequestInit = { method, headers: this.headers() };
@@ -174,6 +188,8 @@ class NexusApi {
     } catch { return false; }
   }
 
+  // ── Auth ────────────────────────────────────────────────────────────────────
+
   async register(username: string, password: string, email?: string) {
     const r = await this.request<{ user: User } & AuthTokens>("POST", "/auth/register", {
       username, password, ...(email ? { email } : {}),
@@ -193,12 +209,23 @@ class NexusApi {
     this.clearTokens();
   }
 
+  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    await this.request("POST", "/users/@me/change-password", {
+      current_password: currentPassword,
+      new_password: newPassword,
+    });
+  }
+
+  // ── Users ───────────────────────────────────────────────────────────────────
+
   async getMe(): Promise<User> { return this.request("GET", "/users/@me"); }
   async getUser(userId: string): Promise<User> { return this.request("GET", "/users/" + userId); }
   async updateMe(data: Partial<User>): Promise<User> { return this.request("PATCH", "/users/@me", data); }
   async searchUsers(query: string): Promise<User[]> {
     return this.request("GET", "/users/search?q=" + encodeURIComponent(query));
   }
+
+  // ── Servers ─────────────────────────────────────────────────────────────────
 
   async getServers(): Promise<Server[]> { return this.request("GET", "/users/@me/servers"); }
   async getServer(serverId: string): Promise<Server> { return this.request("GET", "/servers/" + serverId); }
@@ -207,6 +234,8 @@ class NexusApi {
   }
   async deleteServer(serverId: string) { return this.request("DELETE", "/servers/" + serverId); }
   async leaveServer(serverId: string) { return this.request("DELETE", "/servers/" + serverId + "/members/@me"); }
+
+  // ── Channels ────────────────────────────────────────────────────────────────
 
   async getChannels(serverId: string): Promise<Channel[]> {
     return this.request("GET", "/servers/" + serverId + "/channels");
@@ -220,6 +249,12 @@ class NexusApi {
   }
   async deleteChannel(channelId: string) { return this.request("DELETE", "/channels/" + channelId); }
 
+  async sendTyping(channelId: string): Promise<void> {
+    this.request("POST", "/channels/" + channelId + "/typing").catch(() => {});
+  }
+
+  // ── Messages ─────────────────────────────────────────────────────────────────
+
   async getMessages(channelId: string, before?: string, limit = 50): Promise<Message[]> {
     let path = "/channels/" + channelId + "/messages?limit=" + limit;
     if (before) path += "&before=" + before;
@@ -227,7 +262,9 @@ class NexusApi {
   }
   async sendMessage(channelId: string, content: string, replyTo?: string, threadId?: string): Promise<Message> {
     return this.request("POST", "/channels/" + channelId + "/messages", {
-      content, ...(replyTo ? { reply_to: replyTo } : {}), ...(threadId ? { thread_id: threadId } : {}),
+      content,
+      ...(replyTo ? { reply_to: replyTo } : {}),
+      ...(threadId ? { thread_id: threadId } : {}),
     });
   }
   async editMessage(messageId: string, content: string): Promise<Message> {
@@ -235,70 +272,56 @@ class NexusApi {
   }
   async deleteMessage(messageId: string) { return this.request("DELETE", "/messages/" + messageId); }
   async addReaction(channelId: string, messageId: string, emoji: string) {
-    return this.request("PUT", "/channels/" + channelId + "/messages/" + messageId + "/reactions/" + encodeURIComponent(emoji));
+    return this.request("PUT",
+      "/channels/" + channelId + "/messages/" + messageId + "/reactions/" + encodeURIComponent(emoji));
   }
   async removeReaction(channelId: string, messageId: string, emoji: string) {
-    return this.request("DELETE", "/channels/" + channelId + "/messages/" + messageId + "/reactions/" + encodeURIComponent(emoji));
+    return this.request("DELETE",
+      "/channels/" + channelId + "/messages/" + messageId + "/reactions/" + encodeURIComponent(emoji));
   }
+
+  // ── DMs ──────────────────────────────────────────────────────────────────────
 
   async getDMs(): Promise<DmChannel[]> { return this.request("GET", "/users/@me/channels"); }
   async createDM(recipientId: string): Promise<DmChannel> {
     return this.request("POST", "/users/@me/channels", { recipient_id: recipientId });
   }
 
+  // ── Relationships ─────────────────────────────────────────────────────────────
+
   async getRelationships(): Promise<Relationship[]> { return this.request("GET", "/users/@me/relationships"); }
   async addFriend(userId: string) { return this.request("POST", "/users/@me/relationships", { user_id: userId, type: 1 }); }
   async blockUser(userId: string) { return this.request("POST", "/users/@me/relationships", { user_id: userId, type: 2 }); }
   async removeRelationship(userId: string) { return this.request("DELETE", "/users/@me/relationships/" + userId); }
 
+  // ── Members ───────────────────────────────────────────────────────────────────
+
   async getMembers(serverId: string, limit = 100): Promise<ServerMember[]> {
     return this.request("GET", "/servers/" + serverId + "/members?limit=" + limit);
   }
 
-  async getGatewayUrl(): Promise<string> {
-    const r = await this.request<{ url: string }>("GET", "/gateway");
-    return r.url;
-  }
+  // ── Invites ───────────────────────────────────────────────────────────────────
 
   async getInvites(serverId: string) {
     return this.request("GET", "/servers/" + serverId + "/invites");
   }
   async createInvite(serverId: string, maxAge?: number, maxUses?: number) {
     return this.request("POST", "/servers/" + serverId + "/invites", {
-      ...(maxAge ? { max_age: maxAge } : {}), ...(maxUses ? { max_uses: maxUses } : {}),
+      ...(maxAge ? { max_age: maxAge } : {}),
+      ...(maxUses ? { max_uses: maxUses } : {}),
     });
   }
-  async joinServer(inviteCode: string) {
-    return this.request("POST", "/invites/" + inviteCode);
+  async joinServer(inviteCode: string): Promise<Server> {
+    return this.request("POST", "/invites/" + inviteCode + "/join");
+  }
+
+  // ── Gateway ───────────────────────────────────────────────────────────────────
+
+  async getGatewayUrl(): Promise<string> {
+    const r = await this.request<{ url: string }>("GET", "/gateway");
+    return r.url;
   }
 }
 
 export const api = new NexusApi();
 export { NexusApi };
-
-  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
-    await this.request("POST", "/users/@me/change-password", {
-      current_password: currentPassword,
-      new_password: newPassword,
-    });
-  }
-
-  async sendTyping(channelId: string): Promise<void> {
-    await this.request("POST", `/channels/${channelId}/typing`).catch(() => {});
-  }
-
-  async joinServer(inviteCode: string): Promise<Server> {
-    return this.request("POST", `/invites/${inviteCode}/join`);
-  }
-
-  async getServerMembers(serverId: string): Promise<ServerMember[]> {
-    return this.request("GET", `/servers/${serverId}/members`);
-  }
-
-  getBaseUrl(): string {
-    return this.baseUrl;
-  }
-
-  setBaseUrl(url: string): void {
-    this.baseUrl = url;
-  }
