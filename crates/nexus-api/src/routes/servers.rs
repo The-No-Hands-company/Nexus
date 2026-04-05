@@ -23,6 +23,8 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
+use rand::{distr::Alphanumeric, rngs::OsRng, Rng};
+use rand_core::OsRng as _;
 
 /// Server routes.
 pub fn router() -> Router<Arc<AppState>> {
