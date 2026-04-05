@@ -477,7 +477,7 @@ async fn change_password(
 
     // Hash the new password with Argon2id
     let new_hash = crate::auth::hash_password(&body.new_password)
-        .map_err(|e| NexusError::Internal(e.into()))?;
+        .map_err(|e| NexusError::Internal(anyhow::anyhow!("Password hash failed: {}", e)))?;
 
     // Persist the new password hash
     sqlx::query(

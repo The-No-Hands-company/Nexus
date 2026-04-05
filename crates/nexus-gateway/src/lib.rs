@@ -446,9 +446,9 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
                                     Ok(Some(user)) => {
                                         let flags = user.flags;
                                         let suspended =
-                                            nexus_common::models::user::UserFlags::SUSPENDED;
+                                            nexus_common::models::user::user_flags::SUSPENDED;
                                         let disabled =
-                                            nexus_common::models::user::UserFlags::DISABLED;
+                                            nexus_common::models::user::user_flags::DISABLED;
                                         (flags & suspended) == 0 && (flags & disabled) == 0
                                     }
                                     // User not found or DB error — reject to be safe.

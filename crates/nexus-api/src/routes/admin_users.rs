@@ -32,6 +32,7 @@ use nexus_common::snowflake;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
+use sqlx::Row;
 
 use crate::{middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
 
