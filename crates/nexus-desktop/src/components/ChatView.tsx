@@ -15,6 +15,7 @@ import CanvasView from "./CanvasView";
 import { useFocusTrap } from "../hooks/useFocusTrap";
 import { formatDistanceToNow, format, isToday, isYesterday } from "date-fns";
 import clsx from "clsx";
+import UserProfileCard from "./UserProfileCard";
 
 export default function ChatView() {
   const { channelId } = useParams<{ channelId: string }>();
@@ -31,6 +32,13 @@ export default function ChatView() {
   const [scheduledMsgs, setScheduledMsgs] = useState<import("../store").ScheduledMessage[]>([]);
   const [confirmDisappear, setConfirmDisappear] = useState(false);
   const [pendingTopic, setPendingTopic] = useState<string | undefined>(undefined);
+  const [openProfile, setOpenProfile] = useState<{
+    userId: string;
+    username: string;
+    displayName?: string;
+    avatar?: string;
+    anchorEl: HTMLElement | null;
+  } | null>(null);
 
   const msgs: Message[] = channelId ? (messages[channelId] ?? []) : [];
   const channel = channels.find((c) => c.id === channelId);
@@ -83,6 +91,10 @@ export default function ChatView() {
 
   // Only show member list for server channels, not DMs
   const isServerChannel = !!activeServerId && !isHomeMode;
+
+  const handleOpenProfile = (userId: string, username: string, displayName: string | undefined, avatar: string | undefined, anchorEl: HTMLElement) => {
+    setOpenProfile({ userId, username, displayName, avatar, anchorEl });
+  };
 
   return (
     <div className="flex h-full overflow-hidden bg-bg-800">
@@ -268,6 +280,7 @@ export default function ChatView() {
                     }
                   }}
                   onForward={() => setForwardModalMessage(msg)}
+                  onOpenProfile={(userId, username, displayName, avatar, anchorEl) => handleOpenProfile(userId, username, displayName, avatar, anchorEl)}
                 />
                 {attachedPoll && (
                   <PollCard
@@ -413,6 +426,17 @@ export default function ChatView() {
           </div>
         </div>
       )}
+      {/* User profile popover */}
+      {openProfile && (
+        <UserProfileCard
+          userId={openProfile.userId}
+          username={openProfile.username}
+          displayName={openProfile.displayName}
+          avatar={openProfile.avatar}
+          anchorEl={openProfile.anchorEl}
+          onClose={() => setOpenProfile(null)}
+        />
+      )}
     </div>
   );
 }
@@ -477,6 +501,7 @@ function MessageRow({
   onStartThread,
   onBookmark,
   onForward,
+  onOpenProfile,
 }: {
   msg: Message;
   channelId: string;
@@ -486,9 +511,11 @@ function MessageRow({
   onStartThread?: (msgId: string, content: string) => void;
   onBookmark?: () => void;
   onForward?: () => void;
+  onOpenProfile?: (userId: string, username: string, displayName: string | undefined, avatar: string | undefined, anchorEl: HTMLElement) => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
+  const avatarRef = useRef<HTMLDivElement>(null);
 
   // Close picker on outside click
   useEffect(() => {
@@ -525,8 +552,10 @@ function MessageRow({
       <div className="w-9 shrink-0 mt-0.5">
         {!grouped ? (
           <div
+            ref={avatarRef}
+            onClick={(e) => onOpenProfile?.(msg.authorId, msg.authorUsername, undefined, undefined, e.currentTarget)}
             className={clsx(
-              "w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold",
+              "w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold cursor-pointer hover:ring-2 hover:ring-accent-400/50 transition-all",
               isOwn ? "bg-accent-500 text-white" : "bg-bg-600 text-white"
             )}
           >
