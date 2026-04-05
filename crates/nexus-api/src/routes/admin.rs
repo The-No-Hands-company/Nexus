@@ -164,6 +164,23 @@ async fn update_user_flags(
     tracing::info!(admin = %auth.user_id, target = %user_id,
         set = ?body.set_flags, clear = ?body.clear_flags, "Admin updated user flags");
 
+    // Write audit log for this critical instance-level operation
+    let _ = audit_log::write_instance_entry(
+        &state.db.pool,
+        snowflake::generate_id(),
+        auth.user_id,
+        "USER_FLAGS_UPDATE",
+        Some("user"),
+        Some(user_id),
+        &serde_json::json!({
+            "set_flags": body.set_flags,
+            "clear_flags": body.clear_flags,
+        }),
+        None,
+        None,  // IP address not available here, would need headers
+        None,  // user_agent
+    ).await;
+
     Ok(Json(serde_json::json!({ "updated": true })))
 }
 
