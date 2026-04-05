@@ -22,6 +22,7 @@ use chrono::Utc;
 use nexus_common::{
     error::{NexusError, NexusResult},
     gateway_event::GatewayEvent,
+    permissions::Permissions,
 };
 use nexus_voice::state::{VoiceGlobalStats, VoiceModAction, VoiceState, VoiceStateUpdate};
 use serde::Serialize;
@@ -292,10 +293,10 @@ async fn server_mute(
                 .map_err(NexusError::Database)?;
 
         let effective = all_roles.iter().fold(
-            nexus_common::models::permissions::Permissions::empty(),
+            Permissions::empty(),
             |acc, role| {
                 if role.is_default || member.roles.contains(&role.id) {
-                    acc | nexus_common::models::permissions::Permissions::from_bits_truncate(
+                    acc | Permissions::from_bits_truncate(
                         role.permissions,
                     )
                 } else {
@@ -304,7 +305,7 @@ async fn server_mute(
             },
         );
 
-        if !effective.has(nexus_common::models::permissions::Permissions::MUTE_MEMBERS) {
+        if !effective.has(Permissions::MUTE_MEMBERS) {
             metrics::counter!(
                 "nexus_voice_requests_total",
                 "route" => "server_mute",

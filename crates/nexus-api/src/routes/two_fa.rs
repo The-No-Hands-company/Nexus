@@ -119,7 +119,7 @@ async fn setup(
     let ip = extract_client_ip(&headers);
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
-        format!("rl:2fa:setup:user:{}", auth.user_id),
+        format!("rl:2fa:setup:user:{}", auth_ctx.user_id),
         5,
         3600,
     ).await?;
@@ -193,7 +193,7 @@ async fn enable(
     let ip = extract_client_ip(&headers);
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
-        format!("rl:2fa:enable:user:{}", auth.user_id),
+        format!("rl:2fa:enable:user:{}", auth_ctx.user_id),
         10,
         600,
     ).await?;
@@ -256,7 +256,7 @@ async fn disable(
     let ip = extract_client_ip(&headers);
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
-        format!("rl:2fa:disable:user:{}", auth.user_id),
+        format!("rl:2fa:disable:user:{}", auth_ctx.user_id),
         10,
         600,
     ).await?;
@@ -475,7 +475,7 @@ async fn regenerate_backup_codes(
     let ip = extract_client_ip(&headers);
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
-        format!("rl:2fa:regen:user:{}", auth.user_id),
+        format!("rl:2fa:regen:user:{}", auth_ctx.user_id),
         3,
         3600,
     ).await?;

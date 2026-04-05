@@ -313,6 +313,7 @@ async fn get_attachment(
 async fn delete_attachment(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Path(id): Path<Uuid>,
 ) -> NexusResult<Json<serde_json::Value>> {
     // Rate limiting: 30 attachment deletions per user per 5 minutes
@@ -558,7 +559,6 @@ mod tests {
     fn empty_filename_stays_empty() {
         assert_eq!(sanitize_filename(""), "");
     }
-}
 
     // ── sniff_mime_from_bytes ─────────────────────────────────────────────────
 
@@ -633,3 +633,4 @@ mod tests {
         assert!(mime_families_match("application/zip", "application/zip"));
         assert!(mime_families_match("application/x-tar", "application/zip"));
     }
+}
