@@ -15,7 +15,7 @@
 //! | GET    | `/_nexus/federation/v1/event/{eventId}` | Serve a single event by ID |
 //! | GET    | `/_nexus/federation/v1/state/{roomId}` | Serve room state at an event |
 //! | GET    | `/_nexus/federation/v1/make_join/{roomId}/{userId}` | Prepare a join event template |
-//! | PUT    | `/_nexus/federation/v1/send_join/{roomId}/{eventId}` | Receive a signed join event |
+//! | PUT    | `/_nexus/federation/v1/send_join/{roomId}/{event_id}` | Receive a signed join event |
 //! | GET    | `/_nexus/federation/v1/backfill/{roomId}` | Backfill historical events |
 //! | PUT    | `/_matrix/app/v1/transactions/{txnId}` | Matrix AS bridge inbound transactions |
 
@@ -34,7 +34,10 @@ use sqlx::Row as _;
 use tracing::{debug, info, warn};
 use std::sync::Arc;
 
-use crate::AppState;
+use crate::{
+    middleware::{check_rate_limit_with_fallback, extract_client_ip},
+    AppState,
+};
 
 // ─── Router ───────────────────────────────────────────────────────────────────
 
@@ -168,6 +171,18 @@ async fn receive_transaction(
     Path(txn_id): Path<String>,
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
+    // ── 0. Rate limiting (early, before expensive signature verification) ────
+    // Limit transaction ingestion to 100/min per IP and 200/min per origin
+    let ip = extract_client_ip(&headers);
+    if let Err(e) = check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:fed:txn:ip:{ip}"),
+        100,
+        60,
+    ).await {
+        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({ "error": e.to_string() }))).into_response();
+    }
+    
     // ── 1. Authenticate — full Ed25519 HTTP-request signature check ───────────
     let txn_uri = format!("/_nexus/federation/v1/send/{}", txn_id);
     let origin = match verify_inbound_request(&state, &headers, "PUT", &txn_uri, Some(&body)).await {
