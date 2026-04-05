@@ -9,9 +9,10 @@
 //! GET    /channels/:id/polls/:poll_id/results         — Get results
 //! POST   /channels/:id/polls/:poll_id/end             — End early (MANAGE_MESSAGES)
 
+use axum::http::HeaderMap;
 use axum::{
     extract::{Extension, Path, State},
-use axum::http::HeaderMap;
+    http::StatusCode,
     middleware,
     routing::{get, post},
     Json, Router,

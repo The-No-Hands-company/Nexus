@@ -8,10 +8,8 @@
 //!   GET  /auth/2fa/backup-codes       — count of unused backup codes
 //!   POST /auth/2fa/backup-codes/regenerate — generate a fresh set of 8 codes
 
-use axum::http::HeaderMap;
 use axum::{
-    extract::{Extension, State},
-    http::HeaderMap,
+    extract::{Extension, HeaderMap, State},
     middleware,
     routing::{get, post},
     Json, Router,
@@ -22,14 +20,8 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use totp_rs::{Algorithm, Secret, TOTP};
-
 use chrono::{Duration, Utc};
-
-use crate::{
-    auth,
-    middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip},
-    AppState,
-};
+use crate::{auth, middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -114,23 +106,8 @@ struct SetupResponse {
 async fn setup(
     Extension(auth_ctx): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
 ) -> NexusResult<Json<SetupResponse>> {
     // Rate limiting: 5 TOTP setup attempts per user per hour (prevents enumeration)
-    let ip = extract_client_ip(&headers);
-    check_rate_limit_with_fallback(
-        state.db.redis.as_ref(),
-        format!("rl:2fa:setup:user:{}", auth_ctx.user_id),
-        5,
-        3600,
-    ).await?;
-    check_rate_limit_with_fallback(
-        state.db.redis.as_ref(),
-        format!("rl:2fa:setup:ip:{ip}"),
-        10,
-        3600,
-    ).await?;
-
     let user = users::find_by_id(&state.db.pool, auth_ctx.user_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "User".into() })?;

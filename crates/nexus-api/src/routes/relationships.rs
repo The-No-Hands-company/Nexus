@@ -19,26 +19,33 @@
 //! 4. Forward the request to the remote server via
 //!    `PUT /_nexus/federation/v1/friend_request`.
 
+use axum::http::HeaderMap;
 use axum::{
     extract::{Extension, Path, Query, State},
     middleware,
-    routing::get,
+    routing::{delete, get, post},
     Json, Router,
 };
-use axum::http::HeaderMap;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use nexus_common::{
     error::{NexusError, NexusResult},
+    gateway_event::GatewayEvent,
+    models::user::user_flags,
     models::relationship::RelationshipStatus,
     snowflake,
 };
-use nexus_db::repository::{relationships, users};
+use nexus_db::repository::{audit_log, members, relationships, servers, users};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
+use crate::{
+    middleware::{
+        check_rate_limit_with_fallback, extract_client_ip, AuthContext,
+        user_agent as _,
+    },
+    AppState,
+};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
