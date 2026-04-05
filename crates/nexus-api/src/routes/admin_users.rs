@@ -260,6 +260,21 @@ async fn unsuspend_user(
 ) -> NexusResult<Json<serde_json::Value>> {
     require_instance_admin(&state.db.pool, auth.user_id).await?;
 
+    // Rate limiting: 10 admin actions per minute per admin
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:admin:user:{}", auth.user_id),
+        10,
+        60,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:admin:ip:{ip}"),
+        20,
+        60,
+    ).await?;
+
     users::remove_user_flags(&state.db.pool, user_id, user_flags::SUSPENDED)
         .await
         .map_err(NexusError::from)?;
@@ -297,6 +312,21 @@ async fn disable_user(
     Path(user_id): Path<Uuid>,
 ) -> NexusResult<Json<serde_json::Value>> {
     require_instance_admin(&state.db.pool, auth.user_id).await?;
+
+    // Rate limiting: 10 admin actions per minute per admin
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:admin:user:{}", auth.user_id),
+        10,
+        60,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:admin:ip:{ip}"),
+        20,
+        60,
+    ).await?;
 
     if user_id == auth.user_id {
         return Err(NexusError::Validation {
