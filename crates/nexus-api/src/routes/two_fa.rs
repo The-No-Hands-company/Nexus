@@ -8,8 +8,9 @@
 //!   GET  /auth/2fa/backup-codes       — count of unused backup codes
 //!   POST /auth/2fa/backup-codes/regenerate — generate a fresh set of 8 codes
 
+use axum::http::HeaderMap;
 use axum::{
-    extract::{Extension, HeaderMap, State},
+    extract::{Extension, State},
     middleware,
     routing::{get, post},
     Json, Router,

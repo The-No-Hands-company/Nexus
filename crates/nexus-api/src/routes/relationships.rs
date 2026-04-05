@@ -36,14 +36,12 @@ use nexus_common::{
 };
 use nexus_db::repository::{audit_log, members, relationships, servers, users};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{
-    middleware::{
-        check_rate_limit_with_fallback, extract_client_ip, AuthContext,
-        user_agent as _,
-    },
+    middleware::{check_rate_limit_with_fallback, extract_client_ip, AuthContext, USER_AGENT},
     AppState,
 };
 
