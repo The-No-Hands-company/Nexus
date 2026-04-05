@@ -41,7 +41,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{
-    middleware::{check_rate_limit_with_fallback, extract_client_ip, AuthContext, USER_AGENT},
+    middleware::{check_rate_limit_with_fallback, extract_client_ip, AuthContext},
     AppState,
 };
 
