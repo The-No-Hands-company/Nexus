@@ -1,7 +1,7 @@
 //! Channel routes — CRUD for channels within a server.
 
 use axum::{
-    extract::{Extension, HeaderMap, Path, State},
+    extract::{Extension, Path, State},
     middleware,
     routing::get,
     Json, Router,

@@ -121,10 +121,10 @@ async fn create_event(
         &state.db.pool,
         snowflake::generate_id(),
         server_id,
-        Some(auth.user_id),
+        Some(ctx.user_id),
         "CALENDAR_EVENT_CREATE",
         Some("calendar_event"),
-        Some(event_id),
+        Some(ev.id),
         &serde_json::json!({"title": body.title, "starts_at": body.starts_at}),
         None,
     ).await;

@@ -7,7 +7,7 @@
 //! GET    /channels/:id/e2ee                        — Get channel E2EE config
 
 use axum::{
-    extract::{Extension, HeaderMap, Path, Query, State},
+    extract::{Extension, Path, Query, State},
     middleware,
     routing::get,
     Json, Router,

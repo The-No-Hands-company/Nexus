@@ -4,7 +4,7 @@
 //! Messages in DMs use the same /channels/:id/messages endpoints.
 
 use axum::{
-    extract::{Extension, HeaderMap, Path, State},
+    extract::{Extension, Path, State},
     middleware,
     routing::{get, post, put},
     Json, Router,
