@@ -127,6 +127,20 @@ async fn create_application(
     headers: axum::http::HeaderMap,
     Json(body): Json<CreateBotRequest>,
 ) -> NexusResult<Json<(BotApplication, BotToken)>> {
+    // ── Input validation ───────────────────────────────────────────────────
+    if body.name.len() > 32 || body.name.is_empty() {
+        return Err(NexusError::Validation {
+            message: "Bot name must be 1-32 characters".into(),
+        });
+    }
+    if let Some(ref desc) = body.description {
+        if desc.len() > 120 {
+            return Err(NexusError::Validation {
+                message: "Bot description must be 120 characters or fewer".into(),
+            });
+        }
+    }
+
     // Rate limiting: 5 bot apps per hour per user
     let ip = extract_client_ip(&headers);
     check_rate_limit_with_fallback(

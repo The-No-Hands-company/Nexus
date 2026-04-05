@@ -105,6 +105,34 @@ async fn create_ai_suggestion(
     Path(channel_id): Path<Uuid>,
     Json(body): Json<CreateAiSuggestionReq>,
 ) -> NexusResult<Json<AiSuggestion>> {
+    // ── Input validation ───────────────────────────────────────────────────
+    if body.suggestion_type.len() > 64 {
+        return Err(NexusError::Validation {
+            message: "suggestion_type must be 64 characters or fewer".into(),
+        });
+    }
+    if body.content.len() > 4000 {
+        return Err(NexusError::Validation {
+            message: "content must be 4000 characters or fewer".into(),
+        });
+    }
+    if let Some(ref model) = body.model_name {
+        if model.len() > 64 {
+            return Err(NexusError::Validation {
+                message: "model_name must be 64 characters or fewer".into(),
+            });
+        }
+    }
+    // Validate context_ids size to prevent abuse
+    if let Some(ref ctx) = body.context_ids {
+        let ctx_str = serde_json::to_string(ctx).unwrap_or_default();
+        if ctx_str.len() > 100_000 {
+            return Err(NexusError::Validation {
+                message: "context_ids too large (max 100KB)".into(),
+            });
+        }
+    }
+
     ensure_ai_generation_writes_enabled()?;
 
     let server_id = ensure_channel_server_membership(&state, ctx.user_id, channel_id).await?;
