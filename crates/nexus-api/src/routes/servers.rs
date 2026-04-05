@@ -50,7 +50,8 @@ pub fn router() -> Router<Arc<AppState>> {
 /// consistent with Slack/Discord invite code strength.
 fn generate_invite_code() -> String {
     use rand::distr::Alphanumeric;
-    use rand_core::OsRng;
+    use rand::Rng;
+    use rand::rngs::OsRng;
     OsRng
         .sample_iter(Alphanumeric)
         .take(12)
