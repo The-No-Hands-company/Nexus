@@ -1,7 +1,7 @@
 //! User routes — profile management, user lookup, account lifecycle.
 
 use axum::{
-    extract::{Extension, Path, State},
+    extract::{Extension, HeaderMap, Path, State},
     http::StatusCode,
     middleware,
     routing::{get, post},
@@ -17,7 +17,11 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{auth, middleware::AuthContext, AppState};
+use crate::{
+    auth,
+    middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip},
+    AppState,
+};
 
 /// User routes (all require authentication).
 pub fn router() -> Router<Arc<AppState>> {
@@ -199,8 +203,24 @@ struct DeleteAccountBody {
 async fn delete_account(
     Extension(auth_ctx): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(body): Json<DeleteAccountBody>,
 ) -> NexusResult<StatusCode> {
+    // Rate limit account deletion attempts (3 per hour per user)
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:user:{}:delete_account", auth_ctx.user_id),
+        3,
+        3600,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:delete_account:ip:{ip}"),
+        10,
+        3600,
+    ).await?;
+
     let user = users::find_by_id(&state.db.pool, auth_ctx.user_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "User".into() })?;
@@ -408,8 +428,24 @@ struct ChangePasswordBody {
 async fn change_password(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(body): Json<ChangePasswordBody>,
 ) -> NexusResult<StatusCode> {
+    // Rate limit password changes (5 per hour per user)
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:user:{}:change_password", auth.user_id),
+        5,
+        3600,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:change_password:ip:{ip}"),
+        20,
+        3600,
+    ).await?;
+
     // Enforce minimum complexity on new password
     if body.new_password.len() < 8 {
         return Err(NexusError::Validation {
