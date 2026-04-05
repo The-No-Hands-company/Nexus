@@ -1,40 +1,60 @@
 import { useEffect, useState } from "react";
-import { api, type AdminServer } from "../api";
+import { api, type AdminServer, type ModerationReport } from "../api";
+import { formatDistanceToNow } from "date-fns";
+
+type FilterStatus = "pending" | "resolved" | "dismissed";
 
 export default function ModerationPage() {
-  const [servers, setServers] = useState<AdminServer[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [reports, setReports] = useState<unknown[]>([]);
+  const [servers, setServers]               = useState<AdminServer[]>([]);
+  const [loadingServers, setLoadingServers] = useState(true);
+  const [selected, setSelected]             = useState<string | null>(null);
+  const [reports, setReports]               = useState<ModerationReport[]>([]);
   const [reportsLoading, setReportsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter]                 = useState<FilterStatus>("pending");
+  const [working, setWorking]               = useState<string | null>(null);
+  const [error, setError]                   = useState<string | null>(null);
 
   useEffect(() => {
     api.servers()
-      .then(d => { setServers(d.servers); setLoading(false); })
-      .catch(e => { setError((e as Error).message); setLoading(false); });
+      .then(d => { setServers(d.servers); setLoadingServers(false); })
+      .catch(e => { setError((e as Error).message); setLoadingServers(false); });
   }, []);
 
   async function loadReports(serverId: string) {
     setSelected(serverId);
     setReportsLoading(true);
     try {
-      const session = (await import("../api")).getSession();
-      if (!session) return;
-      const base = session.serverUrl;
-      const res = await fetch(
-        `${base}/api/v1/servers/${serverId}/reports?status=pending`,
-        { headers: { Authorization: `Bearer ${session.accessToken}` } }
-      );
-      if (res.ok) setReports(await res.json());
-    } catch {
-      setReports([]);
-    } finally {
-      setReportsLoading(false);
-    }
+      const data = await api.serverReports(serverId);
+      setReports(data.reports ?? []);
+    } catch { setReports([]); }
+    finally   { setReportsLoading(false); }
+  }
+
+  async function handleResolve(reportId: string) {
+    if (!selected) return;
+    setWorking(reportId);
+    try {
+      await api.resolveReport(selected, reportId);
+      setReports(r => r.map(x => x.id === reportId ? { ...x, status: "resolved" } : x));
+    } catch (e) { setError((e as Error).message); }
+    finally   { setWorking(null); }
+  }
+
+  async function handleDismiss(reportId: string) {
+    if (!selected) return;
+    setWorking(reportId);
+    try {
+      await api.dismissReport(selected, reportId);
+      setReports(r => r.map(x => x.id === reportId ? { ...x, status: "dismissed" } : x));
+    } catch (e) { setError((e as Error).message); }
+    finally   { setWorking(null); }
   }
 
   const selectedServer = servers.find(s => s.id === selected);
+  const filtered       = reports.filter(r => r.status === filter);
+
+  const statusColor = (s: string) =>
+    s === "pending" ? "var(--warning)" : s === "resolved" ? "var(--success)" : "var(--muted)";
 
   return (
     <div>
@@ -42,30 +62,32 @@ export default function ModerationPage() {
         <h1 className="page-title">Moderation</h1>
       </div>
 
-      {error && <div style={{ color: "var(--danger)", marginBottom: 12 }}>{error}</div>}
+      {error && (
+        <div style={{
+          background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)",
+          borderRadius: 10, padding: "10px 14px", marginBottom: 14, color: "#f87171",
+        }}>{error}</div>
+      )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 16 }}>
-        {/* Server list */}
-        <div className="card" style={{ padding: 0, height: "fit-content" }}>
-          <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", fontWeight: 700, fontSize: 13, color: "var(--fg)" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "240px 1fr", gap: 16, alignItems: "start" }}>
+        {/* Server sidebar */}
+        <div className="card" style={{ padding: 0, overflow: "hidden" }}>
+          <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)", fontWeight: 700, fontSize: 13, color: "var(--fg)" }}>
             Servers
           </div>
-          {loading ? (
-            <p style={{ padding: 16, color: "var(--muted)" }}>Loading…</p>
+          {loadingServers ? (
+            <p style={{ padding: 16, color: "var(--muted)", fontSize: 13 }}>Loading…</p>
           ) : servers.map(s => (
-            <button
-              key={s.id}
-              onClick={() => loadReports(s.id)}
-              style={{
-                display: "block", width: "100%", textAlign: "left",
-                padding: "10px 16px", background: selected === s.id ? "var(--accent-dim)" : "transparent",
-                color: selected === s.id ? "var(--accent)" : "var(--fg-dim)",
-                border: "none", borderBottom: "1px solid var(--border)",
-                cursor: "pointer", fontSize: 13, fontWeight: selected === s.id ? 600 : 400,
-              }}
-            >
-              {s.name}
-              <span style={{ float: "right", fontSize: 11, color: "var(--muted)" }}>
+            <button key={s.id} onClick={() => loadReports(s.id)} style={{
+              display: "flex", width: "100%", textAlign: "left", alignItems: "center",
+              padding: "9px 14px", gap: 8,
+              background: selected === s.id ? "var(--accent-dim)" : "transparent",
+              color: selected === s.id ? "var(--accent)" : "var(--fg-dim)",
+              border: "none", borderBottom: "1px solid var(--border)",
+              cursor: "pointer", fontSize: 13, fontWeight: selected === s.id ? 600 : 400,
+            }}>
+              <span style={{ flex: 1 }}>{s.name}</span>
+              <span style={{ fontSize: 11, color: "var(--muted)" }}>
                 {s.member_count.toLocaleString()}
               </span>
             </button>
@@ -77,52 +99,89 @@ export default function ModerationPage() {
           {!selected ? (
             <div className="card empty-state">
               <h3>Select a server</h3>
-              <p>Choose a server to view its pending moderation reports.</p>
+              <p>Choose a server to review its moderation reports.</p>
             </div>
           ) : (
-            <div>
-              <div style={{ marginBottom: 14, fontWeight: 700, fontSize: 15, color: "var(--fg)" }}>
-                {selectedServer?.name} — Pending reports
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                <h2 style={{ fontSize: 15, fontWeight: 700, color: "var(--fg)", flex: 1 }}>
+                  {selectedServer?.name} — Reports
+                </h2>
+                {(["pending", "resolved", "dismissed"] as FilterStatus[]).map(f => (
+                  <button key={f}
+                    className={`btn ${filter === f ? "btn-primary" : "btn-ghost"}`}
+                    style={{ fontSize: 11, padding: "4px 12px" }}
+                    onClick={() => setFilter(f)}
+                  >
+                    {f} ({reports.filter(r => r.status === f).length})
+                  </button>
+                ))}
+                <button className="btn btn-ghost"
+                  style={{ fontSize: 11, padding: "4px 10px" }}
+                  onClick={() => loadReports(selected)}>↻</button>
               </div>
+
               <div className="card" style={{ padding: 0, overflow: "hidden" }}>
                 {reportsLoading ? (
-                  <p style={{ padding: 24, color: "var(--muted)" }}>Loading…</p>
-                ) : !reports.length ? (
+                  <p style={{ padding: 24, color: "var(--muted)", textAlign: "center" }}>Loading…</p>
+                ) : !filtered.length ? (
                   <div className="empty-state">
-                    <h3>No pending reports</h3>
-                    <p>This server has no unresolved moderation reports.</p>
+                    <h3>No {filter} reports</h3>
+                    <p>{filter === "pending" ? "All reports reviewed." : `No ${filter} reports.`}</p>
                   </div>
                 ) : (
                   <table>
                     <thead>
                       <tr>
-                        <th>Report ID</th><th>Reason</th><th>Status</th><th>Created</th>
+                        <th>ID</th><th>Reporter</th><th>Reported</th>
+                        <th>Reason</th><th>Age</th><th>Status</th>
+                        {filter === "pending" && <th>Actions</th>}
                       </tr>
                     </thead>
                     <tbody>
-                      {(reports as Record<string, string>[]).map((r) => (
+                      {filtered.map(r => (
                         <tr key={r.id}>
-                          <td><code style={{ fontSize: 11 }}>{r.id?.slice(0, 8)}…</code></td>
-                          <td style={{ color: "var(--fg-dim)" }}>{r.reason ?? "—"}</td>
+                          <td><code style={{ fontSize: 11, color: "var(--muted)" }}>{r.id.slice(0, 8)}…</code></td>
+                          <td><code style={{ fontSize: 11 }}>{r.reporter_id.slice(0, 8)}…</code></td>
+                          <td>
+                            {r.reported_user_id
+                              ? <code style={{ fontSize: 11 }}>{r.reported_user_id.slice(0, 8)}…</code>
+                              : <span style={{ color: "var(--muted)" }}>—</span>}
+                          </td>
+                          <td style={{ maxWidth: 200 }}>
+                            <span style={{ fontSize: 13, color: "var(--fg-dim)" }}>{r.reason || "—"}</span>
+                          </td>
+                          <td style={{ fontSize: 12, color: "var(--muted)", whiteSpace: "nowrap" }}>
+                            {formatDistanceToNow(new Date(r.created_at), { addSuffix: true })}
+                          </td>
                           <td>
                             <span style={{
                               fontSize: 11, padding: "2px 8px", borderRadius: 20,
-                              background: r.status === "pending" ? "rgba(245,158,11,0.15)" : "rgba(74,222,128,0.1)",
-                              color: r.status === "pending" ? "var(--warning)" : "var(--success)",
-                            }}>
-                              {r.status}
-                            </span>
+                              background: `${statusColor(r.status)}22`,
+                              color: statusColor(r.status), fontWeight: 600,
+                            }}>{r.status}</span>
                           </td>
-                          <td style={{ fontSize: 12, color: "var(--muted)" }}>
-                            {r.created_at ? new Date(r.created_at).toLocaleDateString() : "—"}
-                          </td>
+                          {filter === "pending" && (
+                            <td>
+                              <div style={{ display: "flex", gap: 4 }}>
+                                <button className="btn btn-ghost"
+                                  style={{ fontSize: 11, padding: "3px 10px" }}
+                                  disabled={working === r.id}
+                                  onClick={() => handleResolve(r.id)}>✓ Resolve</button>
+                                <button className="btn btn-danger"
+                                  style={{ fontSize: 11, padding: "3px 10px" }}
+                                  disabled={working === r.id}
+                                  onClick={() => handleDismiss(r.id)}>✗ Dismiss</button>
+                              </div>
+                            </td>
+                          )}
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 )}
               </div>
-            </div>
+            </>
           )}
         </div>
       </div>

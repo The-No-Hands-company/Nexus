@@ -1,0 +1,31 @@
+# OSX
+#
+.DS_Store
+
+# Android/IntelliJ
+#
+build/
+.idea
+.gradle
+local.properties
+*.iml
+*.hprof
+.cxx/
+*.keystore
+!debug.keystore
+
+# node.js
+#
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# fastlane
+#
+# It is recommended to not store the screenshots in the git repo. Instead, use fastlane to re-generate the
+# temporary keystore has been added to .gitignore as a safety measure
+# so you don't accidentally share your private key with the world.
+# For more information about how to store your signing certificates, see
+# https://docs.fastlane.tools/codesigning/getting-started/
+#
+# /app/google-play-encrypt-key.json
