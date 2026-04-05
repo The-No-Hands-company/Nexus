@@ -25,7 +25,7 @@
 //! | GET      | `/federation/search`                            | Cross-instance user search (auth'd)  |
 
 use axum::{
-    extract::{Extension, Path, Query, State},
+    extract::{Extension, HeaderMap, Path, Query, State},
     http::StatusCode,
     middleware,
     response::IntoResponse,
@@ -44,7 +44,7 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use sqlx::Row;
-use crate::{middleware::AuthContext, AppState};
+use crate::{middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
 
 // ─── Router ───────────────────────────────────────────────────────────────────
 
@@ -228,9 +228,19 @@ struct UpdateIdentityBody {
 async fn update_identity(
     State(state): State<Arc<AppState>>,
     Extension(auth): Extension<AuthContext>,
+    headers: HeaderMap,
     Json(body): Json<UpdateIdentityBody>,
 ) -> NexusResult<impl IntoResponse> {
     require_instance_admin(&state.db.pool, auth.user_id).await?;
+
+    // Rate limit identity updates
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:fedadmin:user:{}:identity", auth.user_id),
+        30,   // 30 updates per admin
+        300,  // per 5 minutes
+    ).await?;
 
     // Validate federation_policy
     if let Some(ref policy) = body.federation_policy {
@@ -326,9 +336,25 @@ struct AddPeerBody {
 async fn add_peer(
     State(state): State<Arc<AppState>>,
     Extension(auth): Extension<AuthContext>,
+    headers: HeaderMap,
     Json(body): Json<AddPeerBody>,
 ) -> NexusResult<impl IntoResponse> {
     require_instance_admin(&state.db.pool, auth.user_id).await?;
+
+    // Rate limit peering attempts (external HTTP calls)
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:fedadmin:user:{}:add_peer", auth.user_id),
+        10,   // 10 peering attempts per admin
+        300,  // per 5 minutes
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:fedadmin:ip:{ip}:add_peer"),
+        20,   // 20 per IP
+        300,
+    ).await?;
 
     // Basic domain validation.
     let domain = body.domain.trim().to_lowercase();
@@ -522,9 +548,19 @@ async fn update_trust(
 async fn block_peer(
     State(state): State<Arc<AppState>>,
     Extension(auth): Extension<AuthContext>,
+    headers: HeaderMap,
     Path(domain): Path<String>,
 ) -> NexusResult<impl IntoResponse> {
     require_instance_admin(&state.db.pool, auth.user_id).await?;
+
+    // Rate limit block operations
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:fedadmin:user:{}:block", auth.user_id),
+        50,   // 50 blocks per admin
+        60,   // per minute
+    ).await?;
 
     let result = sqlx::query(
         "UPDATE federated_servers SET is_blocked = true, trust_score = 0 WHERE server_name = $1 RETURNING id")
