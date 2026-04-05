@@ -6,6 +6,7 @@
 //! PUT    /channels/:id/e2ee                        — Enable E2EE on a channel
 //! GET    /channels/:id/e2ee                        — Get channel E2EE config
 
+use axum::http::HeaderMap;
 use axum::{
     extract::{Extension, Path, Query, State},
     middleware,

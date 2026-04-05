@@ -1,7 +1,8 @@
 //! Server (guild) routes — create, join, leave, manage.
 
+use axum::http::HeaderMap;
 use axum::{
-    extract::{Extension, HeaderMap, Path, State},
+    extract::{Extension, Path, State},
     http::StatusCode,
     middleware,
     routing::{get, patch, post},

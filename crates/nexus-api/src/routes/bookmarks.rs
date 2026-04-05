@@ -7,8 +7,9 @@
 //! DELETE /users/@me/bookmarks/:msg_id    — Remove bookmark
 //! GET    /users/@me/bookmarks            — List bookmarks with hydrated messages
 
+use axum::http::HeaderMap;
 use axum::{
-    extract::{Extension, HeaderMap, Path, State},
+    extract::{Extension, Path, State},
     middleware,
     routing::{delete, get},
     Json, Router,

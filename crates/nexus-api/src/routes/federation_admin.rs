@@ -25,13 +25,15 @@
 //! | GET      | `/federation/search`                            | Cross-instance user search (auth'd)  |
 
 use axum::{
-    extract::{Extension, HeaderMap, Path, Query, State},
+    extract::{Extension, Path, Query, State},
     http::StatusCode,
     middleware,
     response::IntoResponse,
     routing::{delete, get, patch, post},
     Json, Router,
-};use chrono::{DateTime, Utc};
+};
+use axum::http::HeaderMap;
+use chrono::{DateTime, Utc};
 use nexus_common::{
     error::{NexusError, NexusResult},
     models::user::user_flags,

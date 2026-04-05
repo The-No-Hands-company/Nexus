@@ -25,7 +25,7 @@ use rand::Rng;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::{check_rate_limit_with_fallback, AuthContext}, AppState};
+use crate::{middleware::{check_rate_limit_with_fallback, AuthContext, extract_client_ip}, AppState};
 
 /// Webhook routes — authenticated management + unauthenticated execution.
 pub fn router() -> Router<Arc<AppState>> {

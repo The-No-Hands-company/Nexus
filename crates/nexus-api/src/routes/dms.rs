@@ -3,6 +3,7 @@
 //! DMs are just channels with type "dm" or "group_dm" and dm_participants entries.
 //! Messages in DMs use the same /channels/:id/messages endpoints.
 
+use axum::http::HeaderMap;
 use axum::{
     extract::{Extension, Path, State},
     middleware,

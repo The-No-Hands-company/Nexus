@@ -20,11 +20,12 @@
 //!    `PUT /_nexus/federation/v1/friend_request`.
 
 use axum::{
-    extract::{Extension, HeaderMap, Path, Query, State},
+    extract::{Extension, Path, Query, State},
     middleware,
     routing::get,
     Json, Router,
 };
+use axum::http::HeaderMap;
 use chrono::Utc;
 use nexus_common::{
     error::{NexusError, NexusResult},

@@ -16,7 +16,8 @@
 //! | GET    | /admin/servers                        | List all servers               |
 
 use axum::{
-    extract::{Extension, HeaderMap, Path, Query, State},
+    extract::{Extension, Path, Query, State},
+use axum::http::HeaderMap;
     http::header::USER_AGENT,
     middleware,
     routing::{get, post},
