@@ -123,7 +123,7 @@ pub fn decrypt(stored: &str) -> Option<String> {
 /// lookups go directly against the plaintext `email` column).
 pub fn lookup_hash(email: &str) -> Option<String> {
     let raw_key = key()?;
-    let mut mac = Hmac::<Sha256>::new_from_slice(&raw_key)
+    let mut mac: Hmac<Sha256> = hmac::Mac::new_from_slice(&raw_key)
         .expect("HMAC accepts any key length");
     mac.update(email.to_lowercase().as_bytes());
     Some(hex::encode(mac.finalize().into_bytes()))
@@ -251,7 +251,7 @@ mod tests {
     fn hmac_hash(email: &str, key: [u8; 32]) -> String {
         use hmac::{Hmac, Mac};
         use sha2::Sha256;
-        let mut mac = Hmac::<Sha256>::new_from_slice(&key).unwrap();
+        let mut mac: Hmac<Sha256> = hmac::Mac::new_from_slice(&key).unwrap();
         mac.update(email.to_lowercase().as_bytes());
         hex::encode(mac.finalize().into_bytes())
     }

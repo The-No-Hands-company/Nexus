@@ -167,7 +167,7 @@ impl<'r> sqlx::FromRow<'r, sqlx::any::AnyRow> for InstanceAuditLogEntry {
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_else(|| serde_json::Value::Object(Default::default()));
         
-        let ip: Option<std::net::IpAddr> = row.try_get("ip_address").ok().flatten();
+        let ip: Option<String> = row.try_get("ip_address").ok().flatten();
 
         Ok(InstanceAuditLogEntry {
             id: get_uuid(row, "id")?,
@@ -177,7 +177,7 @@ impl<'r> sqlx::FromRow<'r, sqlx::any::AnyRow> for InstanceAuditLogEntry {
             target_id: get_opt_uuid(row, "target_id")?,
             changes,
             reason: row.try_get("reason").ok().flatten(),
-            ip_address: ip.map(|i| i.to_string()),
+            ip_address: ip,
             user_agent: row.try_get("user_agent").ok().flatten(),
             created_at: get_datetime(row, "created_at")?,
         })
