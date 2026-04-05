@@ -53,9 +53,9 @@ pub fn router() -> Router<Arc<AppState>> {
 fn generate_invite_code() -> String {
     use rand::distr::Alphanumeric;
     use rand::distr::Distribution;
-    let mut rng = OsRng;
+    use rand::Rng;
     Alphanumeric
-        .sample_iter(&mut rng)
+        .sample_iter(rand::rng())
         .take(12)
         .map(|c| (c as char).to_uppercase().next().unwrap_or(c as char))
         .collect()

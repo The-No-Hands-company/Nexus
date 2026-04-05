@@ -71,22 +71,20 @@ fn totp_from_secret(secret_b32: &str, username: &str) -> Result<TOTP, NexusError
 
 /// Generate `BACKUP_CODE_COUNT` random alphanumeric backup codes.
 fn generate_raw_backup_codes() -> Vec<String> {
-    // Use OsRng (CSPRNG) — never the thread-local SmallRng which is not
-    // cryptographically secure. 10 codes × 12 alphanumeric chars ≈ 71 bits
-    // entropy per code — exceeds NIST SP 800-63B single-use token guidance.
+    // Use rand::rng() — thread-local RNG that is properly seeded.
+    // 10 codes × 12 alphanumeric chars ≈ 71 bits entropy per code.
     use rand::distr::Alphanumeric;
     use rand::distr::Distribution;
-    use rand::rngs::OsRng;
-    let mut rng = OsRng;
-    (0..BACKUP_CODE_COUNT)
-        .map(|_| {
-            Alphanumeric
-                .sample_iter(&mut rng)
-                .take(BACKUP_CODE_LEN)
-                .map(char::from)
-                .collect::<String>()
-                .to_uppercase()
-        })
+    use rand::Rng;
+    Alphanumeric
+        .sample_iter(rand::rng())
+        .take(BACKUP_CODE_LEN * BACKUP_CODE_COUNT)
+        .map(char::from)
+        .collect::<String>()
+        .to_uppercase()
+        .as_bytes()
+        .chunks(BACKUP_CODE_LEN)
+        .map(|chunk| String::from_utf8_lossy(chunk).to_string())
         .collect()
 }
 
