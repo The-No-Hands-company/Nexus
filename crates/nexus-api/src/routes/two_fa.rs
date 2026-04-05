@@ -77,12 +77,11 @@ fn generate_raw_backup_codes() -> Vec<String> {
     use rand::distr::Alphanumeric;
     use rand::distr::Distribution;
     use rand::rngs::OsRng;
-    use rand::Rng;
     let mut rng = OsRng;
     (0..BACKUP_CODE_COUNT)
         .map(|_| {
-            (&mut rng)
-                .sample_iter(Alphanumeric)
+            Alphanumeric
+                .sample_iter(&mut rng)
                 .take(BACKUP_CODE_LEN)
                 .map(char::from)
                 .collect::<String>()
