@@ -16,7 +16,8 @@
 //! | GET    | /admin/servers                        | List all servers               |
 
 use axum::{
-    extract::{Extension, Path, Query, State},
+    extract::{Extension, HeaderMap, Path, Query, State},
+    http::header::USER_AGENT,
     middleware,
     routing::{get, post},
     Json, Router,
@@ -25,12 +26,13 @@ use nexus_common::{
     error::{NexusError, NexusResult},
     models::user::user_flags,
 };
-use nexus_db::repository::users;
+use nexus_db::repository::{audit_log, users};
+use nexus_common::snowflake;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -193,10 +195,26 @@ async fn get_user(
 /// POST /admin/users/:user_id/suspend
 async fn suspend_user(
     Extension(auth): Extension<AuthContext>,
+    headers: HeaderMap,
     State(state): State<Arc<AppState>>,
     Path(user_id): Path<Uuid>,
 ) -> NexusResult<Json<serde_json::Value>> {
     require_instance_admin(&state.db.pool, auth.user_id).await?;
+
+    // Rate limiting: 10 admin actions per minute per admin
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:admin:user:{}", auth.user_id),
+        10,
+        60,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:admin:ip:{ip}"),
+        20,
+        60,
+    ).await?;
 
     if user_id == auth.user_id {
         return Err(NexusError::Validation {
@@ -207,6 +225,22 @@ async fn suspend_user(
     users::add_user_flags(&state.db.pool, user_id, user_flags::SUSPENDED)
         .await
         .map_err(NexusError::from)?;
+
+    // Audit log
+    let ip = extract_client_ip(&headers);
+    let ua = headers.get(USER_AGENT).and_then(|v| v.to_str().ok());
+    let _ = audit_log::write_instance_entry(
+        &state.db.pool,
+        snowflake::generate_id(),
+        auth.user_id,
+        "USER_SUSPEND",
+        Some("user"),
+        Some(user_id),
+        &serde_json::json!({"action": "suspended"}),
+        None,
+        ip.parse().ok(),
+        ua,
+    ).await;
 
     tracing::warn!(
         admin = %auth.user_id,
@@ -220,6 +254,7 @@ async fn suspend_user(
 /// POST /admin/users/:user_id/unsuspend
 async fn unsuspend_user(
     Extension(auth): Extension<AuthContext>,
+    headers: HeaderMap,
     State(state): State<Arc<AppState>>,
     Path(user_id): Path<Uuid>,
 ) -> NexusResult<Json<serde_json::Value>> {
@@ -228,6 +263,22 @@ async fn unsuspend_user(
     users::remove_user_flags(&state.db.pool, user_id, user_flags::SUSPENDED)
         .await
         .map_err(NexusError::from)?;
+
+    // Audit log
+    let ip = extract_client_ip(&headers);
+    let ua = headers.get(USER_AGENT).and_then(|v| v.to_str().ok());
+    let _ = audit_log::write_instance_entry(
+        &state.db.pool,
+        snowflake::generate_id(),
+        auth.user_id,
+        "USER_UNSUSPEND",
+        Some("user"),
+        Some(user_id),
+        &serde_json::json!({"action": "unsuspended"}),
+        None,
+        ip.parse().ok(),
+        ua,
+    ).await;
 
     tracing::info!(
         admin = %auth.user_id,
@@ -241,6 +292,7 @@ async fn unsuspend_user(
 /// POST /admin/users/:user_id/disable — hard-disable (blocks login)
 async fn disable_user(
     Extension(auth): Extension<AuthContext>,
+    headers: HeaderMap,
     State(state): State<Arc<AppState>>,
     Path(user_id): Path<Uuid>,
 ) -> NexusResult<Json<serde_json::Value>> {
@@ -255,6 +307,22 @@ async fn disable_user(
     users::add_user_flags(&state.db.pool, user_id, user_flags::DISABLED)
         .await
         .map_err(NexusError::from)?;
+
+    // Audit log
+    let ip = extract_client_ip(&headers);
+    let ua = headers.get(USER_AGENT).and_then(|v| v.to_str().ok());
+    let _ = audit_log::write_instance_entry(
+        &state.db.pool,
+        snowflake::generate_id(),
+        auth.user_id,
+        "USER_DISABLE",
+        Some("user"),
+        Some(user_id),
+        &serde_json::json!({"action": "disabled"}),
+        None,
+        ip.parse().ok(),
+        ua,
+    ).await;
 
     tracing::warn!(
         admin = %auth.user_id,

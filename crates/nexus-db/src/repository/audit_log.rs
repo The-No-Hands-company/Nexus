@@ -139,3 +139,135 @@ pub async fn list_entries(
 
     query.fetch_all(pool).await
 }
+
+// ============================================================================
+// Instance-level audit log (system-wide administrative actions)
+// ============================================================================
+
+/// A single instance-level audit log entry.
+#[derive(Debug, Serialize)]
+pub struct InstanceAuditLogEntry {
+    pub id: Uuid,
+    pub actor_id: Uuid,
+    pub action: String,
+    pub target_type: Option<String>,
+    pub target_id: Option<Uuid>,
+    pub changes: serde_json::Value,
+    pub reason: Option<String>,
+    pub ip_address: Option<String>,
+    pub user_agent: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+impl<'r> sqlx::FromRow<'r, sqlx::any::AnyRow> for InstanceAuditLogEntry {
+    fn from_row(row: &'r sqlx::any::AnyRow) -> Result<Self, sqlx::Error> {
+        use sqlx::Row;
+        let changes_str: Option<String> = row.try_get("changes").ok().flatten();
+        let changes = changes_str
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_else(|| serde_json::Value::Object(Default::default()));
+        
+        let ip: Option<std::net::IpAddr> = row.try_get("ip_address").ok().flatten();
+
+        Ok(InstanceAuditLogEntry {
+            id: get_uuid(row, "id")?,
+            actor_id: get_uuid(row, "actor_id")?,
+            action: row.try_get("action")?,
+            target_type: row.try_get("target_type").ok().flatten(),
+            target_id: get_opt_uuid(row, "target_id")?,
+            changes,
+            reason: row.try_get("reason").ok().flatten(),
+            ip_address: ip.map(|i| i.to_string()),
+            user_agent: row.try_get("user_agent").ok().flatten(),
+            created_at: get_datetime(row, "created_at")?,
+        })
+    }
+}
+
+/// Write an instance-level audit log entry.
+#[allow(clippy::too_many_arguments)]
+pub async fn write_instance_entry(
+    pool: &sqlx::AnyPool,
+    id: Uuid,
+    actor_id: Uuid,
+    action: &str,
+    target_type: Option<&str>,
+    target_id: Option<Uuid>,
+    changes: &serde_json::Value,
+    reason: Option<&str>,
+    ip_address: Option<std::net::IpAddr>,
+    user_agent: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO instance_audit_log \
+         (id, actor_id, action, target_type, target_id, changes, reason, ip_address, user_agent, created_at) \
+         VALUES ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6::jsonb, $7, $8::inet, $9, NOW())",
+    )
+    .bind(id.to_string())
+    .bind(actor_id.to_string())
+    .bind(action)
+    .bind(target_type)
+    .bind(target_id.map(|u| u.to_string()))
+    .bind(serde_json::to_string(changes).unwrap_or_else(|_| "{}".to_string()))
+    .bind(reason)
+    .bind(ip_address.map(|ip| ip.to_string()))
+    .bind(user_agent)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// List instance-level audit log entries, newest first.
+pub async fn list_instance_entries(
+    pool: &sqlx::AnyPool,
+    action_filter: Option<&str>,
+    actor_filter: Option<Uuid>,
+    target_type_filter: Option<&str>,
+    target_id_filter: Option<Uuid>,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<InstanceAuditLogEntry>, sqlx::Error> {
+    let mut conditions = vec!["1=1"];
+    if action_filter.is_some() {
+        conditions.push("action = $3");
+    }
+    if actor_filter.is_some() {
+        conditions.push("actor_id = $4");
+    }
+    if target_type_filter.is_some() {
+        conditions.push("target_type = $5");
+    }
+    if target_id_filter.is_some() {
+        conditions.push("target_id = $6");
+    }
+    
+    let where_clause = conditions.join(" AND ");
+    let query = format!(
+        "SELECT id::text, actor_id::text, action, target_type, target_id::text, 
+                changes, reason, ip_address, user_agent, created_at::text 
+         FROM instance_audit_log 
+         WHERE {} 
+         ORDER BY created_at DESC 
+         LIMIT $1 OFFSET $2",
+        where_clause
+    );
+    
+    let mut q = sqlx::query_as::<_, InstanceAuditLogEntry>(&query)
+        .bind(limit)
+        .bind(offset);
+    
+    if action_filter.is_some() {
+        q = q.bind(action_filter);
+    }
+    if actor_filter.is_some() {
+        q = q.bind(actor_filter.map(|u| u.to_string()));
+    }
+    if target_type_filter.is_some() {
+        q = q.bind(target_type_filter);
+    }
+    if target_id_filter.is_some() {
+        q = q.bind(target_id_filter.map(|u| u.to_string()));
+    }
+    
+    q.fetch_all(pool).await
+}
