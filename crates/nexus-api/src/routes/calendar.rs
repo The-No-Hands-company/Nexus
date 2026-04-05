@@ -20,7 +20,7 @@ use axum::{
 };
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_common::snowflake;
-use nexus_db::repository::calendar;
+use nexus_db::repository::{audit_log, calendar};
 use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -115,6 +115,19 @@ async fn create_event(
     )
     .await
     .map_err(|e| NexusError::Internal(e.into()))?;
+
+    // Audit log
+    let _ = audit_log::write_entry(
+        &state.db.pool,
+        snowflake::generate_id(),
+        server_id,
+        Some(auth.user_id),
+        "CALENDAR_EVENT_CREATE",
+        Some("calendar_event"),
+        Some(event_id),
+        &serde_json::json!({"title": body.title, "starts_at": body.starts_at}),
+        None,
+    ).await;
 
     Ok(Json(ev))
 }

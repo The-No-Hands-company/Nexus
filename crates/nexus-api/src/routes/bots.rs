@@ -199,8 +199,18 @@ async fn update_application(
 async fn delete_application(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Path(app_id): Path<Uuid>,
 ) -> NexusResult<axum::http::StatusCode> {
+    // Rate limiting: 10 deletions per user per minute
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:bot:delete:{}", auth.user_id),
+        10,
+        60,
+    ).await?;
+
     let existing = bots::get_bot(&state.db.pool, app_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "application".to_string() })?;
@@ -216,8 +226,18 @@ async fn delete_application(
 async fn reset_token(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
+    headers: axum::http::HeaderMap,
     Path(app_id): Path<Uuid>,
 ) -> NexusResult<Json<BotToken>> {
+    // Rate limiting: 3 token resets per user per hour
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:bot:token_reset:{}", auth.user_id),
+        3,
+        3600,
+    ).await?;
+
     let existing = bots::get_bot(&state.db.pool, app_id)
         .await?
         .ok_or(NexusError::NotFound { resource: "application".to_string() })?;

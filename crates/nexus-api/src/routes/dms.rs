@@ -15,7 +15,8 @@ use nexus_common::{
     snowflake,
     gateway_event::GatewayEvent,
 };
-use nexus_db::{repository::channels, select_cols::CHANNEL_COLS_C};
+use nexus_db::{repository::{audit_log, channels}, select_cols::CHANNEL_COLS_C};
+use nexus_common::snowflake;
 use serde::Deserialize;
 use sqlx::Row;
 use std::collections::{HashMap, HashSet};
@@ -198,6 +199,19 @@ async fn create_dm(
         let dm =
             channels::find_or_create_dm(&state.db.pool, dm_id, auth.user_id, recipient_id)
                 .await?;
+
+        // Audit log
+        let _ = audit_log::write_entry(
+            &state.db.pool,
+            snowflake::generate_id(),
+            dm.id,
+            Some(auth.user_id),
+            "DM_CREATE",
+            Some("channel"),
+            Some(dm.id),
+            &serde_json::json!({"recipient_id": recipient_id, "recipient_username": recipient.username}),
+            None,
+        ).await;
 
         Ok(Json(serde_json::json!({
             "id": dm.id,
