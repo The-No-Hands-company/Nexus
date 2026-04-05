@@ -75,6 +75,7 @@ fn generate_raw_backup_codes() -> Vec<String> {
     // cryptographically secure. 10 codes × 12 alphanumeric chars ≈ 71 bits
     // entropy per code — exceeds NIST SP 800-63B single-use token guidance.
     use rand::distr::Alphanumeric;
+    use rand::distr::Distribution;
     use rand::rngs::OsRng;
     use rand::Rng;
     let mut rng = OsRng;

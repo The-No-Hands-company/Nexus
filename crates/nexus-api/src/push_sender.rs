@@ -272,7 +272,8 @@ impl PushSender {
         let _ecdh_secret = EphemeralSecret::random(&mut OsRng);
         // Compute shared secret using sender_priv (converted to NonZeroScalar) and recipient_pub
         let sender_scalar = sender_priv.to_nonzero_scalar();
-        let ecdh_point = diffie_hellman(&sender_scalar, &recipient_pub);
+        let recipient_affine = recipient_pub.to_affine();
+        let ecdh_point = diffie_hellman(&sender_scalar, &recipient_affine);
         let shared_secret = ecdh_point.raw_secret_bytes();
 
         // Generate a random salt (16 bytes)
