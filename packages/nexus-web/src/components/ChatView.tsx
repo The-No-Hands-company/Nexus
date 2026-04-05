@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type FormEvent } from "react";
+import { useEffect, useRef, useState, lazy, Suspense, type KeyboardEvent, type FormEvent } from "react";
+const UserPopover = lazy(() => import("./UserPopover"));
 import { useParams } from "react-router-dom";
 import clsx from "clsx";
 import { format, isToday, isYesterday } from "date-fns";
@@ -7,6 +8,7 @@ import { useStore, type NxMessage } from "../store";
 
 export default function ChatView() {
   const { t } = useTranslation();
+  const [popover, setPopover] = useState<{ userId: string; username: string; avatar: string | null; rect: DOMRect } | null>(null);
   const { channelId } = useParams<{ channelId: string }>();
   const {
     session,
@@ -150,6 +152,9 @@ export default function ChatView() {
               if (!channelId) return;
               await addReaction(channelId, id, emoji);
             }}
+            onOpenProfile={(uid, uname, ava, rect) =>
+              setPopover(p => p?.userId === uid ? null : { userId: uid, username: uname, avatar: ava, rect })
+            }
           />
         ))}
 
@@ -230,6 +235,17 @@ export default function ChatView() {
           </button>
         </form>
       </div>
+      {popover && (
+        <Suspense fallback={null}>
+          <UserPopover
+            userId={popover.userId}
+            username={popover.username}
+            avatar={popover.avatar}
+            anchor={popover.rect}
+            onClose={() => setPopover(null)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }
@@ -272,12 +288,14 @@ function MessageGroup({
   onReply,
   onDelete,
   onReact,
+  onOpenProfile,
 }: {
   messages: NxMessage[];
   currentUserId: string;
   onReply: (m: NxMessage) => void;
   onDelete: (id: string) => Promise<void>;
   onReact: (id: string, emoji: string) => Promise<void>;
+  onOpenProfile: (userId: string, username: string, avatar: string | null, rect: DOMRect) => void;
 }) {
   const { t } = useTranslation();
   const first = messages[0];
@@ -287,7 +305,12 @@ function MessageGroup({
   return (
     <div className="flex gap-3 group py-0.5 hover:bg-bg-800/40 rounded px-1 -mx-1">
       {/* Avatar */}
-      <div className="w-9 h-9 rounded-full bg-accent-500/30 flex items-center justify-center text-xs font-bold text-accent-300 shrink-0 mt-0.5">
+      <button
+        type="button"
+        onClick={(e) => onOpenProfile(first.author_id, first.author_username ?? "Unknown", first.author_avatar ?? null, e.currentTarget.getBoundingClientRect())}
+        className="w-9 h-9 rounded-full bg-accent-500/30 flex items-center justify-center text-xs font-bold text-accent-300 shrink-0 mt-0.5 hover:ring-2 hover:ring-accent-400/60 transition-all cursor-pointer border-0 p-0"
+        title="View profile"
+      >
         {first.author_avatar ? (
           <img
             src={first.author_avatar}
@@ -297,15 +320,19 @@ function MessageGroup({
         ) : (
           (first.author_username ?? "?").slice(0, 2).toUpperCase()
         )}
-      </div>
+      </button>
 
       {/* Messages */}
       <div className="flex-1 min-w-0">
         {/* Author + timestamp (shown on first msg in group) */}
         <div className="flex items-baseline gap-2 mb-0.5">
-          <span className={clsx("text-sm font-semibold", isOwn ? "text-accent-400" : "text-fg")}>
+          <button
+            type="button"
+            onClick={(e) => onOpenProfile(first.author_id, first.author_username ?? "Unknown", first.author_avatar ?? null, e.currentTarget.getBoundingClientRect())}
+            className={clsx("text-sm font-semibold hover:underline cursor-pointer bg-transparent border-0 p-0 text-left", isOwn ? "text-accent-400" : "text-fg")}
+          >
             {first.author_username ?? "Unknown"}
-          </span>
+          </button>
           <span className="text-[10px] text-muted">
             {formatTimestamp(first.created_at)}
           </span>

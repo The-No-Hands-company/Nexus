@@ -154,6 +154,61 @@ export default function UserDetailPage() {
           </div>
         </div>
       </div>
+      {/* Quick actions */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 14, color: "var(--fg)" }}>Quick Actions</h2>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          {!!(user.flags & USER_FLAGS.SUSPENDED) ? (
+            <button className="btn btn-ghost" disabled={working} onClick={async () => {
+              setWorking(true);
+              try { await api.unsuspendUser(user.id); await load(); setMessage("Unsuspended."); }
+              catch (e) { setMessage(`Error: ${(e as Error).message}`); }
+              finally { setWorking(false); }
+            }}>✓ Unsuspend</button>
+          ) : (
+            <button className="btn btn-danger" disabled={working} onClick={async () => {
+              if (!confirm(`Suspend @${user.username}? They will be signed out.`)) return;
+              setWorking(true);
+              try { await api.suspendUser(user.id); await load(); setMessage("Suspended."); }
+              catch (e) { setMessage(`Error: ${(e as Error).message}`); }
+              finally { setWorking(false); }
+            }}>⊘ Suspend</button>
+          )}
+          {!!(user.flags & USER_FLAGS.DISABLED) ? (
+            <button className="btn btn-ghost" disabled={working} onClick={async () => {
+              setWorking(true);
+              try { await api.updateUser(user.id, { clear_flags: USER_FLAGS.DISABLED }); await load(); setMessage("Re-enabled."); }
+              catch (e) { setMessage(`Error: ${(e as Error).message}`); }
+              finally { setWorking(false); }
+            }}>✓ Re-enable</button>
+          ) : (
+            <button className="btn btn-danger" disabled={working} onClick={async () => {
+              if (!confirm(`Disable @${user.username}? Soft-delete — cannot sign in.`)) return;
+              setWorking(true);
+              try { await api.disableUser(user.id); await load(); setMessage("Disabled."); }
+              catch (e) { setMessage(`Error: ${(e as Error).message}`); }
+              finally { setWorking(false); }
+            }}>✗ Disable</button>
+          )}
+          {!(user.flags & USER_FLAGS.INSTANCE_ADMIN) ? (
+            <button className="btn btn-ghost" disabled={working} onClick={async () => {
+              if (!confirm(`Grant full admin to @${user.username}?`)) return;
+              setWorking(true);
+              try { await api.updateUser(user.id, { set_flags: USER_FLAGS.INSTANCE_ADMIN }); await load(); setMessage("Admin granted."); }
+              catch (e) { setMessage(`Error: ${(e as Error).message}`); }
+              finally { setWorking(false); }
+            }}>⬆ Grant Admin</button>
+          ) : (
+            <button className="btn btn-danger" disabled={working} onClick={async () => {
+              if (!confirm(`Revoke admin from @${user.username}?`)) return;
+              setWorking(true);
+              try { await api.updateUser(user.id, { clear_flags: USER_FLAGS.INSTANCE_ADMIN }); await load(); setMessage("Admin revoked."); }
+              catch (e) { setMessage(`Error: ${(e as Error).message}`); }
+              finally { setWorking(false); }
+            }}>⬇ Revoke Admin</button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

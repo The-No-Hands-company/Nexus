@@ -14,6 +14,13 @@ const JoinServerModal = lazy(() => import("../components/JoinServerModal"));
 export default function MainLayout() {
   const { session, loadServers, setSession } = useStore();
   const [showSettings, setShowSettings] = useState(false);
+  const [notifDismissed, setNotifDismissed] = useState(
+    () => localStorage.getItem("nx_notif_dismissed") === "1"
+  );
+  const showNotifBanner =
+    !notifDismissed &&
+    typeof Notification !== "undefined" &&
+    Notification.permission === "default";
   const voice = useVoice();
   const [showJoin, setShowJoin]         = useState(false);
 
@@ -76,6 +83,55 @@ export default function MainLayout() {
 
   return (
     <div className="flex h-screen overflow-hidden bg-bg-900 text-fg">
+      {/* Push notification permission banner — bottom-right toast */}
+      {showNotifBanner && (
+        <div style={{
+          position: "fixed", bottom: 20, right: 20, zIndex: 400,
+          width: 312,
+          background: "var(--bg-700)",
+          border: "1px solid rgba(255,255,255,0.09)",
+          borderRadius: 14,
+          boxShadow: "0 8px 28px rgba(0,0,0,0.45)",
+          padding: "14px 16px",
+          display: "flex", flexDirection: "column", gap: 10,
+        }}>
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+            <span style={{ fontSize: 20, lineHeight: 1 }}>🔔</span>
+            <div>
+              <p style={{ fontSize: 13, fontWeight: 700, color: "var(--fg)", margin: 0 }}>
+                Enable notifications
+              </p>
+              <p style={{ fontSize: 12, color: "var(--muted)", margin: "4px 0 0", lineHeight: 1.5 }}>
+                Get alerted for mentions and DMs even when the tab is in the background.
+              </p>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button
+              className="nx-btn nx-btn-primary"
+              style={{ flex: 1, fontSize: 12, padding: "7px 12px" }}
+              onClick={async () => {
+                try { await enablePush(); } catch { /* ignore */ }
+                localStorage.setItem("nx_notif_dismissed", "1");
+                setNotifDismissed(true);
+              }}
+            >
+              Enable
+            </button>
+            <button
+              className="nx-btn nx-btn-ghost"
+              style={{ fontSize: 12, padding: "7px 12px" }}
+              onClick={() => {
+                localStorage.setItem("nx_notif_dismissed", "1");
+                setNotifDismissed(true);
+              }}
+            >
+              Not now
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Column 1 — server rail (passes callbacks down) */}
       <ServerList
         onOpenSettings={() => setShowSettings(true)}

@@ -9,7 +9,7 @@
 //!   DELETE /admin/servers/:id    — permanently delete a server
 
 use axum::{
-    extract::{Extension, Path, State},
+    extract::{Extension, Path, Query, State},
     middleware,
     routing::{delete, get, patch},
     Json, Router,
@@ -30,6 +30,7 @@ use nexus_common::snowflake;
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/admin/overview", get(get_overview))
+        .route("/admin/instance-audit", get(get_instance_audit))
         .route("/admin/users/:id", patch(update_user_flags))
         .route("/admin/servers/:id", delete(delete_server))
         .route_layer(middleware::from_fn(crate::middleware::auth_middleware))
@@ -217,4 +218,57 @@ async fn delete_server(
 
     tracing::warn!(admin = %auth.user_id, server = %server_id, "Admin deleted server");
     Ok(Json(serde_json::json!({ "deleted": true })))
+}
+
+// ── GET /admin/instance-audit ─────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct InstanceAuditQuery {
+    action:      Option<String>,
+    actor_id:    Option<Uuid>,
+    target_type: Option<String>,
+    #[serde(default = "default_audit_limit")]
+    limit:  i64,
+    #[serde(default)]
+    offset: i64,
+}
+fn default_audit_limit() -> i64 { 100 }
+
+/// GET /admin/instance-audit — recent instance-wide admin actions.
+///
+/// Returns entries from `instance_audit_log`: USER_SUSPEND, USER_DISABLE,
+/// ADMIN_GRANT, FLAG_UPDATE, SERVER_DELETE, etc.  Filterable by action,
+/// actor_id, and target_type.
+async fn get_instance_audit(
+    Extension(auth): Extension<AuthContext>,
+    State(state): State<Arc<AppState>>,
+    Query(q): Query<InstanceAuditQuery>,
+) -> NexusResult<Json<serde_json::Value>> {
+    require_instance_admin(&state.db.pool, auth.user_id).await?;
+
+    let entries = nexus_db::repository::audit_log::list_instance_entries(
+        &state.db.pool,
+        q.action.as_deref(),
+        q.actor_id,
+        q.target_type.as_deref(),
+        None,
+        q.limit.clamp(1, 200),
+        q.offset.max(0),
+    )
+    .await
+    .map_err(NexusError::Database)?;
+
+    let items: Vec<serde_json::Value> = entries.iter().map(|e| serde_json::json!({
+        "id":          e.id,
+        "actor_id":    e.actor_id,
+        "action":      e.action,
+        "target_type": e.target_type,
+        "target_id":   e.target_id,
+        "changes":     e.changes,
+        "reason":      e.reason,
+        "ip_address":  e.ip_address,
+        "created_at":  e.created_at,
+    })).collect();
+
+    Ok(Json(serde_json::json!({ "entries": items, "total": items.len() })))
 }

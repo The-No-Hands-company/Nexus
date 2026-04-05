@@ -87,6 +87,18 @@ export interface FederationAuditEntry {
   created_at: string;
 }
 
+export interface InstanceAuditEntry {
+  id: string;
+  actor_id: string;
+  action: string;
+  target_type: string | null;
+  target_id: string | null;
+  changes: Record<string, unknown>;
+  reason: string | null;
+  ip_address: string | null;
+  created_at: string;
+}
+
 export interface ModerationReport {
   id: string;
   reporter_id: string;
@@ -212,6 +224,12 @@ export const api = {
   federationStatus: () => apiFetch<FederationStatus>("/admin/federation/status"),
   federationPeers: () => apiFetch<{ peers: FederationPeer[] }>("/admin/federation/peers"),
   federationAudit: () => apiFetch<{ entries: FederationAuditEntry[] }>("/admin/federation/audit"),
+  instanceAudit: (params?: { action?: string; limit?: number }) => {
+    const qs = params ? new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)])
+    ).toString() : "";
+    return apiFetch<{ entries: InstanceAuditEntry[]; total: number }>(`/admin/instance-audit${qs ? `?${qs}` : ""}`);
+  },
   blockPeer: (domain: string) =>
     apiFetch(`/admin/federation/peers/${domain}/block`, { method: "POST" }),
   unblockPeer: (domain: string) =>

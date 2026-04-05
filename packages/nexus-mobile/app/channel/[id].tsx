@@ -102,6 +102,7 @@ export default function ChannelScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const [input, setInput] = useState("");
+  const typingTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const [replyTo, setReplyTo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const flatListRef = useRef<FlatList>(null);
@@ -235,7 +236,15 @@ export default function ChannelScreen() {
               placeholder={channelName !== "DM" ? ("Message #" + channelName) : "Message..."}
               placeholderTextColor="#7890b0"
               value={input}
-              onChangeText={setInput}
+              onChangeText={(text) => {
+                setInput(text);
+                if (!typingTimerRef.current && channelId) {
+                  store.api.sendTyping(channelId).catch(() => {});
+                  typingTimerRef.current = setTimeout(() => {
+                    typingTimerRef.current = null;
+                  }, 4_000);
+                }
+              }}
               multiline
               maxLength={4000}
               onSubmitEditing={handleSend}

@@ -10,7 +10,7 @@ export default function ChannelList({ voice }: { voice?: UseVoiceReturn }) {
   const { t } = useTranslation();
   const {
     channels, activeServerId, servers, activeChannelId, setActiveChannel,
-    loadMessages, unread, loadDms, dmChannels, session, createChannel,
+    loadMessages, unread, loadDms, dmChannels, session, createChannel, createDm,
   } = useStore();
 
   const navigate = useNavigate();
@@ -19,6 +19,8 @@ export default function ChannelList({ voice }: { voice?: UseVoiceReturn }) {
   const { channelId } = useParams<{ channelId: string }>();
   const [creatingText, setCreatingText] = useState(false);
   const [newName, setNewName] = useState("");
+  const [composingDm, setComposingDm] = useState(false);
+  const [dmTarget, setDmTarget] = useState("");
 
   const activeServer = servers.find((s) => s.id === activeServerId);
   const homeMode = !activeServerId;
@@ -58,9 +60,38 @@ export default function ChannelList({ voice }: { voice?: UseVoiceReturn }) {
         aria-label={t("nav.directMessages")}
         className="w-56 bg-bg-800 flex flex-col shrink-0 border-r border-bg-600/40 overflow-hidden"
       >
-        <div className="px-3 py-2.5 text-sm font-semibold border-b border-bg-600/40 shrink-0">
-          {t("nav.directMessages")}
+        <div className="px-3 py-2 border-b border-bg-600/40 shrink-0 flex items-center gap-1">
+          <span className="text-sm font-semibold flex-1">{t("nav.directMessages")}</span>
+          <button
+            type="button"
+            onClick={() => { setComposingDm(true); setDmTarget(""); }}
+            title="New direct message"
+            className="w-5 h-5 flex items-center justify-center rounded text-muted hover:text-fg hover:bg-bg-600 transition-colors leading-none text-base"
+          >+</button>
         </div>
+        {composingDm && (
+          <div className="px-2 pt-1.5 pb-1 border-b border-bg-600/40 shrink-0">
+            <input
+              autoFocus
+              className="nx-input w-full text-xs py-1.5"
+              placeholder="Paste a user ID, then press Enter"
+              value={dmTarget}
+              onChange={(e) => setDmTarget(e.target.value)}
+              onKeyDown={async (e) => {
+                if (e.key === "Escape") { setComposingDm(false); setDmTarget(""); }
+                if (e.key === "Enter" && dmTarget.trim()) {
+                  try {
+                    const dm = await createDm(dmTarget.trim());
+                    setActiveChannel(dm.id);
+                    loadMessages(dm.id);
+                    navigate(`/channel/${dm.id}`);
+                    setComposingDm(false); setDmTarget("");
+                  } catch { /* ignore */ }
+                }
+              }}
+            />
+          </div>
+        )}
         <div className="flex-1 overflow-y-auto px-2 py-2 flex flex-col gap-px">
           {dmChannels.map((dm) => {
             const name =
