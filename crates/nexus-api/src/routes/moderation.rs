@@ -25,6 +25,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{middleware::AuthContext, AppState};
+use crate::middleware::{HeaderMap, check_rate_limit_with_fallback, extract_client_ip, USER_AGENT};
 
 /// All moderation routes (require authentication).
 pub fn router() -> Router<Arc<AppState>> {
@@ -179,6 +180,21 @@ async fn kick_member(
     require_server_permission(&state.db.pool, &server, auth.user_id, Permissions::KICK_MEMBERS)
         .await?;
 
+    // Rate limiting: 10 kicks per user per 5 minutes
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:kick:user:{}", auth.user_id),
+        10,
+        300,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:kick:ip:{ip}"),
+        20,
+        300,
+    ).await?;
+
     // Can't kick the owner
     if target_id == server.owner_id {
         return Err(NexusError::Forbidden);
@@ -245,6 +261,21 @@ async fn ban_member(
     require_server_permission(&state.db.pool, &server, auth.user_id, Permissions::BAN_MEMBERS)
         .await?;
 
+    // Rate limiting: 10 bans per user per 5 minutes
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:ban:user:{}", auth.user_id),
+        10,
+        300,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:ban:ip:{ip}"),
+        20,
+        300,
+    ).await?;
+
     if target_id == server.owner_id {
         return Err(NexusError::Forbidden);
     }
@@ -306,6 +337,21 @@ async fn unban_member(
     let server = get_server_or_404(&state.db.pool, server_id).await?;
     require_server_permission(&state.db.pool, &server, auth.user_id, Permissions::BAN_MEMBERS)
         .await?;
+
+        // Rate limiting: 10 unbans per user per 5 minutes
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:unban:user:{}", auth.user_id),
+        10,
+        300,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:unban:ip:{ip}"),
+        20,
+        300,
+    ).await?;
 
     let removed = moderation::remove_ban(&state.db.pool, target_id, server_id).await?;
     if !removed {
@@ -375,6 +421,21 @@ async fn set_timeout(
     let server = get_server_or_404(&state.db.pool, server_id).await?;
     require_server_permission(&state.db.pool, &server, auth.user_id, Permissions::KICK_MEMBERS)
         .await?;
+
+    // Rate limiting: 10 timeouts per user per 5 minutes
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:timeout:user:{}", auth.user_id),
+        10,
+        300,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:timeout:ip:{ip}"),
+        20,
+        300,
+    ).await?;
 
     if target_id == server.owner_id {
         return Err(NexusError::Forbidden);
@@ -601,6 +662,21 @@ async fn resolve_report(
     Path((server_id, report_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<ResolveReportBody>,
 ) -> NexusResult<Json<serde_json::Value>> {
+        // Rate limiting: 20 report resolutions per user per 5 minutes
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:report_resolve:user:{}", auth.user_id),
+        20,
+        300,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:report_resolve:ip:{ip}"),
+        40,
+        300,
+    ).await?;
+
     let server = get_server_or_404(&state.db.pool, server_id).await?;
     require_server_permission(
         &state.db.pool,
@@ -642,6 +718,21 @@ async fn dismiss_report(
     State(state): State<Arc<AppState>>,
     Path((server_id, report_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<serde_json::Value>> {
+        // Rate limiting: 20 report dismissals per user per 5 minutes
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:report_dismiss:user:{}", auth.user_id),
+        20,
+        300,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:report_dismiss:ip:{ip}"),
+        40,
+        300,
+    ).await?;
+
     let server = get_server_or_404(&state.db.pool, server_id).await?;
     require_server_permission(
         &state.db.pool,
@@ -708,6 +799,21 @@ async fn add_word_filter(
     Path(server_id): Path<Uuid>,
     Json(body): Json<AddFilterBody>,
 ) -> NexusResult<Json<moderation::WordFilter>> {
+        // Rate limiting: 10 word filter changes per user per 5 minutes
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:word_filter:user:{}", auth.user_id),
+        10,
+        300,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:word_filter:ip:{ip}"),
+        20,
+        300,
+    ).await?;
+
     let pattern = body.pattern.trim().to_lowercase();
     if pattern.is_empty() {
         return Err(NexusError::Validation { message: "Pattern cannot be empty".into() });
@@ -771,6 +877,21 @@ async fn remove_word_filter(
     State(state): State<Arc<AppState>>,
     Path((server_id, filter_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<serde_json::Value>> {
+        // Rate limiting: 10 word filter changes per user per 5 minutes
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:word_filter:user:{}", auth.user_id),
+        10,
+        300,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:word_filter:ip:{ip}"),
+        20,
+        300,
+    ).await?;
+
     let server = get_server_or_404(&state.db.pool, server_id).await?;
     require_server_permission(&state.db.pool, &server, auth.user_id, Permissions::MANAGE_SERVER)
         .await?;
