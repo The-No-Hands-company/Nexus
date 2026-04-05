@@ -24,7 +24,7 @@ use axum::{
 };
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_common::snowflake;
-use nexus_db::repository::tasks;
+use nexus_db::repository::{audit_log, tasks};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
@@ -147,6 +147,19 @@ async fn create_task(
     )
     .await
     .map_err(|e| NexusError::Internal(e.into()))?;
+
+    // Audit log
+    let _ = audit_log::write_entry(
+        &state.db.pool,
+        snowflake::generate_id(),
+        server_id,
+        Some(ctx.user_id),
+        "TASK_CREATE",
+        Some("task"),
+        Some(task.id),
+        &serde_json::json!({"title": task.title, "status": task.status}),
+        None,
+    ).await;
 
     Ok(Json(task))
 }
