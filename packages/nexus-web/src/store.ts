@@ -10,6 +10,9 @@ export interface Session {
   userId: string;
   avatar: string | null;
   serverUrl: string;
+  displayName?: string | null;
+  bio?: string | null;
+  status?: string | null;
 }
 
 export interface NxServer {
@@ -145,6 +148,13 @@ interface Store {
   onPresenceUpdate: (userId: string, presence: NxUser["presence"]) => void;
   onTypingStart: (channelId: string, username: string) => void;
   markRead: (channelId: string) => void;
+
+  // Profile / settings actions
+  updateProfile: (fields: { display_name?: string; bio?: string; status?: string; avatar?: string }) => Promise<void>;
+  changePassword: (currentPw: string, newPw: string) => Promise<void>;
+  joinServer: (inviteCode: string) => Promise<NxServer>;
+  createDm: (userId: string) => Promise<NxChannel>;
+  sendTyping: (channelId: string) => Promise<void>;
 }
 
 export const useStore = create<Store>()(
@@ -289,6 +299,50 @@ export const useStore = create<Store>()(
         });
         set((st) => ({ channels: [ch, ...st.channels] }));
         return ch;
+      },
+
+      // ── Profile / settings actions ────────────────────────────────────────
+
+      updateProfile: async (fields) => {
+        const { session } = get();
+        if (!session) return;
+        await apiFetch(session, '/users/@me', { method: 'PATCH', body: JSON.stringify(fields) });
+        set((st) => ({ session: st.session ? { ...st.session, ...('display_name' in fields ? {} : {}) } : null }));
+      },
+
+      changePassword: async (currentPw, newPw) => {
+        const { session } = get();
+        if (!session) return;
+        await apiFetch(session, '/users/@me/change-password', {
+          method: 'POST',
+          body: JSON.stringify({ current_password: currentPw, new_password: newPw }),
+        });
+      },
+
+      joinServer: async (inviteCode) => {
+        const { session } = get();
+        if (!session) throw new Error('Not authenticated');
+        const res = await apiFetch<{ server: NxServer }>(session, `/invites/${inviteCode}/join`, { method: 'POST' });
+        const srv = res.server ?? (res as unknown as NxServer);
+        set((st) => ({ servers: st.servers.some(s => s.id === srv.id) ? st.servers : [...st.servers, srv] }));
+        return srv;
+      },
+
+      createDm: async (userId) => {
+        const { session } = get();
+        if (!session) throw new Error('Not authenticated');
+        const dm = await apiFetch<NxChannel>(session, '/channels/@me/dms', {
+          method: 'POST',
+          body: JSON.stringify({ recipient_id: userId }),
+        });
+        set((st) => ({ dmChannels: st.dmChannels.some(d => d.id === dm.id) ? st.dmChannels : [dm, ...st.dmChannels] }));
+        return dm;
+      },
+
+      sendTyping: async (channelId) => {
+        const { session } = get();
+        if (!session) return;
+        await apiFetch(session, `/channels/${channelId}/typing`, { method: 'POST' }).catch(() => {});
       },
 
       // ── Gateway event handlers ─────────────────────────────────────────────

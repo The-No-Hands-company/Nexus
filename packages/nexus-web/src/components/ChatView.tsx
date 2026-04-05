@@ -279,6 +279,7 @@ function MessageGroup({
   onDelete: (id: string) => Promise<void>;
   onReact: (id: string, emoji: string) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const first = messages[0];
   const isOwn = first.author_id === currentUserId;
   const [hoveredId, setHoveredId] = useState<string | null>(null);
