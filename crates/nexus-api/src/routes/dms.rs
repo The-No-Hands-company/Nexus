@@ -4,7 +4,7 @@
 //! Messages in DMs use the same /channels/:id/messages endpoints.
 
 use axum::{
-    extract::{Extension, Path, State},
+    extract::{Extension, HeaderMap, Path, State},
     middleware,
     routing::{get, post, put},
     Json, Router,
@@ -22,7 +22,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
 
 /// DM routes — mounted under /users/@me/channels.
 pub fn router() -> Router<Arc<AppState>> {
@@ -161,10 +161,28 @@ async fn list_dm_channels(
 
 /// POST /api/v1/users/@me/channels — Create a DM channel (or return existing).
 async fn create_dm(
+    headers: HeaderMap,
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
     Json(body): Json<CreateDmRequest>,
 ) -> NexusResult<Json<serde_json::Value>> {
+    // ── Rate limiting: 10 DM creates per user per minute ────────────
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:dm:create:{}", auth.user_id),
+        10,
+        60,
+    )
+    .await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:dm:create:ip:{ip}"),
+        20,
+        60,
+    )
+    .await?;
+
     if let Some(recipient_id) = body.recipient_id {
         if recipient_id == auth.user_id {
             return Err(NexusError::Validation {

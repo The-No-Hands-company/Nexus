@@ -1,7 +1,7 @@
 //! Channel routes — CRUD for channels within a server.
 
 use axum::{
-    extract::{Extension, Path, State},
+    extract::{Extension, HeaderMap, Path, State},
     middleware,
     routing::get,
     Json, Router,
@@ -17,7 +17,7 @@ use nexus_db::repository::{audit_log, channels, members, roles, servers};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
 
 /// Verify that `user_id` holds `required` permission in a server.
 ///
@@ -74,16 +74,16 @@ async fn require_server_permission(
 
 /// Channel routes.
 pub fn router() -> Router<Arc<AppState>> {
-    // Routes that require authentication
-    let authed = Router::new()
-        .route("/servers/{server_id}/channels", get(list_channels).post(create_channel))
+    Router::new()
+        .route(
+            "/servers/{server_id}/channels",
+            get(list_channels).post(create_channel),
+        )
         .route(
             "/channels/{channel_id}",
             get(get_channel).patch(update_channel).delete(delete_channel),
         )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware));
-
-    Router::new().merge(authed)
+        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
 }
 
 /// GET /api/v1/servers/:server_id/channels
@@ -97,12 +97,30 @@ async fn list_channels(
 
 /// POST /api/v1/servers/:server_id/channels
 async fn create_channel(
+    headers: axum::http::HeaderMap,
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
     Path(server_id): Path<Uuid>,
     Json(body): Json<CreateChannelRequest>,
 ) -> NexusResult<Json<nexus_common::models::channel::Channel>> {
     validate_request(&body)?;
+
+    // ── Rate limiting: 10 channel creates per user per minute ────────────
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:channel:create:{}", auth.user_id),
+        10,
+        60,
+    )
+    .await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:channel:create:ip:{ip}"),
+        20,
+        60,
+    )
+    .await?;
 
     // Verify server exists and user has permission
     let server = servers::find_by_id(&state.db.pool, server_id)
@@ -178,12 +196,30 @@ async fn get_channel(
 
 /// PATCH /api/v1/channels/:channel_id
 async fn update_channel(
+    headers: axum::http::HeaderMap,
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
     Path(channel_id): Path<Uuid>,
     Json(body): Json<UpdateChannelRequest>,
 ) -> NexusResult<Json<nexus_common::models::channel::Channel>> {
     validate_request(&body)?;
+
+    // ── Rate limiting: 5 channel updates per user per minute ────────────
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:channel:update:{}", auth.user_id),
+        5,
+        60,
+    )
+    .await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:channel:update:ip:{ip}"),
+        10,
+        60,
+    )
+    .await?;
 
     let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
@@ -240,10 +276,28 @@ async fn update_channel(
 
 /// DELETE /api/v1/channels/:channel_id
 async fn delete_channel(
+    headers: axum::http::HeaderMap,
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
     Path(channel_id): Path<Uuid>,
 ) -> NexusResult<Json<serde_json::Value>> {
+    // ── Rate limiting: 5 channel deletes per user per minute ────────────
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:channel:delete:{}", auth.user_id),
+        5,
+        60,
+    )
+    .await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:channel:delete:ip:{ip}"),
+        10,
+        60,
+    )
+    .await?;
+
     // Load the channel first so we can find its server and return 404 if missing.
     let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?

@@ -8,7 +8,7 @@
 //! GET    /users/@me/bookmarks            — List bookmarks with hydrated messages
 
 use axum::{
-    extract::{Extension, Path, State},
+    extract::{Extension, HeaderMap, Path, State},
     middleware,
     routing::{delete, get},
     Json, Router,
@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
 
 // ============================================================
 // Router
@@ -125,10 +125,28 @@ impl TryFrom<BookmarkRow> for Bookmark {
 
 /// POST /api/v1/users/@me/bookmarks
 async fn add_bookmark(
+    headers: HeaderMap,
     State(state): State<Arc<AppState>>,
     Extension(ctx): Extension<AuthContext>,
     Json(body): Json<AddBookmarkRequest>,
 ) -> NexusResult<Json<Bookmark>> {
+    // ── Rate limiting: 20 bookmarks per user per minute ────────────
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:bookmark:add:{}", ctx.user_id),
+        20,
+        60,
+    )
+    .await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:bookmark:add:ip:{ip}"),
+        40,
+        60,
+    )
+    .await?;
+
     let message_row: (String, Option<String>) = sqlx::query_as(
         r#"
         SELECT m.channel_id::text AS channel_id, c.server_id::text AS server_id
