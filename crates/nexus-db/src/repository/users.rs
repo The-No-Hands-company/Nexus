@@ -222,6 +222,7 @@ pub async fn soft_delete_user(pool: &sqlx::AnyPool, id: Uuid) -> Result<(), sqlx
             password_hash = '',
             totp_secret = NULL,
             totp_enabled = false,
+            scheduled_deletion_at = NULL,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = $1::uuid
         "#,
@@ -259,21 +260,19 @@ pub async fn purge_scheduled_deletions(pool: &sqlx::AnyPool) -> Result<u64, sqlx
     .fetch_all(pool)
     .await?;
 
-    let mut purged = 0u64;
-    for (id,) in rows {
-        let user_id = Uuid::parse_str(&id).unwrap_or_else(|_| Uuid::nil());
-        if user_id.is_nil() {
-            continue;
-        }
-        soft_delete_user(pool, user_id).await?;
-        sqlx::query("UPDATE users SET scheduled_deletion_at = NULL WHERE id = $1::uuid")
-            .bind(user_id.to_string())
-            .execute(pool)
-            .await?;
-        purged += 1;
+    let mut affected = 0u64;
+    for (user_id,) in rows {
+        let uid = user_id
+            .parse::<Uuid>()
+            .map_err(|_| sqlx::Error::ColumnDecode {
+                index: "id".to_string(),
+                source: Box::new(std::fmt::Error),
+            })?;
+        soft_delete_user(pool, uid).await?;
+        affected += 1;
     }
 
-    Ok(purged)
+    Ok(affected)
 }
 
 // ── Federation helpers ────────────────────────────────────────────────────────
