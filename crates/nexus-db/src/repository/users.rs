@@ -241,6 +241,17 @@ pub async fn count_users(pool: &sqlx::AnyPool) -> Result<i64, sqlx::Error> {
     Ok(row.0)
 }
 
+/// Clear any scheduled account deletion for a user.
+pub async fn cancel_scheduled_deletion(pool: &sqlx::AnyPool, id: Uuid) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query(
+        "UPDATE users SET scheduled_deletion_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1::uuid AND scheduled_deletion_at IS NOT NULL",
+    )
+    .bind(id.to_string())
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 /// Execute due scheduled account deletions.
 ///
 /// This applies a soft-delete policy:

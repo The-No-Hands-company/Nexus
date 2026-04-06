@@ -28,6 +28,7 @@ use crate::{
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/users/@me", get(get_current_user).patch(update_current_user).delete(delete_account))
+        .route("/users/@me/cancel-deletion", post(cancel_account_deletion))
         .route("/users/@me/change-password", post(change_password))
         .route("/users/@me/data-export", get(data_export))
         .route("/users/@me/note-to-self", get(get_note_to_self_channel))
@@ -198,7 +199,7 @@ struct DeleteAccountBody {
 ///
 /// Request account deletion.  Sets a 30-day grace period (`scheduled_deletion_at`).
 /// The account remains accessible during this window.  A background purge job
-/// (not yet scheduled — placeholder) executes the final deletion after 30 days.
+/// executes the final deletion after 30 days.
 ///
 /// This is the canonical GDPR "right to erasure" flow.
 async fn delete_account(
@@ -245,6 +246,49 @@ async fn delete_account(
 
     tracing::info!(user_id = %user.id, "Account deletion scheduled (30-day grace period)");
     Ok(StatusCode::ACCEPTED)
+}
+
+#[derive(Serialize)]
+struct CancelDeletionResponse {
+    scheduled_deletion_at: Option<String>,
+}
+
+/// POST /api/v1/users/@me/cancel-deletion
+///
+/// Cancels a pending account deletion request.
+async fn cancel_account_deletion(
+    Extension(auth_ctx): Extension<AuthContext>,
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> NexusResult<Json<CancelDeletionResponse>> {
+    let ip = extract_client_ip(&headers);
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:user:{}:cancel_delete_account", auth_ctx.user_id),
+        5,
+        3600,
+    ).await?;
+    check_rate_limit_with_fallback(
+        state.db.redis.as_ref(),
+        format!("rl:cancel_delete_account:ip:{ip}"),
+        15,
+        3600,
+    ).await?;
+
+    let canceled = users::cancel_scheduled_deletion(&state.db.pool, auth_ctx.user_id).await?;
+    if !canceled {
+        return Err(NexusError::NotFound { resource: "ScheduledDeletion".into() });
+    }
+
+    let user = users::find_by_id(&state.db.pool, auth_ctx.user_id)
+        .await?
+        .ok_or(NexusError::NotFound { resource: "User".into() })?;
+
+    tracing::info!(user_id = %user.id, "Account deletion cancelled");
+
+    Ok(Json(CancelDeletionResponse {
+        scheduled_deletion_at: None,
+    }))
 }
 
 // ── GDPR data export (09.7-04) ───────────────────────────────────────────────
