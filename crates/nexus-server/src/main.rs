@@ -50,6 +50,12 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Start the Nexus server.
+    ///
+    /// Example:
+    ///   nexus serve --lite
+    ///   # then add to .env:
+    ///   # NEXUS__PUSH__VAPID_PRIVATE_KEY=<output>
+    #[command(name = "serve")]
     Serve {
         /// Lite mode: single binary, SQLite database, local file storage.
         /// No Docker or external services required.
@@ -748,21 +754,46 @@ async fn run_server(
                         }
 
                         // 3. Purge expired (disappearing) messages
-                        let deleted: Result<sqlx::any::AnyQueryResult, _> = sqlx::query(
-                            "DELETE FROM messages WHERE expires_at IS NOT NULL AND expires_at <= NOW()"
+                        #[derive(sqlx::FromRow)]
+                        struct ExpiredMessageRow {
+                            id: String,
+                        }
+                        let deleted: Result<Vec<ExpiredMessageRow>, _> = sqlx::query_as(
+                            "DELETE FROM messages \
+                             WHERE expires_at IS NOT NULL AND expires_at <= NOW() \
+                             RETURNING id::text AS id"
                         )
-                        .execute(&pool)
+                        .fetch_all(&pool)
                         .await;
                         match deleted {
-                            Ok(r) if r.rows_affected() > 0 => tracing::info!(
-                                count = r.rows_affected(), subsystem = "disappearing_messages",
-                                "purged expired messages"
-                            ),
+                            Ok(rows) if !rows.is_empty() => {
+                                let mut search_deleted = 0usize;
+                                let mut scylla_enqueued = 0usize;
+                                for row in &rows {
+                                    if let Ok(message_id) = row.id.parse::<uuid::Uuid>() {
+                                        if search.delete_message(message_id).await.is_ok() {
+                                            search_deleted += 1;
+                                        }
+                                        if scylla_enabled {
+                                            if nexus_db::repository::scylla_outbox::enqueue_delete_message(&pool, message_id).await.is_ok() {
+                                                scylla_enqueued += 1;
+                                            }
+                                        }
+                                    }
+                                }
+                                tracing::info!(
+                                    count = rows.len(),
+                                    search_deleted,
+                                    scylla_enqueued,
+                                    subsystem = "disappearing_messages",
+                                    "purged expired messages"
+                                );
+                            }
+                            Ok(_) => {}
                             Err(e) => tracing::warn!(
                                 error = %e, subsystem = "disappearing_messages",
                                 "failed to purge expired messages"
                             ),
-                            _ => {}
                         }
 
                         // 4. Clear expired custom statuses
