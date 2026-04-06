@@ -287,6 +287,37 @@ export default function SettingsPage() {
     }
   };
 
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteMsg, setDeleteMsg] = useState<string | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
+  const cancelAccountDeletion = async () => {
+    try {
+      await invoke("cancel_account_deletion", {});
+      setDeleteMsg("Deletion cancelled.");
+    } catch (e) {
+      setDeleteMsg(`Error: ${String(e)}`);
+    }
+  };
+
+  const requestAccountDeletion = async () => {
+    if (!deletePassword.trim()) {
+      setDeleteMsg("Enter your password to confirm deletion.");
+      return;
+    }
+    setDeleteLoading(true);
+    setDeleteMsg(null);
+    try {
+      await invoke("delete_account", { password: deletePassword });
+      setDeleteMsg("Deletion scheduled. You can cancel it below.");
+      setDeletePassword("");
+    } catch (e) {
+      setDeleteMsg(`Error: ${String(e)}`);
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
   return (
     <div className="flex-1 overflow-y-auto p-8 text-sm">
       <h1 className="text-2xl font-bold mb-6">Settings</h1>
@@ -885,6 +916,38 @@ export default function SettingsPage() {
           <AdminAnalyticsPanel serverId={activeServerId} />
         </section>
       )}
+
+      <section className="mb-10">
+        <h2 className="text-base font-semibold mb-4 border-b border-bg-600 pb-2">Account</h2>
+        <div className="max-w-lg rounded-lg border border-bg-600/50 bg-bg-800 p-4 space-y-3">
+          <p className="text-sm text-muted">
+            Request account deletion. You’ll have a 30-day grace period and can cancel it.
+          </p>
+          <input
+            type="password"
+            className="input w-full"
+            placeholder="Confirm password"
+            value={deletePassword}
+            onChange={(e) => setDeletePassword(e.target.value)}
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={requestAccountDeletion}
+              disabled={deleteLoading}
+              className="btn-danger disabled:opacity-50"
+            >
+              {deleteLoading ? "Working…" : "Delete Account"}
+            </button>
+            <button
+              onClick={cancelAccountDeletion}
+              className="btn-secondary"
+            >
+              Cancel Deletion
+            </button>
+          </div>
+          {deleteMsg && <p className="text-xs text-muted">{deleteMsg}</p>}
+        </div>
+      </section>
     </div>
   );
 }

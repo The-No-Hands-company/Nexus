@@ -608,9 +608,9 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
     }
 
     case "update_profile": {
-      return apiFetch<T>("PATCH", "/api/v1/users/me", {
+      return apiFetch<T>("PATCH", "/api/v1/users/@me", {
         display_name: args.displayName ?? undefined,
-        avatar_url: args.avatarUrl ?? undefined,
+        avatar: args.avatarUrl ?? undefined,
       });
     }
 
