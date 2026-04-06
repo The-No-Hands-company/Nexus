@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type InstanceOverview } from "../api";
+import NetworkHealth from "../components/NetworkHealth";
 
 function formatUptime(secs: number): string {
   const d = Math.floor(secs / 86400);
@@ -115,6 +116,7 @@ export default function OverviewPage() {
           </div>
         </>
       ) : null}
+      <NetworkHealth />
     </div>
   );
 }
