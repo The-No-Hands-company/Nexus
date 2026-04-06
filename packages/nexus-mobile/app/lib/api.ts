@@ -22,6 +22,7 @@ export interface User {
   status?: string;
   bio?: string;
   createdAt: string;
+  totpEnabled?: boolean;
 }
 
 export interface Server {
@@ -147,7 +148,7 @@ class NexusApi {
     return h;
   }
 
-  private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const opts: RequestInit = { method, headers: this.headers() };
     if (body !== undefined) opts.body = JSON.stringify(body);
     const res = await fetch(this.baseUrl + path, opts);
@@ -218,54 +219,44 @@ class NexusApi {
     return this.request("GET", "/users/search?q=" + encodeURIComponent(query));
   }
 
-  // ── Users sub-namespaces ────────────────────────────────────────────────────
+  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    await this.request("POST", "/users/@me/change-password", {
+      current_password: currentPassword,
+      new_password: newPassword,
+    });
+  }
 
-  users = {
-    async changePassword(currentPassword: string, newPassword: string): Promise<void> {
-      await this.request("POST", "/users/@me/change-password", {
-        current_password: currentPassword,
-        new_password: newPassword,
-      });
-    },
-    async updateProfile(data: { displayName?: string; bio?: string }): Promise<User> {
-      return this.request("PATCH", "/users/@me", data);
-    },
-    async deleteAccount(password: string): Promise<void> {
-      await this.request("DELETE", "/users/@me", { password });
-    },
-  };
+  async deleteAccount(password: string): Promise<void> {
+    await this.request("DELETE", "/users/@me", { password });
+  }
 
   // ── Sessions ─────────────────────────────────────────────────────────────────
 
   async getSessions(): Promise<any[]> {
-    return this.request("GET", "/users/@me/sessions");
+    return this.request("GET", "/auth/sessions");
   }
   async revokeSession(sessionId: string): Promise<void> {
-    return this.request("DELETE", "/users/@me/sessions/" + sessionId);
+    return this.request("DELETE", "/auth/sessions/" + sessionId);
   }
 
   // ── E2EE ─────────────────────────────────────────────────────────────────────
 
-  e2ee = {
-    async listDevices(): Promise<any[]> {
-      return this.request("GET", "/users/@me/devices");
-    },
-    async deleteDevice(deviceId: string): Promise<void> {
-      return this.request("DELETE", "/users/@me/devices/" + deviceId);
-    },
-  };
+  async listDevices(): Promise<any[]> {
+    return this.request("GET", "/devices");
+  }
+  async deleteDevice(deviceId: string): Promise<void> {
+    return this.request("DELETE", "/devices/" + deviceId);
+  }
 
   // ── Voice ────────────────────────────────────────────────────────────────────
 
   async joinVoice(channelId: string): Promise<any> {
     return this.request("POST", "/voice/channels/" + channelId + "/join");
   }
-  async leaveVoice(): Promise<void> {
-    const channelId = (await this.request("GET", "/gateway")) as any;
-    // Leave via voice endpoint if we know the channel
-    try {
+  async leaveVoice(channelId?: string): Promise<void> {
+    if (channelId) {
       await this.request("POST", "/voice/channels/" + channelId + "/leave");
-    } catch { /* ignore if not in voice */ }
+    }
   }
   async toggleMute(): Promise<void> {
     await this.request("PATCH", "/voice/state", { muted: true });
@@ -273,14 +264,33 @@ class NexusApi {
   async toggleDeafen(): Promise<void> {
     await this.request("PATCH", "/voice/state", { deafened: true });
   }
+  async getVoiceState(channelId: string): Promise<any> {
+    return this.request("GET", "/voice/channels/" + channelId);
+  }
 
-  // ── Voice sub-namespace ─────────────────────────────────────────────────────
+  // ── Search ────────────────────────────────────────────────────────────────────
 
-  voice = {
-    async getState(channelId: string): Promise<any> {
-      return this.request("GET", "/voice/channels/" + channelId + "/state");
-    },
-  };
+  async searchMessages(q: string): Promise<{ messages: Message[] }> {
+    return this.request("GET", "/search?q=" + encodeURIComponent(q) + "&type=messages");
+  }
+  async searchUsersRemote(q: string): Promise<User[]> {
+    return this.request("GET", "/search?q=" + encodeURIComponent(q) + "&type=users");
+  }
+
+  // ── Directory ─────────────────────────────────────────────────────────────────
+
+  async searchServers(query: string): Promise<Server[]> {
+    return this.request("GET", "/directory/servers?q=" + encodeURIComponent(query));
+  }
+
+  // ── Threads ───────────────────────────────────────────────────────────────────
+
+  async getThreads(channelId: string): Promise<any[]> {
+    return this.request("GET", "/channels/" + channelId + "/threads");
+  }
+  async getThread(threadId: string): Promise<any> {
+    return this.request("GET", "/threads/" + threadId);
+  }
 
   // ── Servers ─────────────────────────────────────────────────────────────────
 
@@ -291,6 +301,9 @@ class NexusApi {
   }
   async deleteServer(serverId: string) { return this.request("DELETE", "/servers/" + serverId); }
   async leaveServer(serverId: string) { return this.request("DELETE", "/servers/" + serverId + "/members/@me"); }
+  async joinServer(inviteCode: string): Promise<Server> {
+    return this.request("POST", "/invites/" + inviteCode + "/join");
+  }
 
   // ── Channels ────────────────────────────────────────────────────────────────
 
@@ -367,9 +380,6 @@ class NexusApi {
       ...(maxAge ? { max_age: maxAge } : {}),
       ...(maxUses ? { max_uses: maxUses } : {}),
     });
-  }
-  async joinServer(inviteCode: string): Promise<Server> {
-    return this.request("POST", "/invites/" + inviteCode + "/join");
   }
 
   // ── Gateway ───────────────────────────────────────────────────────────────────

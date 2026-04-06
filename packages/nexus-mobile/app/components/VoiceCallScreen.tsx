@@ -67,7 +67,7 @@ export default function VoiceCallScreen() {
   async function fetchParticipants() {
     if (!channelId) return;
     try {
-      const state = await api.voice.getState(channelId);
+      const state = await api.getVoiceState(channelId);
       setParticipants(state.participants || []);
     } catch (e) {
       console.error("Failed to fetch participants:", e);

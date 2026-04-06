@@ -7,7 +7,7 @@ import {
   SafeAreaView, KeyboardAvoidingView, Platform, ActivityIndicator
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { store } from "../lib/store";
+import { store, api } from "../lib/store";
 
 export default function ThreadView() {
   const { channelId, threadId } = useLocalSearchParams<{ channelId: string; threadId: string }>();
@@ -22,7 +22,7 @@ export default function ThreadView() {
 
   async function loadThread() {
     try {
-      const data = await store.api.threads.get(threadId);
+      const data = await store.api.getThread(threadId);
       setThread(data);
     } catch (e) {
       console.error("Failed to load thread:", e);
@@ -33,7 +33,7 @@ export default function ThreadView() {
     if (!input.trim() || loading) return;
     setLoading(true);
     try {
-      await store.api.threads.reply(channelId, threadId, input.trim());
+      await api.sendMessage(channelId, input.trim(), undefined, threadId);
       setInput("");
       await loadThread();
     } catch (e: any) {

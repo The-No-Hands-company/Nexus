@@ -7,7 +7,7 @@ import {
   SafeAreaView, Switch, Alert, Modal, ActivityIndicator, ScrollView
 } from "react-native";
 import { useRouter } from "expo-router";
-import { store } from "../lib/store";
+import { store, api } from "../lib/store";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 interface SettingSection {
@@ -51,7 +51,7 @@ export default function SettingsScreen() {
 
   async function loadDevices() {
     try {
-      const data = await store.api.e2ee.listDevices();
+      const data = await api.listDevices();
       setDevices(data);
     } catch (e) {
       console.error("Failed to load devices:", e);
@@ -79,7 +79,7 @@ export default function SettingsScreen() {
   async function handleChangePassword(current: string, newPass: string) {
     setLoading(true);
     try {
-      await store.api.users.changePassword(current, newPass);
+      await api.changePassword(current, newPass);
       Alert.alert("Success", "Password changed successfully");
       setActiveModal(null);
     } catch (e: any) {
@@ -100,7 +100,7 @@ export default function SettingsScreen() {
 
   async function handleRevokeDevice(deviceId: string) {
     try {
-      await store.api.e2ee.deleteDevice(deviceId);
+      await api.deleteDevice(deviceId);
       loadDevices();
     } catch (e: any) {
       Alert.alert("Error", e.message);
@@ -110,7 +110,7 @@ export default function SettingsScreen() {
   async function handleDeleteAccount(password: string) {
     setLoading(true);
     try {
-      await store.api.users.deleteAccount(password);
+      await api.deleteAccount(password);
       await store.logout();
       router.replace("/(auth)/login");
     } catch (e: any) {
@@ -136,7 +136,7 @@ export default function SettingsScreen() {
           type: "text",
           value: user?.displayName,
           onChange: async (val) => {
-            await store.api.users.updateProfile({ displayName: val });
+            await api.updateMe({ displayName: val });
           }
         },
         {

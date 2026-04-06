@@ -4,10 +4,11 @@
 import React, { useState } from "react";
 import {
   View, Text, Pressable, StyleSheet, SafeAreaView, ScrollView,
-  Alert, TextInput, Modal, ActivityIndicator, Switch,
+  Alert, TextInput, Modal, ActivityIndicator,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { store } from "../lib/store";
+import { api } from "../lib/api";
 import { gateway } from "../lib/gateway";
 
 function StatusDot({ status }: { status?: string }) {
@@ -31,9 +32,8 @@ export default function ProfileScreen() {
   const [newPw, setNewPw] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
   const [changingPw, setChangingPw] = useState(false);
-  const [gatewayStatus, setGatewayStatus] = useState(gateway.status);
+  const [gatewayStatus, setGatewayStatus] = useState(store.isAuthenticated ? gateway.status : "disconnected");
 
-  // Refresh gateway status on mount
   React.useEffect(() => {
     const interval = setInterval(() => setGatewayStatus(gateway.status), 2000);
     return () => clearInterval(interval);
@@ -80,12 +80,12 @@ export default function ProfileScreen() {
     }
     setChangingPw(true);
     try {
-      await store.api.changePassword(currentPw, newPw);
+      await api.changePassword(currentPw, newPw);
       Alert.alert("Success", "Password changed. All other sessions have been signed out.");
       setShowChangePw(false);
       setCurrentPw(""); setNewPw(""); setConfirmPw("");
-    } catch (e: any) {
-      Alert.alert("Error", e.message ?? "Failed to change password.");
+    } catch (e: unknown) {
+      Alert.alert("Error", e instanceof Error ? e.message : "Failed to change password.");
     } finally {
       setChangingPw(false);
     }
@@ -131,9 +131,9 @@ export default function ProfileScreen() {
               style={[s.presenceRow, user.presence === p && s.presenceRowActive]}
               onPress={async () => {
                 try {
-                  await store.api.updateMe({ presence: p });
+                  await api.updateMe({ presence: p });
                   if (store.session) {
-                    store.session = { ...store.session, user: { ...user, presence: p } };
+                    store.session = { ...store.session, user: { ...store.session.user, presence: p } };
                     store.notify();
                   }
                 } catch {}
@@ -156,7 +156,7 @@ export default function ProfileScreen() {
 
         {/* Connection */}
         <Section title="Connection">
-          <InfoRow label="Server" value={store.api.getBaseUrl().replace("/api/v1", "")} />
+          <InfoRow label="Server" value={api.getBaseUrl().replace("/api/v1", "")} />
           <View style={s.row}>
             <Text style={s.rowLabel}>Gateway</Text>
             <View style={[s.statusBadge, { backgroundColor: gwColor + "22" }]}>
@@ -269,7 +269,7 @@ const s = StyleSheet.create({
   sectionBody: { backgroundColor: "#0b1a30", borderRadius: 12, overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.06)" },
   row:         { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.04)" },
   rowLabel:    { color: "#9ec5d5", fontSize: 15 },
-  rowValue:    { color: "#556680", fontSize: 14, maxWidth: "55%", textAlign: "right" },
+  rowValue:    { color: "#556688", fontSize: 14, maxWidth: "55%", textAlign: "right" },
   actionRow:   { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.04)" },
   actionLabel: { color: "#d6f4ff", fontSize: 15 },
   chevron:     { color: "#556680", fontSize: 20 },

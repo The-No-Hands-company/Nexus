@@ -3,18 +3,18 @@ import {
   View, Text, TextInput, Pressable, StyleSheet,
   KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator,
 } from "react-native";
-import { Link, useNavigation } from "expo-router";
-import { useStore } from "../lib/store";
+import { useRouter, Link } from "expo-router";
+import { store } from "../lib/store";
 
 export default function RegisterScreen() {
-  const store = useStore();
+  const router = useRouter();
   const [serverUrl, setServerUrl] = useState("http://localhost:8080");
   const [username, setUsername]   = useState("");
   const [password, setPassword]   = useState("");
   const [email, setEmail]         = useState("");
   const [error, setError]         = useState<string | null>(null);
   const [loading, setLoading]     = useState(false);
-  const navigation = useNavigation();
+  
 
   async function submit() {
     if (!username.trim() || !password) return;
@@ -24,7 +24,7 @@ export default function RegisterScreen() {
       const base = serverUrl.replace(/\/$/, "");
       store.api.setBaseUrl(base + "/api/v1");
       await store.register(username.trim(), password, email.trim() || undefined);
-      navigation.replace("/(tabs)");
+      router.replace("/(tabs)");
     } catch (e) {
       setError((e as Error).message);
     } finally {

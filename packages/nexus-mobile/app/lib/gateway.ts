@@ -200,6 +200,12 @@ export class GatewayClient {
     api.sendTyping(channelId).catch(() => {});
   }
 
+  get status(): string {
+    if (!this.ws) return "disconnected";
+    return this.ws.readyState === WebSocket.OPEN ? "connected" :
+           this.ws.readyState === WebSocket.CONNECTING ? "connecting" : "disconnected";
+  }
+
   disconnect() {
     this.intentionalClose = true;
     if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);

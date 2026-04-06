@@ -5,6 +5,7 @@ import React, { useEffect, useState } from "react";
 import {
   View, Text, FlatList, Pressable, StyleSheet,
   SafeAreaView, TextInput, Modal, Alert,
+  ScrollView,
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { store } from "../lib/store";

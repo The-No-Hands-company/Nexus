@@ -1,7 +1,7 @@
 /**
  * SearchScreen.tsx - Global search (messages, users, servers)
  */
-import React, { useState, useCallback } from "react";
+import React, { useState, useRef, useCallback } from "react";
 import {
   View, Text, FlatList, TextInput, Pressable, StyleSheet,
   SafeAreaView, ActivityIndicator, Keyboard
@@ -9,7 +9,6 @@ import {
 import { useRouter } from "expo-router";
 import { store } from "../lib/store";
 import { api } from "../lib/api";
-import { debounce } from "lodash";
 
 type SearchTab = "messages" | "users" | "servers";
 
@@ -22,6 +21,15 @@ interface SearchResult {
   serverId?: string;
 }
 
+// Simple debounce without lodash
+function useDebounce<T extends (...args: any[]) => any>(fn: T, delay: number) {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  return useCallback((...args: Parameters<T>) => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => fn(...args), delay);
+  }, [fn, delay]);
+}
+
 export default function SearchScreen() {
   const router = useRouter();
   const [query, setQuery] = useState("");
@@ -30,60 +38,52 @@ export default function SearchScreen() {
   const [loading, setLoading] = useState(false);
   const [recent, setRecent] = useState<string[]>([]);
 
-  // Debounced search
-  const performSearch = useCallback(
-    debounce(async (q: string, tab: SearchTab) => {
-      if (!q.trim()) {
-        setResults([]);
-        return;
-      }
-      setLoading(true);
-      try {
-        let searchResults: SearchResult[] = [];
-        
-        switch (tab) {
-          case "messages": {
-            const data = await api.search.messages(q);
-            searchResults = data.messages.map((m: any) => ({
-              id: m.id,
-              type: "messages" as SearchTab,
-              title: m.content.slice(0, 100) || "(no content)",
-              subtitle: `${m.authorUsername} in #${m.channelName || "channel"}`,
-              channelId: m.channelId,
-            }));
-            break;
-          }
-          case "users": {
-            const data = await api.search.users(q);
-            searchResults = data.map((u: any) => ({
-              id: u.id,
-              type: "users" as SearchTab,
-              title: u.displayName || u.username,
-              subtitle: `@${u.username}`,
-            }));
-            break;
-          }
-          case "servers": {
-            const data = await api.directory.search(q);
-            searchResults = data.map((s: any) => ({
-              id: s.id,
-              type: "servers" as SearchTab,
-              title: s.name,
-              subtitle: `${s.memberCount || 0} members • ${s.category || "Community"}`,
-              serverId: s.id,
-            }));
-            break;
-          }
+  const performSearch = useDebounce(async (q: string, tab: SearchTab) => {
+    if (!q.trim()) { setResults([]); return; }
+    setLoading(true);
+    try {
+      let searchResults: SearchResult[] = [];
+      switch (tab) {
+        case "messages": {
+          const data = await api.searchMessages(q);
+          searchResults = (data.messages || []).map((m: any) => ({
+            id: m.id,
+            type: "messages" as SearchTab,
+            title: (m.content || "(no content)").slice(0, 100),
+            subtitle: `${m.authorUsername} in #${m.channelName || "channel"}`,
+            channelId: m.channelId,
+          }));
+          break;
         }
-        setResults(searchResults);
-      } catch (e) {
-        console.error("Search failed:", e);
-      } finally {
-        setLoading(false);
+        case "users": {
+          const data = await api.searchUsersRemote(q);
+          searchResults = (data || []).map((u: any) => ({
+            id: u.id,
+            type: "users" as SearchTab,
+            title: u.displayName || u.username,
+            subtitle: `@${u.username}`,
+          }));
+          break;
+        }
+        case "servers": {
+          const data = await api.searchServers(q);
+          searchResults = (data || []).map((s: any) => ({
+            id: s.id,
+            type: "servers" as SearchTab,
+            title: s.name,
+            subtitle: `${s.memberCount || 0} members`,
+            serverId: s.id,
+          }));
+          break;
+        }
       }
-    }, 300),
-    []
-  );
+      setResults(searchResults);
+    } catch (e) {
+      console.error("Search failed:", e);
+    } finally {
+      setLoading(false);
+    }
+  }, 300);
 
   function onSearch(text: string) {
     setQuery(text);
@@ -92,26 +92,20 @@ export default function SearchScreen() {
 
   function onTabChange(tab: SearchTab) {
     setActiveTab(tab);
-    if (query.trim()) {
-      performSearch(query, tab);
-    }
+    if (query.trim()) performSearch(query, tab);
   }
 
   function handleSelect(result: SearchResult) {
-    // Save to recent
     setRecent(prev => [result.title, ...prev.slice(0, 9)]);
-    
-    // Navigate
     if (result.type === "messages" && result.channelId) {
-      store.selectChannel(result.channelId);
       router.push(`/channel/${result.channelId}`);
     } else if (result.type === "users") {
       router.push(`/user/${result.id}`);
     } else if (result.type === "servers" && result.serverId) {
-      store.joinServer(result.serverId).then(() => {
-        store.selectServer(result.serverId!);
+      api.joinServer(result.serverId).then(() => {
+        store.servers = [...store.servers, { id: result.serverId!, name: result.title, ownerId: "", icon: undefined }];
         router.push(`/server/${result.serverId}`);
-      });
+      }).catch(console.error);
     }
   }
 
@@ -133,7 +127,6 @@ export default function SearchScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Search header */}
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} style={styles.cancelBtn}>
           <Text style={styles.cancelBtnText}>Cancel</Text>
@@ -158,7 +151,6 @@ export default function SearchScreen() {
         </View>
       </View>
 
-      {/* Tab bar */}
       <View style={styles.tabBar}>
         {(["messages", "users", "servers"] as SearchTab[]).map(tab => (
           <Pressable
@@ -173,11 +165,8 @@ export default function SearchScreen() {
         ))}
       </View>
 
-      {/* Results */}
       {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color="#27c9a5" />
-        </View>
+        <View style={styles.center}><ActivityIndicator size="large" color="#27c9a5" /></View>
       ) : results.length > 0 ? (
         <FlatList
           data={results}

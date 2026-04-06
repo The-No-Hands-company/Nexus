@@ -1,10 +1,14 @@
 /**
- * store.ts - Zustand-compatible React Native store (no external deps)
+ * store.ts - Zustand-compatible React Native store with AsyncStorage persistence
  */
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { api } from "./api";
 import type { User, Server, Channel, Message, DmChannel, Relationship, ServerMember } from "./api";
 
 export { api };
+
+const STORAGE_KEY_SESSION = "nexus_session";
+const STORAGE_KEY_SETTINGS = "nexus_settings";
 
 export interface Session {
   user: User;
@@ -45,6 +49,7 @@ class Store {
   };
   updateSettings = (patch: Partial<Store["settings"]>) => {
     this.settings = { ...this.settings, ...patch };
+    this._persistSettings();
     this.emit();
   };
   loading = false;
@@ -57,15 +62,62 @@ class Store {
   subscribe(fn: Listener) { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; }
   addListener = (fn: Listener) => { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; };
   private emit() { this.listeners.forEach(fn => fn()); }
+  /** Trigger a re-render for all subscribed components. */
+  notify() { this.emit(); }
 
   get hasSession() { return !!this.session; }
   get isAuthenticated() { return !!this.session; }
+
+  // ── Persistence ──────────────────────────────────────────────────────────────
+
+  /** Load session + settings from AsyncStorage. Call once at app startup. */
+  async hydrate(): Promise<void> {
+    try {
+      const [sessionJson, settingsJson] = await Promise.all([
+        AsyncStorage.getItem(STORAGE_KEY_SESSION),
+        AsyncStorage.getItem(STORAGE_KEY_SETTINGS),
+      ]);
+      if (sessionJson) {
+        const saved: Session = JSON.parse(sessionJson);
+        // Restore tokens so the api client can make authenticated requests
+        api.setTokens(saved.accessToken, saved.refreshToken);
+        this.session = saved;
+      }
+      if (settingsJson) {
+        const saved = JSON.parse(settingsJson);
+        this.settings = { ...this.settings, ...saved };
+      }
+    } catch (e) {
+      console.error("store hydrate error", e);
+    }
+  }
+
+  private async _persistSession(): Promise<void> {
+    if (this.session) {
+      await AsyncStorage.setItem(STORAGE_KEY_SESSION, JSON.stringify(this.session)).catch(
+        e => console.error("persistSession error", e),
+      );
+    } else {
+      await AsyncStorage.removeItem(STORAGE_KEY_SESSION).catch(
+        e => console.error("clearSession error", e),
+      );
+    }
+  }
+
+  private _persistSettings(): void {
+    AsyncStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(this.settings)).catch(
+      e => console.error("persistSettings error", e),
+    );
+  }
+
+  // ── Auth ─────────────────────────────────────────────────────────────────────
 
   async login(username: string, password: string) {
     this.loading = true; this.error = null; this.emit();
     try {
       const r = await api.login(username, password);
       this.session = { user: r.user, accessToken: r.accessToken, refreshToken: r.refreshToken };
+      await this._persistSession();
       await this.loadInitialData();
     } catch (e: unknown) {
       this.error = e instanceof Error ? e.message : "Login failed";
@@ -79,6 +131,7 @@ class Store {
     try {
       const r = await api.register(username, password, email);
       this.session = { user: r.user, accessToken: r.accessToken, refreshToken: r.refreshToken };
+      await this._persistSession();
       await this.loadInitialData();
     } catch (e: unknown) {
       this.error = e instanceof Error ? e.message : "Registration failed";
@@ -94,6 +147,7 @@ class Store {
     this.channels = []; this.activeChannelId = null;
     this.messages = {}; this.dmChannels = [];
     this.relationships = []; this.members = {};
+    this._persistSession();
     this.emit();
   }
 
@@ -269,10 +323,13 @@ class Store {
 
   async leaveVoice() {
     if (!this.voiceJoinedChannelId) return;
+    const channelId = this.voiceJoinedChannelId;
     this.voiceJoinedChannelId = null;
+    this.voiceMuted = false;
+    this.voiceDeafened = false;
     this.emit();
     try {
-      await api.leaveVoice();
+      await api.leaveVoice(channelId);
     } catch (e) { console.error("leaveVoice error", e); }
   }
 

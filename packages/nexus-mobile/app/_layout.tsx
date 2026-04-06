@@ -1,23 +1,22 @@
 /**
- * app/_layout.tsx - Root layout with reactive auth guard
+ * app/_layout.tsx - Root layout with async auth guard
+ * Hydrates the store from AsyncStorage before rendering.
  */
-import React, { useEffect, useState, createContext, useContext } from "react";
+import React, { useEffect, useState } from "react";
 import { View, ActivityIndicator, StyleSheet } from "react-native";
 import { Stack } from "expo-router";
 import { store } from "./lib/store";
 
 export default function RootLayout() {
-  const [loading, setLoading] = useState(true);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const sub = store.addListener(() => {
-      setLoading(false);
-    });
-    setLoading(store.session === null);
-    return sub;
+    // Hydrate session + settings from AsyncStorage before
+    // showing any UI. Until this resolves the store is empty.
+    store.hydrate().finally(() => setReady(true));
   }, []);
 
-  if (loading) {
+  if (!ready) {
     return (
       <View style={styles.center}>
         <ActivityIndicator size="large" color="#27c9a5" />
