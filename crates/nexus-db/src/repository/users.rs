@@ -169,16 +169,64 @@ pub async fn update_password_hash(
 
 /// Delete a user account (soft delete — sets DISABLED flag).
 pub async fn soft_delete_user(pool: &sqlx::AnyPool, id: Uuid) -> Result<(), sqlx::Error> {
+    let user_id = id.to_string();
+
+    sqlx::query("DELETE FROM refresh_tokens WHERE user_id = $1::uuid")
+        .bind(&user_id)
+        .execute(pool)
+        .await?;
+    sqlx::query("DELETE FROM password_reset_tokens WHERE user_id = $1::uuid")
+        .bind(&user_id)
+        .execute(pool)
+        .await?;
+    sqlx::query("DELETE FROM email_verification_tokens WHERE user_id = $1::uuid")
+        .bind(&user_id)
+        .execute(pool)
+        .await?;
+    sqlx::query("DELETE FROM push_subscriptions WHERE user_id = $1::uuid")
+        .bind(&user_id)
+        .execute(pool)
+        .await?;
+    sqlx::query("DELETE FROM totp_backup_codes WHERE user_id = $1::uuid")
+        .bind(&user_id)
+        .execute(pool)
+        .await?;
+    sqlx::query("DELETE FROM note_to_self_channels WHERE user_id = $1::uuid")
+        .bind(&user_id)
+        .execute(pool)
+        .await?;
+    sqlx::query("DELETE FROM user_relationships WHERE requester_id = $1::uuid OR addressee_id = $1::uuid")
+        .bind(&user_id)
+        .execute(pool)
+        .await?;
+    sqlx::query("DELETE FROM device_verifications WHERE verifier_id = $1::uuid")
+        .bind(&user_id)
+        .execute(pool)
+        .await?;
+    sqlx::query("DELETE FROM devices WHERE user_id = $1::uuid")
+        .bind(&user_id)
+        .execute(pool)
+        .await?;
+
     sqlx::query(
         r#"
         UPDATE users SET
             flags = flags | (1 << 5),
+            display_name = NULL,
+            avatar = NULL,
+            banner = NULL,
+            bio = NULL,
+            status = NULL,
             email = NULL,
+            email_hash = NULL,
+            password_hash = '',
+            totp_secret = NULL,
+            totp_enabled = false,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = $1::uuid
         "#,
     )
-    .bind(id.to_string())
+    .bind(&user_id)
     .execute(pool)
     .await?;
     Ok(())
@@ -202,21 +250,30 @@ pub async fn count_users(pool: &sqlx::AnyPool) -> Result<i64, sqlx::Error> {
 ///
 /// Returns number of affected users.
 pub async fn purge_scheduled_deletions(pool: &sqlx::AnyPool) -> Result<u64, sqlx::Error> {
-    let result = sqlx::query(
-        "UPDATE users SET \
-            flags = flags | (1 << 5), \
-            email = NULL, \
-            password_hash = '', \
-            scheduled_deletion_at = NULL, \
-            updated_at = CURRENT_TIMESTAMP \
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT id::text FROM users \
          WHERE scheduled_deletion_at IS NOT NULL \
            AND scheduled_deletion_at <= NOW() \
            AND (flags & (1 << 5)) = 0",
     )
-    .execute(pool)
+    .fetch_all(pool)
     .await?;
 
-    Ok(result.rows_affected())
+    let mut purged = 0u64;
+    for (id,) in rows {
+        let user_id = Uuid::parse_str(&id).unwrap_or_else(|_| Uuid::nil());
+        if user_id.is_nil() {
+            continue;
+        }
+        soft_delete_user(pool, user_id).await?;
+        sqlx::query("UPDATE users SET scheduled_deletion_at = NULL WHERE id = $1::uuid")
+            .bind(user_id.to_string())
+            .execute(pool)
+            .await?;
+        purged += 1;
+    }
+
+    Ok(purged)
 }
 
 // ── Federation helpers ────────────────────────────────────────────────────────
