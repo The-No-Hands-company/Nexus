@@ -196,7 +196,8 @@ export class GatewayClient {
   }
 
   sendTyping(channelId: string) {
-    this.send({ op: OP_DISPATCH, t: "TYPING_START", d: { channel_id: channelId } });
+    // Typing indicators go via REST API, not WebSocket
+    api.sendTyping(channelId).catch(() => {});
   }
 
   disconnect() {

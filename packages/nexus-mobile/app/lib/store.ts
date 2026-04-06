@@ -27,7 +27,26 @@ class Store {
   typingUsers: Record<string, string[]> = {};
   unreadChannels: Record<string, boolean> = {};
   voiceJoinedChannelId: string | null = null;
+  voiceMuted = false;
+  voiceDeafened = false;
   experienceMode: "full" | "messaging" = "full";
+  settings = {
+    theme: "dark",
+    fontSize: 16,
+    compactMode: false,
+    reducedMotion: false,
+    notificationsEnabled: true,
+    mentionsOnly: false,
+    soundsEnabled: true,
+    vibrationEnabled: true,
+    readReceipts: true,
+    sharePresence: true,
+    dmPermission: "everyone" as "everyone" | "friends" | "nobody",
+  };
+  updateSettings = (patch: Partial<Store["settings"]>) => {
+    this.settings = { ...this.settings, ...patch };
+    this.emit();
+  };
   loading = false;
   error: string | null = null;
 
@@ -238,6 +257,39 @@ class Store {
     const dm = await api.createDM(recipientId);
     this.dmChannels = [...this.dmChannels.filter(d => d.id !== dm.id), dm]; this.emit();
     return dm;
+  }
+
+  async joinVoice(channelId: string) {
+    this.voiceJoinedChannelId = channelId;
+    this.emit();
+    try {
+      await api.joinVoice(channelId);
+    } catch (e) { console.error("joinVoice error", e); }
+  }
+
+  async leaveVoice() {
+    if (!this.voiceJoinedChannelId) return;
+    this.voiceJoinedChannelId = null;
+    this.emit();
+    try {
+      await api.leaveVoice();
+    } catch (e) { console.error("leaveVoice error", e); }
+  }
+
+  async toggleMute() {
+    this.voiceMuted = !this.voiceMuted;
+    this.emit();
+    try {
+      await api.toggleMute();
+    } catch (e) { console.error("toggleMute error", e); }
+  }
+
+  async toggleDeafen() {
+    this.voiceDeafened = !this.voiceDeafened;
+    this.emit();
+    try {
+      await api.toggleDeafen();
+    } catch (e) { console.error("toggleDeafen error", e); }
   }
 }
 

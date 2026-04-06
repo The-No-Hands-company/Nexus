@@ -209,13 +209,6 @@ class NexusApi {
     this.clearTokens();
   }
 
-  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
-    await this.request("POST", "/users/@me/change-password", {
-      current_password: currentPassword,
-      new_password: newPassword,
-    });
-  }
-
   // ── Users ───────────────────────────────────────────────────────────────────
 
   async getMe(): Promise<User> { return this.request("GET", "/users/@me"); }
@@ -224,6 +217,70 @@ class NexusApi {
   async searchUsers(query: string): Promise<User[]> {
     return this.request("GET", "/users/search?q=" + encodeURIComponent(query));
   }
+
+  // ── Users sub-namespaces ────────────────────────────────────────────────────
+
+  users = {
+    async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+      await this.request("POST", "/users/@me/change-password", {
+        current_password: currentPassword,
+        new_password: newPassword,
+      });
+    },
+    async updateProfile(data: { displayName?: string; bio?: string }): Promise<User> {
+      return this.request("PATCH", "/users/@me", data);
+    },
+    async deleteAccount(password: string): Promise<void> {
+      await this.request("DELETE", "/users/@me", { password });
+    },
+  };
+
+  // ── Sessions ─────────────────────────────────────────────────────────────────
+
+  async getSessions(): Promise<any[]> {
+    return this.request("GET", "/users/@me/sessions");
+  }
+  async revokeSession(sessionId: string): Promise<void> {
+    return this.request("DELETE", "/users/@me/sessions/" + sessionId);
+  }
+
+  // ── E2EE ─────────────────────────────────────────────────────────────────────
+
+  e2ee = {
+    async listDevices(): Promise<any[]> {
+      return this.request("GET", "/users/@me/devices");
+    },
+    async deleteDevice(deviceId: string): Promise<void> {
+      return this.request("DELETE", "/users/@me/devices/" + deviceId);
+    },
+  };
+
+  // ── Voice ────────────────────────────────────────────────────────────────────
+
+  async joinVoice(channelId: string): Promise<any> {
+    return this.request("POST", "/voice/channels/" + channelId + "/join");
+  }
+  async leaveVoice(): Promise<void> {
+    const channelId = (await this.request("GET", "/gateway")) as any;
+    // Leave via voice endpoint if we know the channel
+    try {
+      await this.request("POST", "/voice/channels/" + channelId + "/leave");
+    } catch { /* ignore if not in voice */ }
+  }
+  async toggleMute(): Promise<void> {
+    await this.request("PATCH", "/voice/state", { muted: true });
+  }
+  async toggleDeafen(): Promise<void> {
+    await this.request("PATCH", "/voice/state", { deafened: true });
+  }
+
+  // ── Voice sub-namespace ─────────────────────────────────────────────────────
+
+  voice = {
+    async getState(channelId: string): Promise<any> {
+      return this.request("GET", "/voice/channels/" + channelId + "/state");
+    },
+  };
 
   // ── Servers ─────────────────────────────────────────────────────────────────
 
