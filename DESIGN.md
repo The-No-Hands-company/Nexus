@@ -1,0 +1,139 @@
+# Nexus — Design Language
+
+## Brand
+
+**Nexus** is a federated, privacy-first messaging platform built around the Matrix protocol. The name evokes connection, centrality, and open infrastructure — a hub that bridges people across servers.
+
+## UI Style
+
+Nexus mobile uses a **deep-space dark** aesthetic: rich dark backgrounds with teal/cyan accent highlights, evoking a premium sci-fi dashboard. The desktop client supports multiple theme presets with CSS custom properties.
+
+---
+
+## Color Palette
+
+### Mobile (Ocean Dark — current default theme)
+
+| Token | Hex | Use |
+|---|---|---|
+| `--bg-deepest` | `#030a14` | App background |
+| `--bg-deep` | `#071327` | Header, tab bar, modals |
+| `--bg-card` | `#0b1a30` | Message bubbles, cards |
+| `--bg-elevated` | `#112544` | Input fields, reaction badges |
+| `--bg-hover` | `#0f1f35` | Unread channel rows |
+| `--border` | `#0f2040` | Dividers, borders |
+| `--border-bright` | `#1e3a5f` | Input field borders |
+| `--accent` | `#27c9a5` | CTA buttons, links, active icons |
+| `--accent-dark` | `#062020` | Button text on accent bg |
+| `--fg-primary` | `#d6f4ff` | Primary text |
+| `--fg-secondary` | `#9ec5d5` | Secondary text, timestamps |
+| `--fg-muted` | `#7890b0` | Placeholder text, icons |
+| `--danger` | `#ed4245` | Error badges, unread counts |
+| `--voice` | `#27c9a5` | Voice channel icons |
+
+### Desktop (Theme System via CSS Custom Properties)
+
+Core themes included: **Nexus Dark** (purple accent `#7c6af7`), **Midnight** (Discord-like indigo `#5865f2`), **Ocean** (cyan `#00b4d8`), **Nexus Light**, **High Contrast Dark** (yellow accent `#ffcc00`), **High Contrast Light**.
+
+Each theme overrides these tokens:
+```
+--color-bg-900 / --bg-800 / --bg-700 / --bg-600 / --bg-500
+--color-accent-500 / -600 / -400
+--color-surface-900 / -800 / -700
+--color-muted / -fg / -online / -idle / -dnd / -offline
+--scrollbar-thumb / -hover
+```
+
+---
+
+## Typography
+
+- **UI Labels & Body**: System default (San Francisco on iOS, Roboto on Android)
+- **Server/Channel Names**: 16–18pt, weight 600–700
+- **Timestamps & Meta**: 10–12pt, muted color
+- **Buttons**: 14–16pt, weight 700
+
+---
+
+## Component Patterns
+
+### Navigation
+- **Tabs**: Header-less custom tab bar at bottom (Servers / Messages / Profile). Active = accent teal, inactive = muted gray.
+- **Stack Navigation**: Stack-based with fade animation. Header is hidden; custom header views are rendered inline.
+- **Server Detail**: Full-screen server view with inline header, channel list, FAB-style create button.
+
+### Cards & List Items
+- Rounded corners (`borderRadius: 8–12px`)
+- Subtle background layering (darker → slightly lighter for elevation)
+- Channel rows: `#` prefix icon, name, unread dot, E2EE `*` indicator
+- Server rows: Circle avatar (initial letter or icon), name, member count
+
+### Message Bubbles
+- **Own messages**: Right-aligned, no avatar, card background
+- **Others' messages**: Left-aligned, avatar circle, author name above, card background
+- Max width: 75%
+- Reactions: Pill-shaped emoji badges, own reaction highlighted with brighter background
+- Long-press reveals quick reaction picker
+
+### Modals & Overlays
+- Semi-transparent black overlay (`rgba(0,0,0,0.7)`)
+- Centered card with 16px border radius
+- Input fields: pill-shaped with bright border
+- Action buttons: accent background, dark text
+
+### Input / Composer
+- Pill-shaped text input with internal icon buttons
+- Send button: accent green, disabled when empty
+- Keyboard-aware layout
+
+---
+
+## Iconography
+
+| Element | Icon | Notes |
+|---|---|---|
+| Text channel | `#` | Muted color |
+| Voice channel | `V` | Accent teal |
+| Announcement | `!` | |
+| Forum | `F` | |
+| Stage channel | `S` | |
+| E2EE indicator | `*` | Accent teal |
+| Unread badge | Red pill | Top-right of tab icon |
+| Online status | Green dot | |
+| Offline status | Gray dot | |
+
+---
+
+## Spatial System
+
+- **Header**: 10–12px padding, 1px bottom border
+- **List items**: 12px padding, 4–8px gap between items
+- **Message spacing**: 4px between messages, grouped by author
+- **Screen padding**: 8px horizontal
+- **Modal padding**: 20px
+
+---
+
+## Interaction Patterns
+
+- **Tap**: Navigate, select, send
+- **Long press**: Toggle quick reaction picker on messages
+- **Pull / scroll pagination**: Load older messages on channel scroll
+- **Keyboard avoiding**: Input stays above keyboard on mobile
+
+---
+
+## Animations
+
+- Stack navigation: `fade` transition (300ms)
+- Modal: `slide` from bottom
+- Tab switching: Default platform behavior
+- Unread badge: Static pill
+
+---
+
+## Responsive Strategy
+
+- Mobile-first, single-column layouts
+- Desktop: Multi-column (server list sidebar + main content + detail panel)
+- Breakpoints managed via Tailwind on desktop, React Native `Dimensions` on mobile
