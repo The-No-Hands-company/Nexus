@@ -14,19 +14,53 @@ export type GatewayEventType =
   | "MEMBER_JOIN" | "MEMBER_LEAVE"
   | "READY" | "RESUMED";
 
+type GatewayOpcode =
+  | "Hello"
+  | "Identify"
+  | "Resume"
+  | "Dispatch"
+  | "Reconnect"
+  | "InvalidSession"
+  | "Heartbeat"
+  | "HeartbeatAck";
+
 export interface GatewayMessage {
-  op: number;
+  op: GatewayOpcode | number;
   d?: Record<string, unknown>;
   s?: number;
   t?: GatewayEventType;
 }
 
-const OP_HELLO = 10;
-const OP_DISPATCH = 0;
-const OP_HEARTBEAT = 1;
-const OP_IDENTIFY = 2;
-const OP_RESUME = 6;
-const OP_HEARTBEAT_ACK = 11;
+const OP_HELLO = "Hello";
+const OP_DISPATCH = "Dispatch";
+const OP_HEARTBEAT = "Heartbeat";
+const OP_IDENTIFY = "Identify";
+const OP_RESUME = "Resume";
+const OP_HEARTBEAT_ACK = "HeartbeatAck";
+const OP_RECONNECT = "Reconnect";
+const OP_INVALID_SESSION = "InvalidSession";
+
+function normalizeOpcode(op: GatewayMessage["op"]): GatewayOpcode {
+  if (typeof op === "string") return op as GatewayOpcode;
+  switch (op) {
+    case 10:
+      return "Hello";
+    case 0:
+      return "Dispatch";
+    case 1:
+      return "Heartbeat";
+    case 2:
+      return "Identify";
+    case 6:
+      return "Resume";
+    case 7:
+      return "Reconnect";
+    case 11:
+      return "HeartbeatAck";
+    default:
+      return "Dispatch";
+  }
+}
 
 export class GatewayClient {
   private ws: WebSocket | null = null;
@@ -63,6 +97,7 @@ export class GatewayClient {
   private onOpen() {
     console.log("[Gateway] connected");
     this.reconnectAttempts = 0;
+    this.identify();
   }
 
   private onMessage(event: MessageEvent) {
@@ -75,10 +110,9 @@ export class GatewayClient {
   }
 
   private handlePayload(data: GatewayMessage) {
-    switch (data.op) {
+    switch (normalizeOpcode(data.op)) {
       case OP_HELLO:
         this.startHeartbeat(data.d as { heartbeat_interval: number });
-        this.identify();
         break;
       case OP_DISPATCH:
         this.seq = data.s ?? this.seq;
@@ -87,18 +121,25 @@ export class GatewayClient {
       case OP_HEARTBEAT_ACK:
         this.heartbeatAcked = true;
         break;
+      case OP_RECONNECT:
+        this.ws?.close();
+        break;
+      case OP_INVALID_SESSION:
+        this.ws?.close();
+        break;
     }
   }
 
   private startHeartbeat(d: { heartbeat_interval: number }) {
     const interval = d.heartbeat_interval;
+    if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
     this.heartbeatInterval = setInterval(() => {
       if (!this.heartbeatAcked) {
         console.warn("[Gateway] heartbeat timeout, reconnecting...");
         this.ws?.close(); return;
       }
       this.heartbeatAcked = false;
-      this.send({ op: OP_HEARTBEAT, d: { token: store.session?.accessToken } });
+      this.send({ op: OP_HEARTBEAT, d: { timestamp: Date.now() } });
     }, interval);
   }
 
@@ -209,6 +250,8 @@ export class GatewayClient {
   disconnect() {
     this.intentionalClose = true;
     if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
+    if (this.heartbeatInterval) clearInterval(this.heartbeatInterval);
+    if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
     this.ws?.close();
   }
 }

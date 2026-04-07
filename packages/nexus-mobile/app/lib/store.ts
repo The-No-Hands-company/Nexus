@@ -9,6 +9,7 @@ export { api };
 
 const STORAGE_KEY_SESSION = "nexus_session";
 const STORAGE_KEY_SETTINGS = "nexus_settings";
+const STORAGE_KEY_SERVER_URL = "nexus_server_url";
 
 export interface Session {
   user: User;
@@ -20,6 +21,7 @@ type Listener = () => void;
 
 class Store {
   session: Session | null = null;
+  serverUrl = api.getBaseUrl().replace(/\/api\/v1$/, "");
   servers: Server[] = [];
   activeServerId: string | null = null;
   channels: Channel[] = [];
@@ -73,10 +75,18 @@ class Store {
   /** Load session + settings from AsyncStorage. Call once at app startup. */
   async hydrate(): Promise<void> {
     try {
-      const [sessionJson, settingsJson] = await Promise.all([
+      const [sessionJson, settingsJson, serverUrlJson] = await Promise.all([
         AsyncStorage.getItem(STORAGE_KEY_SESSION),
         AsyncStorage.getItem(STORAGE_KEY_SETTINGS),
+        AsyncStorage.getItem(STORAGE_KEY_SERVER_URL),
       ]);
+      if (serverUrlJson) {
+        const savedServerUrl = JSON.parse(serverUrlJson);
+        if (typeof savedServerUrl === "string" && savedServerUrl.trim()) {
+          this.serverUrl = savedServerUrl.trim().replace(/\/$/, "");
+        }
+      }
+      api.setBaseUrl(this.serverUrl);
       if (sessionJson) {
         const saved: Session = JSON.parse(sessionJson);
         // Restore tokens so the api client can make authenticated requests
@@ -90,6 +100,16 @@ class Store {
     } catch (e) {
       console.error("store hydrate error", e);
     }
+  }
+
+  async setServerUrl(url: string) {
+    const normalized = url.trim().replace(/\/$/, "");
+    this.serverUrl = normalized || "http://localhost:8080";
+    api.setBaseUrl(this.serverUrl);
+    await AsyncStorage.setItem(STORAGE_KEY_SERVER_URL, JSON.stringify(this.serverUrl)).catch(
+      e => console.error("persistServerUrl error", e),
+    );
+    this.emit();
   }
 
   private async _persistSession(): Promise<void> {
@@ -222,7 +242,7 @@ class Store {
       authorId: this.session!.user.id, authorUsername: this.session!.user.username,
       authorAvatar: this.session!.user.avatar, content, createdAt: new Date().toISOString(), replyTo,
     };
-    const msgs = [...(this.messages[this.activeChannelId] ?? []), optimistic];
+    const msgs = [optimistic, ...(this.messages[this.activeChannelId] ?? [])];
     this.messages = { ...this.messages, [this.activeChannelId]: msgs };
     this.emit();
     try {
@@ -242,7 +262,7 @@ class Store {
   appendMessage(msg: Message) {
     const existing = this.messages[msg.channelId] ?? [];
     if (existing.some(m => m.id === msg.id)) return;
-    const msgs = [...existing, msg];
+    const msgs = [msg, ...existing];
     this.messages = { ...this.messages, [msg.channelId]: msgs };
     const unread = { ...this.unreadChannels };
     if (this.activeChannelId !== msg.channelId) unread[msg.channelId] = true;
@@ -252,7 +272,7 @@ class Store {
 
   prependOlderMessages(channelId: string, msgs: Message[]) {
     const existing = this.messages[channelId] ?? [];
-    this.messages = { ...this.messages, [channelId]: [...msgs, ...existing] };
+    this.messages = { ...this.messages, [channelId]: [...existing, ...msgs] };
     this.emit();
   }
 

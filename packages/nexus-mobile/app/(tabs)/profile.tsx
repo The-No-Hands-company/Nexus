@@ -32,6 +32,8 @@ export default function ProfileScreen() {
   const [newPw, setNewPw] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
   const [changingPw, setChangingPw] = useState(false);
+  const [savingServerUrl, setSavingServerUrl] = useState(false);
+  const [serverUrl, setServerUrl] = useState(store.serverUrl);
   const [gatewayStatus, setGatewayStatus] = useState(store.isAuthenticated ? gateway.status : "disconnected");
 
   React.useEffect(() => {
@@ -88,6 +90,23 @@ export default function ProfileScreen() {
       Alert.alert("Error", e instanceof Error ? e.message : "Failed to change password.");
     } finally {
       setChangingPw(false);
+    }
+  }
+
+  async function handleSaveServerUrl() {
+    const normalized = serverUrl.trim().replace(/\/$/, "");
+    if (!normalized) {
+      Alert.alert("Error", "Server URL cannot be empty.");
+      return;
+    }
+    setSavingServerUrl(true);
+    try {
+      await store.setServerUrl(normalized);
+      Alert.alert("Saved", "Server URL updated for this device.");
+    } catch (e: unknown) {
+      Alert.alert("Error", e instanceof Error ? e.message : "Failed to save server URL.");
+    } finally {
+      setSavingServerUrl(false);
     }
   }
 
@@ -156,7 +175,27 @@ export default function ProfileScreen() {
 
         {/* Connection */}
         <Section title="Connection">
-          <InfoRow label="Server" value={api.getBaseUrl().replace("/api/v1", "")} />
+          <View style={s.serverEditor}>
+            <Text style={s.serverEditorLabel}>Server URL</Text>
+            <TextInput
+              style={s.serverEditorInput}
+              value={serverUrl}
+              onChangeText={setServerUrl}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
+              placeholder="http://localhost:8080"
+              placeholderTextColor="#556680"
+            />
+            <Pressable style={s.serverSaveBtn} onPress={handleSaveServerUrl} disabled={savingServerUrl}>
+              {savingServerUrl ? (
+                <ActivityIndicator color="#062020" size="small" />
+              ) : (
+                <Text style={s.serverSaveText}>Save Server URL</Text>
+              )}
+            </Pressable>
+          </View>
+          <InfoRow label="Current API" value={api.getBaseUrl().replace("/api/v1", "")} />
           <View style={s.row}>
             <Text style={s.rowLabel}>Gateway</Text>
             <View style={[s.statusBadge, { backgroundColor: gwColor + "22" }]}>
@@ -293,4 +332,9 @@ const s = StyleSheet.create({
   cancelText:  { color: "#9ec5d5", fontWeight: "600", fontSize: 15 },
   saveBtn:     { backgroundColor: "#27c9a5", borderRadius: 10, paddingHorizontal: 20, paddingVertical: 10, minWidth: 80, alignItems: "center" },
   saveText:    { color: "#062020", fontWeight: "700", fontSize: 15 },
+  serverEditor: { paddingHorizontal: 16, paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.04)" },
+  serverEditorLabel: { color: "#9ec5d5", fontSize: 12, fontWeight: "700", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.8 },
+  serverEditorInput: { backgroundColor: "#112544", color: "#d6f4ff", borderRadius: 10, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)" },
+  serverSaveBtn: { marginTop: 10, backgroundColor: "#27c9a5", borderRadius: 10, paddingVertical: 12, alignItems: "center" },
+  serverSaveText: { color: "#062020", fontWeight: "700", fontSize: 14 },
 });

@@ -2,7 +2,26 @@
  * api.ts - REST API client for Nexus Mobile
  */
 
-export const DEFAULT_API_BASE = "http://localhost:8080/api/v1";
+function normalizeBaseOrigin(url: string): string {
+  const trimmed = url.trim().replace(/\/+$/, "");
+  return trimmed || "http://localhost:8080";
+}
+
+export function normalizeApiBaseUrl(url: string): string {
+  const origin = normalizeBaseOrigin(url);
+  return origin.endsWith("/api/v1") ? origin : `${origin}/api/v1`;
+}
+
+export function apiBaseToOrigin(baseUrl: string): string {
+  return baseUrl.replace(/\/api\/v1$/, "");
+}
+
+const defaultServerUrl =
+  typeof process !== "undefined" && process.env?.EXPO_PUBLIC_NEXUS_API_BASE_URL
+    ? process.env.EXPO_PUBLIC_NEXUS_API_BASE_URL
+    : "http://localhost:8080";
+
+export const DEFAULT_API_BASE = normalizeApiBaseUrl(defaultServerUrl);
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -126,7 +145,7 @@ class NexusApi {
   // ── Config ──────────────────────────────────────────────────────────────────
 
   getBaseUrl(): string { return this.baseUrl; }
-  setBaseUrl(url: string): void { this.baseUrl = url; }
+  setBaseUrl(url: string): void { this.baseUrl = normalizeApiBaseUrl(url); }
 
   setTokens(access: string, refresh: string) {
     this._accessToken = access;

@@ -13,6 +13,7 @@ import { store } from "../lib/store";
 export default function LoginScreen() {
   const router = useRouter();
   const [mode, setMode] = useState<"login" | "register">("login");
+  const [serverUrl, setServerUrl] = useState(store.serverUrl || "http://localhost:8080");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [email, setEmail] = useState("");
@@ -29,6 +30,7 @@ export default function LoginScreen() {
     }
     setLoading(true);
     try {
+      await store.setServerUrl(serverUrl.replace(/\/$/, ""));
       if (mode === "login") {
         await store.login(username.trim(), password);
       } else {
@@ -82,6 +84,16 @@ export default function LoginScreen() {
               onChangeText={setUsername}
               autoCapitalize="none"
               autoCorrect={false}
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Server URL"
+              placeholderTextColor="#7890b0"
+              value={serverUrl}
+              onChangeText={setServerUrl}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="url"
             />
             {mode === "register" && (
               <TextInput

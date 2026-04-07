@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   View, Text, TextInput, Pressable, StyleSheet,
   KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator,
@@ -8,7 +8,7 @@ import { store } from "../lib/store";
 
 export default function RegisterScreen() {
   const router = useRouter();
-  const [serverUrl, setServerUrl] = useState("http://localhost:8080");
+  const [serverUrl, setServerUrl] = useState(store.serverUrl || "http://localhost:8080");
   const [username, setUsername]   = useState("");
   const [password, setPassword]   = useState("");
   const [email, setEmail]         = useState("");
@@ -22,7 +22,7 @@ export default function RegisterScreen() {
     setLoading(true);
     try {
       const base = serverUrl.replace(/\/$/, "");
-      store.api.setBaseUrl(base + "/api/v1");
+      await store.setServerUrl(base);
       await store.register(username.trim(), password, email.trim() || undefined);
       router.replace("/(tabs)");
     } catch (e) {
