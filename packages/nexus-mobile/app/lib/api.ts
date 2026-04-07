@@ -230,6 +230,10 @@ class NexusApi {
     await this.request("DELETE", "/users/@me", { password });
   }
 
+  async cancelAccountDeletion(): Promise<void> {
+    await this.request("POST", "/users/@me/cancel-deletion");
+  }
+
   // ── Sessions ─────────────────────────────────────────────────────────────────
 
   async getSessions(): Promise<any[]> {
