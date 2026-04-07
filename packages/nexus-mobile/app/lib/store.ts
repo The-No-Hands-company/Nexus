@@ -171,7 +171,7 @@ class Store {
     this.emit();
   }
 
-  private async loadInitialData() {
+  async loadInitialData() {
     try {
       const [servers, dms, relationships] = await Promise.all([
         api.getServers(), api.getDMs(), api.getRelationships(),
@@ -179,6 +179,14 @@ class Store {
       this.servers = servers; this.dmChannels = dms; this.relationships = relationships;
       this.emit();
     } catch (e) { console.error("loadInitialData error", e); }
+  }
+
+  async sendTyping(channelId: string) {
+    try {
+      await api.sendTyping(channelId);
+    } catch (e) {
+      console.error("sendTyping error", e);
+    }
   }
 
   async selectServer(serverId: string) {

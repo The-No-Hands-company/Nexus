@@ -239,7 +239,7 @@ export default function ChannelScreen() {
               onChangeText={(text) => {
                 setInput(text);
                 if (!typingTimerRef.current && id) {
-                  store.api.sendTyping(id).catch(() => {});
+                  store.sendTyping(id).catch(() => {});
                   typingTimerRef.current = setTimeout(() => {
                     typingTimerRef.current = null;
                   }, 4_000);

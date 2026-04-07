@@ -102,6 +102,8 @@ export default function ProfileScreen() {
     setSavingServerUrl(true);
     try {
       await store.setServerUrl(normalized);
+      await store.loadInitialData?.();
+      gateway.disconnect();
       Alert.alert("Saved", "Server URL updated for this device.");
     } catch (e: unknown) {
       Alert.alert("Error", e instanceof Error ? e.message : "Failed to save server URL.");
