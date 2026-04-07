@@ -130,6 +130,9 @@ pub fn run() {
             commands::settings::set_setting,
             commands::settings::set_server_url,
             commands::settings::update_profile,
+            commands::settings::change_password,
+            commands::settings::delete_account,
+            commands::settings::cancel_account_deletion,
             // Overlay
             overlay::show_overlay,
             overlay::hide_overlay,

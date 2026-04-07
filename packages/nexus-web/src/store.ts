@@ -123,7 +123,7 @@ interface Store {
   dmChannels: NxChannel[];
   messages: Record<string, NxMessage[]>;
   unread: Record<string, boolean>;
-  typing: Record<string, string[]>; // channelId -> usernames
+  typing: Record<string, string[]>;
   onlineUsers: Record<string, NxUser["presence"]>;
   gatewayStatus: GatewayStatus;
   setGatewayStatus: (s: GatewayStatus) => void;
@@ -152,6 +152,8 @@ interface Store {
   // Profile / settings actions
   updateProfile: (fields: { display_name?: string; bio?: string; status?: string; avatar?: string }) => Promise<void>;
   changePassword: (currentPw: string, newPw: string) => Promise<void>;
+  deleteAccount: (password: string) => Promise<void>;
+  cancelAccountDeletion: () => Promise<void>;
   joinServer: (inviteCode: string) => Promise<NxServer>;
   createDm: (userId: string) => Promise<NxChannel>;
   sendTyping: (channelId: string) => Promise<void>;
@@ -238,31 +240,27 @@ export const useStore = create<Store>()(
           const data = await apiFetch<NxMessage[]>(
             s, `/channels/${channelId}/messages?limit=50&before=${oldest.id}`
           );
-          if (!Array.isArray(data) || data.length === 0) return;
           set((st) => ({
-            messages: {
-              ...st.messages,
-              [channelId]: [...(st.messages[channelId] ?? []), ...data],
-            },
+            messages: { ...st.messages, [channelId]: [...existing, ...data] },
           }));
         } catch (e) { console.error("loadMoreMessages", e); }
       },
 
-      // ── Actions ───────────────────────────────────────────────────────────
+      // ── Actions ────────────────────────────────────────────────────────
 
       sendMessage: async (channelId, content, replyTo) => {
         const s = get().session;
         if (!s) return;
-        await apiFetch(s, `/channels/${channelId}/messages`, {
+        await apiFetch<NxMessage>(s, `/channels/${channelId}/messages`, {
           method: "POST",
-          body: JSON.stringify({ content, reply_to_message_id: replyTo ?? null }),
+          body: JSON.stringify({ content, reference_message_id: replyTo ?? undefined }),
         });
       },
 
       addReaction: async (channelId, messageId, emoji) => {
         const s = get().session;
         if (!s) return;
-        await apiFetch(s, `/channels/${channelId}/messages/${messageId}/reactions/${encodeURIComponent(emoji)}`, {
+        await apiFetch(s, `/channels/${channelId}/messages/${messageId}/reactions/${encodeURIComponent(emoji)}/@me`, {
           method: "PUT",
         });
       },
@@ -271,12 +269,6 @@ export const useStore = create<Store>()(
         const s = get().session;
         if (!s) return;
         await apiFetch(s, `/channels/${channelId}/messages/${messageId}`, { method: "DELETE" });
-        set((st) => ({
-          messages: {
-            ...st.messages,
-            [channelId]: (st.messages[channelId] ?? []).filter((m) => m.id !== messageId),
-          },
-        }));
       },
 
       createServer: async (name) => {
@@ -306,16 +298,32 @@ export const useStore = create<Store>()(
       updateProfile: async (fields) => {
         const { session } = get();
         if (!session) return;
-        await apiFetch(session, '/users/@me', { method: 'PATCH', body: JSON.stringify(fields) });
-        set((st) => ({ session: st.session ? { ...st.session, ...('display_name' in fields ? {} : {}) } : null }));
+        await apiFetch(session, "/users/@me", { method: "PATCH", body: JSON.stringify(fields) });
       },
 
       changePassword: async (currentPw, newPw) => {
         const { session } = get();
         if (!session) return;
-        await apiFetch(session, '/users/@me/change-password', {
-          method: 'POST',
+        await apiFetch(session, "/users/@me/change-password", {
+          method: "POST",
           body: JSON.stringify({ current_password: currentPw, new_password: newPw }),
+        });
+      },
+
+      deleteAccount: async (password) => {
+        const { session } = get();
+        if (!session) return;
+        await apiFetch(session, "/users/@me", {
+          method: "DELETE",
+          body: JSON.stringify({ password }),
+        });
+      },
+
+      cancelAccountDeletion: async () => {
+        const { session } = get();
+        if (!session) return;
+        await apiFetch(session, "/users/@me/cancel-deletion", {
+          method: "POST",
         });
       },
 

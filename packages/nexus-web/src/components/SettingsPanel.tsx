@@ -7,7 +7,15 @@ type Tab = "profile" | "security" | "appearance" | "connection";
 
 export default function SettingsPanel({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
-  const { session, setSession, gatewayStatus, changePassword, updateProfile } = useStore();
+  const {
+    session,
+    setSession,
+    gatewayStatus,
+    changePassword,
+    updateProfile,
+    deleteAccount,
+    cancelAccountDeletion,
+  } = useStore();
   const [tab, setTab] = useState<Tab>("profile");
 
   // Profile
@@ -24,6 +32,9 @@ export default function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [confirmPw, setConfirmPw] = useState("");
   const [pwSaving, setPwSaving] = useState(false);
   const [pwMsg, setPwMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteSaving, setDeleteSaving] = useState(false);
+  const [deleteMsg, setDeleteMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   // Appearance
   const [fontSize, setFontSize] = useState(() => localStorage.getItem("nx_font_size") ?? "14");
@@ -78,6 +89,37 @@ export default function SettingsPanel({ onClose }: { onClose: () => void }) {
       setPwMsg({ ok: false, text: (e as Error).message });
     } finally {
       setPwSaving(false);
+    }
+  }
+
+  async function requestDeletion() {
+    if (!deletePassword.trim()) {
+      setDeleteMsg({ ok: false, text: "Enter your password to confirm deletion." });
+      return;
+    }
+    setDeleteSaving(true);
+    setDeleteMsg(null);
+    try {
+      await deleteAccount(deletePassword);
+      setDeleteMsg({ ok: true, text: "Deletion scheduled. You can cancel it below." });
+      setDeletePassword("");
+    } catch (e) {
+      setDeleteMsg({ ok: false, text: (e as Error).message });
+    } finally {
+      setDeleteSaving(false);
+    }
+  }
+
+  async function cancelDeletion() {
+    setDeleteSaving(true);
+    setDeleteMsg(null);
+    try {
+      await cancelAccountDeletion();
+      setDeleteMsg({ ok: true, text: "Deletion cancelled." });
+    } catch (e) {
+      setDeleteMsg({ ok: false, text: (e as Error).message });
+    } finally {
+      setDeleteSaving(false);
     }
   }
 
@@ -299,6 +341,42 @@ export default function SettingsPanel({ onClose }: { onClose: () => void }) {
                       GET /api/v1/users/@me/sessions
                     </code>.
                   </p>
+                </div>
+
+                <div className="pt-4 border-t" style={{ borderColor: "rgba(255,255,255,0.07)" }}>
+                  <SectionTitle>Account Lifecycle</SectionTitle>
+                  <p className="text-sm mt-1" style={{ color: "var(--muted)" }}>
+                    Schedule your account for deletion. You can cancel it below.
+                  </p>
+
+                  <Field label="Password">
+                    <input
+                      className="nx-input w-full"
+                      type="password"
+                      value={deletePassword}
+                      onChange={(e) => setDeletePassword(e.target.value)}
+                      autoComplete="current-password"
+                    />
+                  </Field>
+
+                  {deleteMsg && <Alert ok={deleteMsg.ok}>{deleteMsg.text}</Alert>}
+
+                  <div className="flex gap-2">
+                    <button
+                      className="nx-btn nx-btn-primary px-5 py-2 text-sm"
+                      onClick={requestDeletion}
+                      disabled={deleteSaving}
+                    >
+                      {deleteSaving ? "Deleting…" : "Delete Account"}
+                    </button>
+                    <button
+                      className="nx-btn nx-btn-secondary px-5 py-2 text-sm"
+                      onClick={cancelDeletion}
+                      disabled={deleteSaving}
+                    >
+                      {deleteSaving ? "Cancelling…" : "Cancel Deletion"}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
