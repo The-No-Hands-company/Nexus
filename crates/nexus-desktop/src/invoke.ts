@@ -10,12 +10,22 @@
 export const isTauri = (): boolean =>
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
+function normalizeServerUrl(url: string): string {
+  return url.trim().replace(/\/$/, "");
+}
+
+export function getServerUrlPlaceholder(): string {
+  return import.meta.env.DEV ? "http://localhost:8080" : "https://your-nexus-server.com";
+}
+
 // ── Browser-mode session ─────────────────────────────────────────────────────
 // In Tauri mode the session lives inside Rust AppState; in the browser we keep
 // it here and mirror it in localStorage so it survives a page refresh.
 
 let _serverUrl: string =
-  localStorage.getItem("nexus:lastServerUrl") ?? localStorage.getItem("nexus:dev:serverUrl") ?? "http://localhost:8080";
+  localStorage.getItem("nexus:lastServerUrl") ??
+  localStorage.getItem("nexus:dev:serverUrl") ??
+  (import.meta.env.DEV ? "http://localhost:8080" : "");
 
 /** Return the currently configured server URL (e.g. "https://nexus-tnhc.fly.dev"). */
 export function getServerUrl(): string {
@@ -371,8 +381,13 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
   switch (cmd) {
     // ── Auth ──────────────────────────────────────────────────────────────
     case "set_server_url": {
-      _serverUrl = args.url as string;
+      const normalized = normalizeServerUrl(String(args.url ?? ""));
+      if (!normalized) {
+        throw new Error("Server URL is required");
+      }
+      _serverUrl = normalized;
       localStorage.setItem("nexus:dev:serverUrl", _serverUrl);
+      localStorage.setItem("nexus:lastServerUrl", _serverUrl);
       return undefined as unknown as T;
     }
 

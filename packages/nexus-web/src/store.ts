@@ -1,6 +1,16 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+const DEFAULT_SERVER_URL = import.meta.env.DEV ? "http://localhost:8080" : "";
+
+function normalizeServerUrl(url: string): string {
+  return url.trim().replace(/\/$/, "").replace(/\/api\/v1$/, "");
+}
+
+export function getServerUrlPlaceholder(): string {
+  return import.meta.env.DEV ? "http://localhost:8080" : "https://your-nexus-server.com";
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface Session {
@@ -75,7 +85,10 @@ export type GatewayStatus = "offline" | "connecting" | "online";
 // ── API helpers ───────────────────────────────────────────────────────────────
 
 export function apiBase(session: Session | null): string {
-  return (session?.serverUrl ?? localStorage.getItem("nexus_server_url") ?? "http://localhost:8080") + "/api/v1";
+  const origin = normalizeServerUrl(
+    session?.serverUrl ?? localStorage.getItem("nexus_server_url") ?? DEFAULT_SERVER_URL
+  );
+  return `${origin}/api/v1`;
 }
 
 export function authHeaders(session: Session | null): HeadersInit {
@@ -164,10 +177,14 @@ export const useStore = create<Store>()(
     (set, get) => ({
       session: null,
       setSession: (session) => set({ session }),
-      serverUrl: "http://localhost:8080",
+      serverUrl: DEFAULT_SERVER_URL,
       setServerUrl: (serverUrl) => {
-        localStorage.setItem("nexus_server_url", serverUrl);
-        set({ serverUrl });
+        const normalized = normalizeServerUrl(serverUrl);
+        if (!normalized) {
+          throw new Error("Server URL is required");
+        }
+        localStorage.setItem("nexus_server_url", normalized);
+        set({ serverUrl: normalized });
       },
 
       activeServerId: null,

@@ -49,8 +49,8 @@ src/
 
 ## Environment
 
-The server URL is entered at login time — no build-time configuration needed.
-Point it at any Nexus instance (`http://localhost:8080` for local dev).
+The server URL is entered at login time and stored on-device. If no server has been configured yet, the app prompts for one explicitly.
+For local development, point it at a Nexus instance such as `http://localhost:8080`.
 
 ## Planned
 

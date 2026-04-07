@@ -8,7 +8,7 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { store } from "../lib/store";
-import { api } from "../lib/api";
+import { api, getServerUrlPlaceholder } from "../lib/api";
 import { gateway } from "../lib/gateway";
 
 function StatusDot({ status }: { status?: string }) {
@@ -117,6 +117,8 @@ export default function ProfileScreen() {
     : gatewayStatus === "connecting" ? "#fee75c"
     : "#ed4245";
 
+  const currentApi = store.serverUrl || getServerUrlPlaceholder();
+
   return (
     <SafeAreaView style={s.container}>
       <ScrollView contentContainerStyle={s.content}>
@@ -186,7 +188,7 @@ export default function ProfileScreen() {
               autoCapitalize="none"
               autoCorrect={false}
               keyboardType="url"
-              placeholder="http://localhost:8080"
+              placeholder={getServerUrlPlaceholder()}
               placeholderTextColor="#556680"
             />
             <Pressable style={s.serverSaveBtn} onPress={handleSaveServerUrl} disabled={savingServerUrl}>
@@ -197,7 +199,7 @@ export default function ProfileScreen() {
               )}
             </Pressable>
           </View>
-          <InfoRow label="Current API" value={api.getBaseUrl().replace("/api/v1", "")} />
+          <InfoRow label="Current API" value={currentApi} />
           <View style={s.row}>
             <Text style={s.rowLabel}>Gateway</Text>
             <View style={[s.statusBadge, { backgroundColor: gwColor + "22" }]}>

@@ -1,6 +1,6 @@
 import { useState, FormEvent } from "react";
 import { Link } from "react-router-dom";
-import { invoke } from "../invoke";
+import { invoke, getServerUrlPlaceholder } from "../invoke";
 import { useStore, Session } from "../store";
 
 interface AuthUserInfo {
@@ -20,7 +20,7 @@ export default function LoginPage() {
   const { setSession } = useStore();
 
   const [serverUrl, setServerUrl] = useState(
-    () => localStorage.getItem("nexus:lastServerUrl") || "http://localhost:8080"
+    () => localStorage.getItem("nexus:lastServerUrl") || ""
   );
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -30,9 +30,12 @@ export default function LoginPage() {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (!serverUrl.trim()) {
+      setError("Server URL is required.");
+      return;
+    }
     setLoading(true);
     try {
-      // Persist server URL so commands know where to connect
       await invoke("set_server_url", { url: serverUrl });
 
       const resp = await invoke<LoginResponse>("login", { username, password });
@@ -74,7 +77,7 @@ export default function LoginPage() {
               type="url"
               value={serverUrl}
               onChange={(e) => setServerUrl(e.target.value)}
-              placeholder="https://your-nexus-server.com"
+              placeholder={getServerUrlPlaceholder()}
               required
             />
           </div>

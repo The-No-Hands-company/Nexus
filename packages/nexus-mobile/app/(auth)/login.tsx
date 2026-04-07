@@ -9,17 +9,22 @@ import {
 } from "react-native";
 import { useRouter, Stack } from "expo-router";
 import { store } from "../lib/store";
+import { getServerUrlPlaceholder } from "../lib/api";
 
 export default function LoginScreen() {
   const router = useRouter();
   const [mode, setMode] = useState<"login" | "register">("login");
-  const [serverUrl, setServerUrl] = useState(store.serverUrl || "http://localhost:8080");
+  const [serverUrl, setServerUrl] = useState(store.serverUrl || "");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit() {
+    if (!serverUrl.trim()) {
+      Alert.alert("Error", "Server URL is required");
+      return;
+    }
     if (!username.trim() || !password.trim()) {
       Alert.alert("Error", "Please fill in all required fields");
       return;
@@ -30,7 +35,7 @@ export default function LoginScreen() {
     }
     setLoading(true);
     try {
-      await store.setServerUrl(serverUrl.replace(/\/$/, ""));
+      await store.setServerUrl(serverUrl);
       if (mode === "login") {
         await store.login(username.trim(), password);
       } else {
@@ -87,7 +92,7 @@ export default function LoginScreen() {
             />
             <TextInput
               style={styles.input}
-              placeholder="Server URL"
+              placeholder={getServerUrlPlaceholder()}
               placeholderTextColor="#7890b0"
               value={serverUrl}
               onChangeText={setServerUrl}

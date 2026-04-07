@@ -4,24 +4,43 @@
 
 function normalizeBaseOrigin(url: string): string {
   const trimmed = url.trim().replace(/\/+$/, "");
-  return trimmed || "http://localhost:8080";
+  if (!trimmed) {
+    throw new Error("Server URL is required");
+  }
+  return trimmed.endsWith("/api/v1") ? trimmed.replace(/\/api\/v1$/, "") : trimmed;
+}
+
+function defaultApiOrigin(): string {
+  const env = process.env?.EXPO_PUBLIC_NEXUS_API_BASE_URL?.trim();
+  if (env) {
+    return normalizeBaseOrigin(env);
+  }
+  return typeof __DEV__ !== "undefined" && __DEV__ ? "http://localhost:8080" : "";
+}
+
+export function getDefaultServerOrigin(): string {
+  return defaultApiOrigin();
+}
+
+export function getServerUrlPlaceholder(): string {
+  return typeof __DEV__ !== "undefined" && __DEV__
+    ? "http://localhost:8080"
+    : "https://your-nexus-server.com";
 }
 
 export function normalizeApiBaseUrl(url: string): string {
   const origin = normalizeBaseOrigin(url);
-  return origin.endsWith("/api/v1") ? origin : `${origin}/api/v1`;
+  return `${origin}/api/v1`;
 }
 
 export function apiBaseToOrigin(baseUrl: string): string {
   return baseUrl.replace(/\/api\/v1$/, "");
 }
 
-const defaultServerUrl =
-  typeof process !== "undefined" && process.env?.EXPO_PUBLIC_NEXUS_API_BASE_URL
-    ? process.env.EXPO_PUBLIC_NEXUS_API_BASE_URL
-    : "http://localhost:8080";
-
-export const DEFAULT_API_BASE = normalizeApiBaseUrl(defaultServerUrl);
+export const DEFAULT_API_BASE = (() => {
+  const origin = defaultApiOrigin();
+  return origin ? normalizeApiBaseUrl(origin) : "";
+})();
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

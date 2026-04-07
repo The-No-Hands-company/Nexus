@@ -1,14 +1,15 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import {
   View, Text, TextInput, Pressable, StyleSheet,
   KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator,
 } from "react-native";
 import { useRouter, Link } from "expo-router";
 import { store } from "../lib/store";
+import { getServerUrlPlaceholder } from "../lib/api";
 
 export default function RegisterScreen() {
   const router = useRouter();
-  const [serverUrl, setServerUrl] = useState(store.serverUrl || "http://localhost:8080");
+  const [serverUrl, setServerUrl] = useState(store.serverUrl || "");
   const [username, setUsername]   = useState("");
   const [password, setPassword]   = useState("");
   const [email, setEmail]         = useState("");
@@ -17,6 +18,10 @@ export default function RegisterScreen() {
   
 
   async function submit() {
+    if (!serverUrl.trim()) {
+      setError("Server URL is required");
+      return;
+    }
     if (!username.trim() || !password) return;
     setError(null);
     setLoading(true);
@@ -58,7 +63,7 @@ export default function RegisterScreen() {
             autoCapitalize="none"
             autoCorrect={false}
             keyboardType="url"
-            placeholder="http://localhost:8080"
+            placeholder={getServerUrlPlaceholder()}
             placeholderTextColor="#556680"
           />
 

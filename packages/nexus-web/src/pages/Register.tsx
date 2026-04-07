@@ -1,7 +1,7 @@
 import { FormEvent, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useStore } from "../store";
+import { useStore, getServerUrlPlaceholder } from "../store";
 
 export default function Register() {
   const { t } = useTranslation();
@@ -16,6 +16,10 @@ export default function Register() {
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    if (!serverUrl.trim()) {
+      setError("Server URL is required.");
+      return;
+    }
     setLoading(true);
     try {
       const res = await fetch(`${serverUrl}/api/v1/auth/register`, {

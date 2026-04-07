@@ -2,7 +2,7 @@
  * store.ts - Zustand-compatible React Native store with AsyncStorage persistence
  */
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { api } from "./api";
+import { api, getDefaultServerOrigin, normalizeApiBaseUrl } from "./api";
 import type { User, Server, Channel, Message, DmChannel, Relationship, ServerMember } from "./api";
 
 export { api };
@@ -19,9 +19,13 @@ export interface Session {
 
 type Listener = () => void;
 
+function initialServerOrigin(): string {
+  return getDefaultServerOrigin() || "";
+}
+
 class Store {
   session: Session | null = null;
-  serverUrl = api.getBaseUrl().replace(/\/api\/v1$/, "");
+  serverUrl = initialServerOrigin();
   servers: Server[] = [];
   activeServerId: string | null = null;
   channels: Channel[] = [];
@@ -57,14 +61,12 @@ class Store {
   loading = false;
   error: string | null = null;
 
-  // Expose api for direct access
   get api() { return api; }
 
   private listeners = new Set<Listener>();
   subscribe(fn: Listener) { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; }
   addListener = (fn: Listener) => { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; };
   private emit() { this.listeners.forEach(fn => fn()); }
-  /** Trigger a re-render for all subscribed components. */
   notify() { this.emit(); }
 
   get hasSession() { return !!this.session; }
@@ -86,7 +88,9 @@ class Store {
           this.serverUrl = savedServerUrl.trim().replace(/\/$/, "");
         }
       }
-      api.setBaseUrl(this.serverUrl);
+      if (this.serverUrl) {
+        api.setBaseUrl(this.serverUrl);
+      }
       if (sessionJson) {
         const saved: Session = JSON.parse(sessionJson);
         // Restore tokens so the api client can make authenticated requests
@@ -104,7 +108,15 @@ class Store {
 
   async setServerUrl(url: string) {
     const normalized = url.trim().replace(/\/$/, "");
-    this.serverUrl = normalized || "http://localhost:8080";
+    if (!normalized) {
+      const fallback = getDefaultServerOrigin();
+      if (!fallback) {
+        throw new Error("Server URL is required");
+      }
+      this.serverUrl = fallback;
+    } else {
+      this.serverUrl = normalizeApiBaseUrl(normalized).replace(/\/api\/v1$/, "");
+    }
     api.setBaseUrl(this.serverUrl);
     await AsyncStorage.setItem(STORAGE_KEY_SERVER_URL, JSON.stringify(this.serverUrl)).catch(
       e => console.error("persistServerUrl error", e),

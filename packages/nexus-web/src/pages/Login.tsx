@@ -1,7 +1,7 @@
 import { FormEvent, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { useStore } from "../store";
+import { useStore, getServerUrlPlaceholder } from "../store";
 
 export default function Login() {
   const { t } = useTranslation();
@@ -64,7 +64,7 @@ export default function Login() {
               className="nx-input"
               value={serverUrl}
               onChange={(e) => setServerUrl(e.target.value)}
-              placeholder={t("auth.serverUrlPlaceholder")}
+              placeholder={getServerUrlPlaceholder()}
             />
           </div>
           <div>
