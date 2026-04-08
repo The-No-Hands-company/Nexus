@@ -35,7 +35,7 @@ export default function LoginScreen() {
     }
     setLoading(true);
     try {
-      await store.setServerUrl(serverUrl);
+      await store.setServerUrl(serverUrl.trim());
       if (mode === "login") {
         await store.login(username.trim(), password);
       } else {
@@ -43,9 +43,11 @@ export default function LoginScreen() {
       }
       if (store.error) {
         Alert.alert("Error", store.error);
-      } else {
-        router.replace("/(tabs)");
+        return;
       }
+      router.replace("/(tabs)");
+    } catch (e: unknown) {
+      Alert.alert("Error", e instanceof Error ? e.message : "Authentication failed.");
     } finally {
       setLoading(false);
     }

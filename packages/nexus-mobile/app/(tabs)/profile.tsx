@@ -96,14 +96,17 @@ export default function ProfileScreen() {
   async function handleSaveServerUrl() {
     const normalized = serverUrl.trim().replace(/\/$/, "");
     if (!normalized) {
-      Alert.alert("Error", "Server URL cannot be empty.");
+      Alert.alert("Error", "Server URL is required");
       return;
     }
     setSavingServerUrl(true);
     try {
       await store.setServerUrl(normalized);
-      await store.loadInitialData?.();
       gateway.disconnect();
+      await store.loadInitialData();
+      await gateway.connect();
+      setServerUrl(store.serverUrl);
+      setGatewayStatus(gateway.status);
       Alert.alert("Saved", "Server URL updated for this device.");
     } catch (e: unknown) {
       Alert.alert("Error", e instanceof Error ? e.message : "Failed to save server URL.");
