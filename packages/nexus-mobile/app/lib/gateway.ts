@@ -4,7 +4,7 @@
  */
 import { api } from "./api";
 import { store } from "./store";
-import type { Message } from "./api";
+import type { Message, User } from "./api";
 
 export type GatewayEventType =
   | "MESSAGE_CREATE" | "MESSAGE_UPDATE" | "MESSAGE_DELETE"
@@ -183,9 +183,20 @@ export class GatewayClient {
         store.onMessageDelete(del.channel_id, del.id);
         break;
       }
+      case "MESSAGE_UPDATE": {
+        store.onMessageUpdate(d as unknown as Message);
+        break;
+      }
       case "TYPING_START": {
         const typing = d as { channel_id: string; username: string };
         store.onTypingStart(typing.channel_id, typing.username);
+        break;
+      }
+      case "PRESENCE_UPDATE": {
+        const raw = d as { user_id?: string; presence?: User["presence"] };
+        if (!raw.user_id || !raw.presence) break;
+        if (raw.user_id === store.session?.user.id) store.updatePresence(raw.presence);
+        else store.onPresenceUpdate(raw.user_id, raw.presence);
         break;
       }
       case "MESSAGE_REACTION_ADD": {

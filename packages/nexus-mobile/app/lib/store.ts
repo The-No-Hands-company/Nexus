@@ -92,6 +92,7 @@ class Store {
   relationships: Relationship[] = [];
   members: Record<string, ServerMember[]> = {};
   typingUsers: Record<string, string[]> = {};
+  onlineUsers: Record<string, User["presence"]> = {};
   unreadChannels: Record<string, boolean> = {};
   voiceJoinedChannelId: string | null = null;
   voiceMuted = false;
@@ -303,11 +304,26 @@ class Store {
 
   updateSessionUser(patch: Partial<User>) {
     this.session = patchSessionUser(this.session, patch);
+    void this._persistSession();
     this.emit();
   }
 
   updatePresence(presence: User["presence"]) {
     this.updateSessionUser({ presence });
+  }
+
+  onMessageUpdate(update: Message) {
+    const existing = this.messages[update.channelId] ?? [];
+    const next = existing.some(m => m.id === update.id)
+      ? mergeMessageUpdate(existing, update)
+      : sortMessages([...existing, update]);
+    this.messages = { ...this.messages, [update.channelId]: next };
+    this.emit();
+  }
+
+  onPresenceUpdate(userId: string, presence: User["presence"]) {
+    this.onlineUsers = { ...this.onlineUsers, [userId]: presence };
+    this.emit();
   }
 
   async loadOlderMessages() {

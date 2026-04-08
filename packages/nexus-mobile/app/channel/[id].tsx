@@ -9,7 +9,6 @@ import {
 } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { store } from "../lib/store";
-import { gateway } from "../lib/gateway";
 import type { Message } from "../lib/api";
 
 const EMOJI_SHORTCUTS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
@@ -114,13 +113,6 @@ export default function ChannelScreen() {
     if (id && store.activeChannelId !== id) {
       store.selectChannel(id).catch(console.error);
     }
-  }, [id]);
-
-  // Gateway message handler
-  useEffect(() => {
-    return () => {
-      // No-op: gateway updates now flow through the shared store reducer path.
-    };
   }, [id]);
 
   async function handleSend() {
