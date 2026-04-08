@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
   View, Text, TextInput, Pressable, StyleSheet,
-  KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator,
+  KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator, Alert,
 } from "react-native";
 import { useRouter, Link } from "expo-router";
 import { store } from "../lib/store";
@@ -10,28 +10,29 @@ import { getServerUrlPlaceholder } from "../lib/api";
 export default function RegisterScreen() {
   const router = useRouter();
   const [serverUrl, setServerUrl] = useState(store.serverUrl || "");
-  const [username, setUsername]   = useState("");
-  const [password, setPassword]   = useState("");
-  const [email, setEmail]         = useState("");
-  const [error, setError]         = useState<string | null>(null);
-  const [loading, setLoading]     = useState(false);
-  
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [email, setEmail] = useState("");
+  const [loading, setLoading] = useState(false);
 
   async function submit() {
     if (!serverUrl.trim()) {
-      setError("Server URL is required");
+      Alert.alert("Error", "Server URL is required");
       return;
     }
-    if (!username.trim() || !password) return;
-    setError(null);
+    if (!username.trim() || !password.trim()) {
+      Alert.alert("Error", "Please fill in all required fields");
+      return;
+    }
     setLoading(true);
     try {
-      const base = serverUrl.replace(/\/$/, "");
-      await store.setServerUrl(base);
+      await store.setServerUrl(serverUrl);
       await store.register(username.trim(), password, email.trim() || undefined);
-      router.replace("/(tabs)");
-    } catch (e) {
-      setError((e as Error).message);
+      if (store.error) {
+        Alert.alert("Error", store.error);
+      } else {
+        router.replace("/(tabs)");
+      }
     } finally {
       setLoading(false);
     }
@@ -100,12 +101,6 @@ export default function RegisterScreen() {
             placeholderTextColor="#556680"
           />
 
-          {error && (
-            <View style={s.errorBox}>
-              <Text style={s.errorText}>{error}</Text>
-            </View>
-          )}
-
           <Pressable
             style={[s.btn, loading && s.btnDisabled]}
             onPress={submit}
@@ -155,11 +150,6 @@ const s = StyleSheet.create({
     paddingHorizontal: 14, paddingVertical: 12, fontSize: 15,
     borderWidth: 1, borderColor: "rgba(255,255,255,0.08)",
   },
-  errorBox:  {
-    marginTop: 12, backgroundColor: "rgba(239,68,68,0.1)",
-    borderRadius: 8, padding: 10, borderWidth: 1, borderColor: "rgba(239,68,68,0.3)",
-  },
-  errorText: { color: "#f87171", fontSize: 13 },
   btn:       {
     marginTop: 20, backgroundColor: "#27c9a5", borderRadius: 10,
     paddingVertical: 14, alignItems: "center",

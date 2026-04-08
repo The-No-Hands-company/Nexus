@@ -78,8 +78,12 @@ export class GatewayClient {
 
   async connect(gatewayUrl?: string) {
     if (!gatewayUrl) {
-      try { gatewayUrl = await api.getGatewayUrl(); }
-      catch { gatewayUrl = "ws://localhost:8081/gateway"; }
+      try {
+        gatewayUrl = await api.getGatewayUrl();
+      } catch (e) {
+        console.warn("[Gateway] unable to resolve gateway URL", e);
+        return;
+      }
     }
     this.gatewayUrl = gatewayUrl;
     this.open();

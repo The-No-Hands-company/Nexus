@@ -82,18 +82,17 @@ class Store {
         AsyncStorage.getItem(STORAGE_KEY_SETTINGS),
         AsyncStorage.getItem(STORAGE_KEY_SERVER_URL),
       ]);
-      if (serverUrlJson) {
-        const savedServerUrl = JSON.parse(serverUrlJson);
-        if (typeof savedServerUrl === "string" && savedServerUrl.trim()) {
-          this.serverUrl = savedServerUrl.trim().replace(/\/$/, "");
-        }
+      const savedServerUrl = typeof serverUrlJson === "string" ? JSON.parse(serverUrlJson) : null;
+      if (typeof savedServerUrl === "string" && savedServerUrl.trim()) {
+        this.serverUrl = savedServerUrl.trim().replace(/\/$/, "");
+      } else {
+        this.serverUrl = initialServerOrigin();
       }
       if (this.serverUrl) {
         api.setBaseUrl(this.serverUrl);
       }
       if (sessionJson) {
         const saved: Session = JSON.parse(sessionJson);
-        // Restore tokens so the api client can make authenticated requests
         api.setTokens(saved.accessToken, saved.refreshToken);
         this.session = saved;
       }
@@ -107,16 +106,11 @@ class Store {
   }
 
   async setServerUrl(url: string) {
-    const normalized = url.trim().replace(/\/$/, "");
+    const normalized = url.trim();
     if (!normalized) {
-      const fallback = getDefaultServerOrigin();
-      if (!fallback) {
-        throw new Error("Server URL is required");
-      }
-      this.serverUrl = fallback;
-    } else {
-      this.serverUrl = normalizeApiBaseUrl(normalized).replace(/\/api\/v1$/, "");
+      throw new Error("Server URL is required");
     }
+    this.serverUrl = normalizeApiBaseUrl(normalized).replace(/\/api\/v1$/, "");
     api.setBaseUrl(this.serverUrl);
     await AsyncStorage.setItem(STORAGE_KEY_SERVER_URL, JSON.stringify(this.serverUrl)).catch(
       e => console.error("persistServerUrl error", e),

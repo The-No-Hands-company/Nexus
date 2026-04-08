@@ -2,7 +2,7 @@
  * api.ts - REST API client for Nexus Mobile
  */
 
-function normalizeBaseOrigin(url: string): string {
+export function normalizeBaseOrigin(url: string): string {
   const trimmed = url.trim().replace(/\/+$/, "");
   if (!trimmed) {
     throw new Error("Server URL is required");
@@ -15,7 +15,7 @@ function defaultApiOrigin(): string {
   if (env) {
     return normalizeBaseOrigin(env);
   }
-  return typeof __DEV__ !== "undefined" && __DEV__ ? "http://localhost:8080" : "";
+  return "";
 }
 
 export function getDefaultServerOrigin(): string {
@@ -23,9 +23,7 @@ export function getDefaultServerOrigin(): string {
 }
 
 export function getServerUrlPlaceholder(): string {
-  return typeof __DEV__ !== "undefined" && __DEV__
-    ? "http://localhost:8080"
-    : "https://your-nexus-server.com";
+  return "https://your-nexus-server.com";
 }
 
 export function normalizeApiBaseUrl(url: string): string {
@@ -187,14 +185,18 @@ class NexusApi {
   }
 
   async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const baseUrl = this.baseUrl.trim();
+    if (!baseUrl) {
+      throw new Error("Server URL is not configured");
+    }
     const opts: RequestInit = { method, headers: this.headers() };
     if (body !== undefined) opts.body = JSON.stringify(body);
-    const res = await fetch(this.baseUrl + path, opts);
+    const res = await fetch(baseUrl + path, opts);
     if (res.status === 401 && this.refreshToken) {
       const ok = await this.tryRefresh();
       if (ok) {
         opts.headers = this.headers();
-        const r2 = await fetch(this.baseUrl + path, opts);
+        const r2 = await fetch(baseUrl + path, opts);
         if (r2.ok) return r2.json() as Promise<T>;
       }
       this.clearTokens();
