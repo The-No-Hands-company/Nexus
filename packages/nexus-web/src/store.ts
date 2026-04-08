@@ -11,6 +11,37 @@ export function getServerUrlPlaceholder(): string {
   return import.meta.env.DEV ? "http://localhost:8080" : "https://your-nexus-server.com";
 }
 
+function orderMessages(messages: NxMessage[]): NxMessage[] {
+  return [...messages].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+}
+
+function updateReactionState(
+  messages: NxMessage[],
+  messageId: string,
+  emoji: string,
+  delta: number,
+): NxMessage[] {
+  return messages.map((m) => {
+    if (m.id !== messageId) return m;
+    const reactions = [...(m.reactions ?? [])];
+    const idx = reactions.findIndex((r) => r.emoji === emoji);
+    if (idx >= 0) {
+      const updated = [...reactions];
+      const nextCount = updated[idx].count + delta;
+      if (nextCount <= 0) {
+        updated.splice(idx, 1);
+      } else {
+        updated[idx] = { ...updated[idx], count: nextCount, me: delta > 0 ? true : false };
+      }
+      return { ...m, reactions: updated };
+    }
+    if (delta > 0) {
+      return { ...m, reactions: [...reactions, { emoji, count: 1, me: true }] };
+    }
+    return m;
+  });
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface Session {
@@ -238,11 +269,9 @@ export const useStore = create<Store>()(
         const s = get().session;
         if (!s) return;
         try {
-          const data = await apiFetch<NxMessage[]>(
-            s, `/channels/${channelId}/messages?limit=50`
-          );
+          const data = await apiFetch<NxMessage[]>(s, `/channels/${channelId}/messages?limit=50`);
           set((st) => ({
-            messages: { ...st.messages, [channelId]: Array.isArray(data) ? data : [] },
+            messages: { ...st.messages, [channelId]: orderMessages(Array.isArray(data) ? data : []) },
           }));
         } catch (e) { console.error("loadMessages", e); }
       },
@@ -251,14 +280,12 @@ export const useStore = create<Store>()(
         const s = get().session;
         if (!s) return;
         const existing = get().messages[channelId] ?? [];
-        const oldest = existing[existing.length - 1];
+        const oldest = existing[0];
         if (!oldest) return;
         try {
-          const data = await apiFetch<NxMessage[]>(
-            s, `/channels/${channelId}/messages?limit=50&before=${oldest.id}`
-          );
+          const data = await apiFetch<NxMessage[]>(s, `/channels/${channelId}/messages?limit=50&before=${oldest.id}`);
           set((st) => ({
-            messages: { ...st.messages, [channelId]: [...existing, ...data] },
+            messages: { ...st.messages, [channelId]: orderMessages([...(Array.isArray(data) ? data : []), ...existing]) },
           }));
         } catch (e) { console.error("loadMoreMessages", e); }
       },
@@ -268,10 +295,40 @@ export const useStore = create<Store>()(
       sendMessage: async (channelId, content, replyTo) => {
         const s = get().session;
         if (!s) return;
-        await apiFetch<NxMessage>(s, `/channels/${channelId}/messages`, {
-          method: "POST",
-          body: JSON.stringify({ content, reference_message_id: replyTo ?? undefined }),
-        });
+        const optimistic: NxMessage = {
+          id: `temp-${Date.now()}`,
+          content,
+          author_id: s.userId,
+          author_username: s.username,
+          author_avatar: s.avatar,
+          channel_id: channelId,
+          created_at: new Date().toISOString(),
+          edited_at: null,
+          attachments: [],
+          reactions: [],
+          reply_to: replyTo ?? null,
+        };
+        set((st) => ({
+          messages: { ...st.messages, [channelId]: orderMessages([...(st.messages[channelId] ?? []), optimistic]) },
+        }));
+        try {
+          const sent = await apiFetch<NxMessage>(s, `/channels/${channelId}/messages`, {
+            method: "POST",
+            body: JSON.stringify({ content, reference_message_id: replyTo ?? undefined }),
+          });
+          set((st) => {
+            const next = (st.messages[channelId] ?? []).map((m) => (m.id === optimistic.id ? sent : m));
+            return { messages: { ...st.messages, [channelId]: orderMessages(next) } };
+          });
+        } catch (e) {
+          set((st) => ({
+            messages: {
+              ...st.messages,
+              [channelId]: (st.messages[channelId] ?? []).filter((m) => m.id !== optimistic.id),
+            },
+          }));
+          throw e;
+        }
       },
 
       addReaction: async (channelId, messageId, emoji) => {
@@ -280,12 +337,24 @@ export const useStore = create<Store>()(
         await apiFetch(s, `/channels/${channelId}/messages/${messageId}/reactions/${encodeURIComponent(emoji)}/@me`, {
           method: "PUT",
         });
+        set((st) => ({
+          messages: {
+            ...st.messages,
+            [channelId]: updateReactionState(st.messages[channelId] ?? [], messageId, emoji, +1),
+          },
+        }));
       },
 
       deleteMessage: async (channelId, messageId) => {
         const s = get().session;
         if (!s) return;
         await apiFetch(s, `/channels/${channelId}/messages/${messageId}`, { method: "DELETE" });
+        set((st) => ({
+          messages: {
+            ...st.messages,
+            [channelId]: (st.messages[channelId] ?? []).filter((m) => m.id !== messageId),
+          },
+        }));
       },
 
       createServer: async (name) => {
@@ -376,7 +445,7 @@ export const useStore = create<Store>()(
         set((st) => {
           const prev = st.messages[msg.channel_id] ?? [];
           if (prev.some((m) => m.id === msg.id)) return {};
-          const updated = [msg, ...prev];
+          const updated = orderMessages([...prev, msg]);
           const isActive = st.activeChannelId === msg.channel_id;
           return {
             messages: { ...st.messages, [msg.channel_id]: updated },
