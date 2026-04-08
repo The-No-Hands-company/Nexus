@@ -12,7 +12,6 @@
 use axum::http::HeaderMap;
 use axum::{
     extract::{Extension, Path, State},
-    http::StatusCode,
     middleware,
     routing::{get, post},
     Json, Router,

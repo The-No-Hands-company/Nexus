@@ -28,8 +28,6 @@ use crate::{middleware::AuthContext, AppState};
 use crate::middleware::{check_rate_limit_with_fallback, extract_client_ip};
 use axum::http::HeaderMap;
 
-const USER_AGENT: &str = "user-agent";
-
 /// All moderation routes (require authentication).
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -518,7 +516,6 @@ async fn set_timeout(
 async fn lift_timeout(
     Extension(auth): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
     Path((server_id, target_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<serde_json::Value>> {
     let server = get_server_or_404(&state.db.pool, server_id).await?;

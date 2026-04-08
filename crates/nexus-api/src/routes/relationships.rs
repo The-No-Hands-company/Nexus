@@ -23,18 +23,16 @@ use axum::http::HeaderMap;
 use axum::{
     extract::{Extension, Path, Query, State},
     middleware,
-    routing::{delete, get, post},
+    routing::{get},
     Json, Router,
 };
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use nexus_common::{
     error::{NexusError, NexusResult},
-    gateway_event::GatewayEvent,
-    models::user::user_flags,
     models::relationship::RelationshipStatus,
     snowflake,
 };
-use nexus_db::repository::{audit_log, members, relationships, servers, users};
+use nexus_db::repository::{relationships, users};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::Arc;

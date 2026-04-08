@@ -13,7 +13,6 @@ use axum::{
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_db::repository::attachments;
 use serde::Serialize;
-use sha2::Digest;
 use std::sync::Arc;
 use uuid::Uuid;
 

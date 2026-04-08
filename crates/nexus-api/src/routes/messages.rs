@@ -308,51 +308,31 @@ async fn send_message(
     response["author_username"] = serde_json::Value::String(auth.username.clone());
 
     // Keep full-text index in sync after create.
-    let _ = state
-        .search
-        .index_message(nexus_db::search::MessageDocument {
-            id: msg.id.to_string(),
-            channel_id: msg.channel_id.to_string(),
-            server_id: channel.server_id.map(|x| x.to_string()),
-            author_id: msg.author_id.to_string(),
-            author_username: auth.username.clone(),
-            content: msg.content.clone(),
-            has_attachments: msg
-                .attachments
-                .as_array()
-                .map(|a| !a.is_empty())
-                .unwrap_or(false),
-            has_embeds: msg
-                .embeds
-                .as_array()
-                .map(|a| !a.is_empty())
-                .unwrap_or(false),
-            created_at: msg.created_at.timestamp(),
-        })
-        .await;
+    let doc = nexus_db::search::MessageDocument {
+        id: msg.id.to_string(),
+        channel_id: msg.channel_id.to_string(),
+        server_id: channel.server_id.map(|x| x.to_string()),
+        author_id: msg.author_id.to_string(),
+        author_username: auth.username.clone(),
+        content: msg.content.clone(),
+        has_attachments: msg
+            .attachments
+            .as_array()
+            .map(|a| !a.is_empty())
+            .unwrap_or(false),
+        has_embeds: msg
+            .embeds
+            .as_array()
+            .map(|a| !a.is_empty())
+            .unwrap_or(false),
+        created_at: msg.created_at.timestamp(),
+    };
+    let _ = state.search.sync_message_index(&state.db.pool, msg.id, doc.clone()).await;
 
     if state.db.scylla_enabled {
         let _ = scylla_outbox::enqueue_upsert_message(
             &state.db.pool,
-            &nexus_db::search::MessageDocument {
-                id: msg.id.to_string(),
-                channel_id: msg.channel_id.to_string(),
-                server_id: channel.server_id.map(|x| x.to_string()),
-                author_id: msg.author_id.to_string(),
-                author_username: auth.username.clone(),
-                content: msg.content.clone(),
-                has_attachments: msg
-                    .attachments
-                    .as_array()
-                    .map(|a| !a.is_empty())
-                    .unwrap_or(false),
-                has_embeds: msg
-                    .embeds
-                    .as_array()
-                    .map(|a| !a.is_empty())
-                    .unwrap_or(false),
-                created_at: msg.created_at.timestamp(),
-            },
+            &doc,
         )
         .await;
     }
@@ -617,7 +597,7 @@ async fn get_messages(
             .get(&row.id)
             .map(|set| set.iter().cloned().collect::<Vec<_>>())
             .unwrap_or_default();
-        result.push(message_with_author_to_json(row, &reaction_counts, &my_reactions));
+        result.push(message_with_author_to_json(row, reaction_counts, &my_reactions));
     }
 
     Ok(Json(result))
@@ -773,51 +753,31 @@ async fn edit_message(
     let updated = messages::update_message(&state.db.pool, message_id, content).await?;
 
     // Keep full-text index in sync after edit.
-    let _ = state
-        .search
-        .index_message(nexus_db::search::MessageDocument {
-            id: updated.id.to_string(),
-            channel_id: updated.channel_id.to_string(),
-            server_id: channel.server_id.map(|x| x.to_string()),
-            author_id: updated.author_id.to_string(),
-            author_username: auth.username.clone(),
-            content: updated.content.clone(),
-            has_attachments: updated
-                .attachments
-                .as_array()
-                .map(|a| !a.is_empty())
-                .unwrap_or(false),
-            has_embeds: updated
-                .embeds
-                .as_array()
-                .map(|a| !a.is_empty())
-                .unwrap_or(false),
-            created_at: updated.created_at.timestamp(),
-        })
-        .await;
+    let doc = nexus_db::search::MessageDocument {
+        id: updated.id.to_string(),
+        channel_id: updated.channel_id.to_string(),
+        server_id: channel.server_id.map(|x| x.to_string()),
+        author_id: updated.author_id.to_string(),
+        author_username: auth.username.clone(),
+        content: updated.content.clone(),
+        has_attachments: updated
+            .attachments
+            .as_array()
+            .map(|a| !a.is_empty())
+            .unwrap_or(false),
+        has_embeds: updated
+            .embeds
+            .as_array()
+            .map(|a| !a.is_empty())
+            .unwrap_or(false),
+        created_at: updated.created_at.timestamp(),
+    };
+    let _ = state.search.sync_message_index(&state.db.pool, updated.id, doc.clone()).await;
 
     if state.db.scylla_enabled {
         let _ = scylla_outbox::enqueue_upsert_message(
             &state.db.pool,
-            &nexus_db::search::MessageDocument {
-                id: updated.id.to_string(),
-                channel_id: updated.channel_id.to_string(),
-                server_id: channel.server_id.map(|x| x.to_string()),
-                author_id: updated.author_id.to_string(),
-                author_username: auth.username.clone(),
-                content: updated.content.clone(),
-                has_attachments: updated
-                    .attachments
-                    .as_array()
-                    .map(|a| !a.is_empty())
-                    .unwrap_or(false),
-                has_embeds: updated
-                    .embeds
-                    .as_array()
-                    .map(|a| !a.is_empty())
-                    .unwrap_or(false),
-                created_at: updated.created_at.timestamp(),
-            },
+            &doc,
         )
         .await;
     }
@@ -878,7 +838,7 @@ async fn delete_message(
     messages::delete_message(&state.db.pool, message_id).await?;
 
     // Keep full-text index in sync after delete.
-    let _ = state.search.delete_message(message_id).await;
+    let _ = state.search.sync_message_delete(&state.db.pool, message_id).await;
     if state.db.scylla_enabled {
         let _ = scylla_outbox::enqueue_delete_message(&state.db.pool, message_id).await;
     }
@@ -954,7 +914,7 @@ async fn bulk_delete_messages(
 
     // Keep full-text index in sync after bulk delete.
     for mid in &body.messages {
-        let _ = state.search.delete_message(*mid).await;
+        let _ = state.search.sync_message_delete(&state.db.pool, *mid).await;
         if state.db.scylla_enabled {
             let _ = scylla_outbox::enqueue_delete_message(&state.db.pool, *mid).await;
         }
@@ -1467,7 +1427,7 @@ async fn list_messages_from_scylla(
     let sql_meta_map = match messages::find_by_ids_map(&state.db.pool, &message_ids).await {
         Ok(rows) => {
             metrics::counter!(
-                "nexus_scylla_batch_lookup_total",
+                "nexus_scylla_read_total",
                 "kind" => "sql_meta",
                 "outcome" => "ok",
             )
@@ -1477,7 +1437,7 @@ async fn list_messages_from_scylla(
         Err(error) => {
             tracing::debug!(%channel_id, %error, "Scylla list read: SQL metadata batch lookup failed");
             metrics::counter!(
-                "nexus_scylla_batch_lookup_total",
+                "nexus_scylla_read_total",
                 "kind" => "sql_meta",
                 "outcome" => "error",
             )
@@ -1489,7 +1449,7 @@ async fn list_messages_from_scylla(
     let reaction_counts_map = match reactions::get_reaction_counts_for_messages(&state.db.pool, &message_ids).await {
         Ok(rows) => {
             metrics::counter!(
-                "nexus_scylla_batch_lookup_total",
+                "nexus_scylla_read_total",
                 "kind" => "reaction_counts",
                 "outcome" => "ok",
             )
@@ -1499,7 +1459,7 @@ async fn list_messages_from_scylla(
         Err(error) => {
             tracing::debug!(%channel_id, %error, "Scylla list read: reaction counts batch lookup failed");
             metrics::counter!(
-                "nexus_scylla_batch_lookup_total",
+                "nexus_scylla_read_total",
                 "kind" => "reaction_counts",
                 "outcome" => "error",
             )
@@ -1516,7 +1476,7 @@ async fn list_messages_from_scylla(
     .await {
         Ok(rows) => {
             metrics::counter!(
-                "nexus_scylla_batch_lookup_total",
+                "nexus_scylla_read_total",
                 "kind" => "user_reactions",
                 "outcome" => "ok",
             )
@@ -1526,7 +1486,7 @@ async fn list_messages_from_scylla(
         Err(error) => {
             tracing::debug!(%channel_id, %user_id, %error, "Scylla list read: user reactions batch lookup failed");
             metrics::counter!(
-                "nexus_scylla_batch_lookup_total",
+                "nexus_scylla_read_total",
                 "kind" => "user_reactions",
                 "outcome" => "error",
             )
@@ -1538,8 +1498,14 @@ async fn list_messages_from_scylla(
     let mut result = Vec::with_capacity(scylla_rows.len());
     let mut hydrated_count: usize = 0;
     for (parsed_message_id, parsed_author_id, author_username, content, created_at_epoch) in scylla_rows {
-        let reaction_counts = reaction_counts_map.get(&parsed_message_id);
-        let my_reactions = my_reactions_map.get(&parsed_message_id);
+        let reaction_counts = reaction_counts_map
+            .get(&parsed_message_id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let my_reactions = my_reactions_map
+            .get(&parsed_message_id)
+            .map(|set| set.iter().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
 
         let sql_meta = sql_meta_map.get(&parsed_message_id);
         if sql_meta.is_some() {
@@ -1600,11 +1566,11 @@ async fn list_messages_from_scylla(
             "mention_everyone": mention_everyone,
             "reference": reference,
             "thread_id": thread_id,
-            "reactions": reaction_counts.into_iter().flatten().map(|rc| {
+            "reactions": reaction_counts.iter().map(|rc| {
                 serde_json::json!({
                     "emoji": rc.emoji,
                     "count": rc.count,
-                    "me": my_reactions.map(|set| set.contains(&rc.emoji)).unwrap_or(false),
+                    "me": my_reactions.contains(&rc.emoji),
                 })
             }).collect::<Vec<_>>(),
             "created_at": chrono::DateTime::from_timestamp(created_at_epoch, 0).unwrap_or_else(Utc::now),
@@ -1679,7 +1645,7 @@ async fn get_message_from_scylla(
     let reaction_counts = match reactions::get_reaction_counts(&state.db.pool, message_id).await {
         Ok(rows) => {
             metrics::counter!(
-                "nexus_scylla_batch_lookup_total",
+                "nexus_scylla_read_total",
                 "kind" => "reaction_counts_single",
                 "outcome" => "ok",
             )
@@ -1689,7 +1655,7 @@ async fn get_message_from_scylla(
         Err(error) => {
             tracing::debug!(%channel_id, %message_id, %error, "Scylla get_message: reaction count lookup failed");
             metrics::counter!(
-                "nexus_scylla_batch_lookup_total",
+                "nexus_scylla_read_total",
                 "kind" => "reaction_counts_single",
                 "outcome" => "error",
             )
@@ -1706,7 +1672,7 @@ async fn get_message_from_scylla(
     .await {
         Ok(map) => {
             metrics::counter!(
-                "nexus_scylla_batch_lookup_total",
+                "nexus_scylla_read_total",
                 "kind" => "user_reactions_single",
                 "outcome" => "ok",
             )
@@ -1716,7 +1682,7 @@ async fn get_message_from_scylla(
         Err(error) => {
             tracing::debug!(%channel_id, %message_id, %user_id, %error, "Scylla get_message: user reaction lookup failed");
             metrics::counter!(
-                "nexus_scylla_batch_lookup_total",
+                "nexus_scylla_read_total",
                 "kind" => "user_reactions_single",
                 "outcome" => "error",
             )
@@ -1728,7 +1694,7 @@ async fn get_message_from_scylla(
     let sql_meta = match messages::find_by_id(&state.db.pool, message_id).await {
         Ok(row) => {
             metrics::counter!(
-                "nexus_scylla_batch_lookup_total",
+                "nexus_scylla_read_total",
                 "kind" => "sql_meta_single",
                 "outcome" => "ok",
             )
@@ -1738,7 +1704,7 @@ async fn get_message_from_scylla(
         Err(error) => {
             tracing::debug!(%channel_id, %message_id, %error, "Scylla get_message: SQL metadata lookup failed");
             metrics::counter!(
-                "nexus_scylla_batch_lookup_total",
+                "nexus_scylla_read_total",
                 "kind" => "sql_meta_single",
                 "outcome" => "error",
             )
@@ -1893,7 +1859,8 @@ async fn crosspost_message(
         });
     }
 
-    // Only someone with SEND_MESSAGES (for the OP) or MANAGE_MESSAGES may crosspost
+    // Only someone with SEND_MESSAGES (for the OP) or MANAGE_MESSAGES
+    // may crosspost
     let server_id = channel.server_id.ok_or(NexusError::MissingPermission {
         permission: "SEND_MESSAGES".into(),
     })?;
@@ -1907,11 +1874,11 @@ async fn crosspost_message(
         let member = members::find_member(&state.db.pool, auth.user_id, server_id)
             .await
             .map_err(|e| NexusError::Internal(e.into()))?
-            .ok_or(NexusError::MissingPermission { permission: "SEND_MESSAGES".into() })?;
+            .ok_or(NexusError::MissingPermission {
+                permission: "SEND_MESSAGES or MANAGE_MESSAGES".into(),
+            })?;
 
-        let all_roles = roles::list_server_roles(&state.db.pool, server_id)
-            .await
-            .map_err(|e| NexusError::Internal(e.into()))?;
+        let all_roles = roles::list_server_roles(&state.db.pool, server_id).await?;
 
         let base = all_roles
             .iter()
@@ -2079,9 +2046,7 @@ async fn add_channel_follower(
                     permission: "MANAGE_WEBHOOKS".into(),
                 })?;
 
-            let all_roles = roles::list_server_roles(&state.db.pool, target_server_id)
-                .await
-                .map_err(|e| NexusError::Internal(e.into()))?;
+            let all_roles = roles::list_server_roles(&state.db.pool, target_server_id).await?;
 
             let base = all_roles
                 .iter()
@@ -2210,7 +2175,7 @@ mod tests {
         // parse_mentions uses split_whitespace, so a mention glued to other
         // characters without spaces is treated as one token.
         // "<@uuid>foo" splits as one token, strip_prefix("<@") works but
-        // strip_suffix('>') fails because the token ends with "foo".
+        // strip_suffix('>') fails because the token doesn't end with '>'.
         let uid = Uuid::new_v4();
         let content = format!("<@{uid}>extra_text_no_space");
         // This should NOT extract the UUID because the token doesn't end with '>'

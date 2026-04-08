@@ -154,6 +154,10 @@ impl SearchClient {
         !matches!(self.backend, SearchBackend::Disabled)
     }
 
+    pub fn uses_search_sync_queue(&self) -> bool {
+        matches!(self.backend, SearchBackend::Meilisearch(_))
+    }
+
     // ── Bootstrap ─────────────────────────────────────────────────────────────
 
     pub async fn bootstrap_indexes(&self) -> Result<()> {
@@ -180,6 +184,19 @@ impl SearchClient {
             SearchBackend::Disabled => {}
         }
         Ok(())
+    }
+
+    pub async fn sync_message_index(
+        &self,
+        pool: &sqlx::AnyPool,
+        message_id: Uuid,
+        doc: MessageDocument,
+    ) -> Result<()> {
+        if self.uses_search_sync_queue() {
+            Self::enqueue_message_index(pool, message_id, &doc).await
+        } else {
+            self.index_message(doc).await
+        }
     }
 
     pub async fn index_messages_batch(&self, docs: Vec<MessageDocument>) -> Result<()> {
@@ -227,6 +244,18 @@ impl SearchClient {
             SearchBackend::Disabled => {}
         }
         Ok(())
+    }
+
+    pub async fn sync_message_delete(
+        &self,
+        pool: &sqlx::AnyPool,
+        message_id: Uuid,
+    ) -> Result<()> {
+        if self.uses_search_sync_queue() {
+            Self::enqueue_message_delete(pool, message_id).await
+        } else {
+            self.delete_message(message_id).await
+        }
     }
 
     // ── Search ────────────────────────────────────────────────────────────────

@@ -346,7 +346,7 @@ fn hkdf_expand(prk: &[u8], info: &[u8], length: usize) -> Vec<u8> {
     result
 }
 
-fn build_info(label: &str, auth: &[u8], recv_pub: &[u8], sender_pub: &[u8]) -> Vec<u8> {
+fn build_info(label: &str, _auth: &[u8], recv_pub: &[u8], sender_pub: &[u8]) -> Vec<u8> {
     // "WebPush: <label>\0<receiver_pub_len><receiver_pub><sender_pub_len><sender_pub>"
     let mut info = Vec::new();
     info.extend_from_slice(b"WebPush: ");

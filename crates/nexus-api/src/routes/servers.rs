@@ -23,8 +23,6 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
-use rand::{distr::Alphanumeric, rngs::OsRng, Rng};
-use rand_core::OsRng as _;
 
 /// Server routes.
 pub fn router() -> Router<Arc<AppState>> {
@@ -51,9 +49,7 @@ pub fn router() -> Router<Arc<AppState>> {
 /// of entropy — resistant to brute-force even without rate limiting, and
 /// consistent with Slack/Discord invite code strength.
 fn generate_invite_code() -> String {
-    use rand::distr::Alphanumeric;
-    use rand::distr::Distribution;
-    use rand::Rng;
+    use rand::distr::{Alphanumeric, Distribution};
     Alphanumeric
         .sample_iter(rand::rng())
         .take(12)

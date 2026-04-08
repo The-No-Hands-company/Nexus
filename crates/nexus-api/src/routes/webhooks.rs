@@ -19,7 +19,7 @@ use nexus_common::{
     },
     snowflake,
 };
-use nexus_db::repository::{audit_log, channels, messages, webhooks};
+use nexus_db::repository::{audit_log, channels, webhooks};
 use rand::distr::Alphanumeric;
 use rand::Rng;
 use std::sync::Arc;

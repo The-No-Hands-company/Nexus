@@ -17,8 +17,6 @@ use axum::{
 };
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_db::repository::{sessions, two_fa, users};
-use rand::Rng;
-use rand::distr::{Alphanumeric, Distribution};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use totp_rs::{Algorithm, Secret, TOTP};
@@ -73,9 +71,7 @@ fn totp_from_secret(secret_b32: &str, username: &str) -> Result<TOTP, NexusError
 fn generate_raw_backup_codes() -> Vec<String> {
     // Use rand::rng() — thread-local RNG that is properly seeded.
     // 10 codes × 12 alphanumeric chars ≈ 71 bits entropy per code.
-    use rand::distr::Alphanumeric;
-    use rand::distr::Distribution;
-    use rand::Rng;
+    use rand::distr::{Alphanumeric, Distribution};
     Alphanumeric
         .sample_iter(rand::rng())
         .take(BACKUP_CODE_LEN * BACKUP_CODE_COUNT)

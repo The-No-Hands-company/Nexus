@@ -635,6 +635,8 @@ async fn run_server(
             loop {
                 tokio::select! {
                     _ = interval.tick() => {
+                        let _ = search.process_sync_queue(&pool).await;
+
                         // 1. Auto-end polls
                         #[derive(sqlx::FromRow)]
                         struct PollEndRow { id: String, channel_id: String }
@@ -723,7 +725,7 @@ async fn run_server(
                                     .unwrap_or_default(),
                             };
 
-                            if let Err(e) = search.index_message(doc.clone()).await {
+                            if let Err(e) = search.sync_message_index(&pool, msg_id, doc.clone()).await {
                                 tracing::warn!(error = %e, sm_id = %sm.id, "failed to index dispatched scheduled message");
                             }
 
@@ -757,11 +759,12 @@ async fn run_server(
                         #[derive(sqlx::FromRow)]
                         struct ExpiredMessageRow {
                             id: String,
+                            channel_id: String,
                         }
                         let deleted: Result<Vec<ExpiredMessageRow>, _> = sqlx::query_as(
                             "DELETE FROM messages \
                              WHERE expires_at IS NOT NULL AND expires_at <= NOW() \
-                             RETURNING id::text AS id"
+                             RETURNING id::text AS id, channel_id::text AS channel_id"
                         )
                         .fetch_all(&pool)
                         .await;
@@ -769,22 +772,41 @@ async fn run_server(
                             Ok(rows) if !rows.is_empty() => {
                                 let mut search_deleted = 0usize;
                                 let mut scylla_enqueued = 0usize;
+                                let mut gateway_emitted = 0usize;
                                 for row in &rows {
-                                    if let Ok(message_id) = row.id.parse::<uuid::Uuid>() {
-                                        if search.delete_message(message_id).await.is_ok() {
-                                            search_deleted += 1;
-                                        }
-                                        if scylla_enabled {
-                                            if nexus_db::repository::scylla_outbox::enqueue_delete_message(&pool, message_id).await.is_ok() {
-                                                scylla_enqueued += 1;
-                                            }
+                                    let Ok(message_id) = row.id.parse::<uuid::Uuid>() else {
+                                        continue;
+                                    };
+                                    let Ok(channel_id) = row.channel_id.parse::<uuid::Uuid>() else {
+                                        continue;
+                                    };
+
+                                    if search.sync_message_delete(&pool, message_id).await.is_ok() {
+                                        search_deleted += 1;
+                                    }
+                                    if scylla_enabled {
+                                        if nexus_db::repository::scylla_outbox::enqueue_delete_message(&pool, message_id).await.is_ok() {
+                                            scylla_enqueued += 1;
                                         }
                                     }
+
+                                    let _ = gw_tx.send(nexus_common::gateway_event::GatewayEvent {
+                                        event_type: nexus_common::gateway_event::event_types::MESSAGE_DELETE.into(),
+                                        data: serde_json::json!({
+                                            "id": row.id,
+                                            "channel_id": row.channel_id,
+                                        }),
+                                        server_id: None,
+                                        channel_id: Some(channel_id),
+                                        user_id: None,
+                                    });
+                                    gateway_emitted += 1;
                                 }
                                 tracing::info!(
                                     count = rows.len(),
                                     search_deleted,
                                     scylla_enqueued,
+                                    gateway_emitted,
                                     subsystem = "disappearing_messages",
                                     "purged expired messages"
                                 );
