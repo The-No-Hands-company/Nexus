@@ -158,10 +158,7 @@ export default function ProfileScreen() {
               onPress={async () => {
                 try {
                   await api.updateMe({ presence: p });
-                  if (store.session) {
-                    store.session = { ...store.session, user: { ...store.session.user, presence: p } };
-                    store.notify();
-                  }
+                  store.updatePresence(p);
                 } catch {}
               }}
             >

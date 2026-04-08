@@ -59,6 +59,27 @@ function updateReactionState(
   });
 }
 
+function mergeMessageUpdate(messages: Message[], update: Partial<Message> & { id: string; channelId: string }): Message[] {
+  const idx = messages.findIndex((m) => m.id === update.id);
+  if (idx < 0) return messages;
+  const current = messages[idx];
+  const next: Message = {
+    ...current,
+    ...update,
+    reactions: update.reactions ?? current.reactions,
+    embeds: update.embeds ?? current.embeds,
+    attachments: update.attachments ?? current.attachments,
+  };
+  const nextMessages = [...messages];
+  nextMessages[idx] = next;
+  return nextMessages;
+}
+
+function patchSessionUser(session: Session | null, patch: Partial<User>): Session | null {
+  if (!session) return session;
+  return { ...session, user: { ...session.user, ...patch } };
+}
+
 class Store {
   session: Session | null = null;
   serverUrl = initialServerOrigin();
@@ -278,6 +299,15 @@ class Store {
       this.messages = { ...this.messages, [channelId]: sortMessages(merged) };
       this.emit();
     } catch (e) { console.error("loadMessages error", e); }
+  }
+
+  updateSessionUser(patch: Partial<User>) {
+    this.session = patchSessionUser(this.session, patch);
+    this.emit();
+  }
+
+  updatePresence(presence: User["presence"]) {
+    this.updateSessionUser({ presence });
   }
 
   async loadOlderMessages() {
