@@ -34,7 +34,7 @@ export default function ServersScreen() {
 
   async function handleSelectServer(server: typeof store.servers[0]) {
     await store.selectServer(server.id);
-    router.push("/server/[id]" as any);
+    router.push(`/server/${server.id}`);
   }
 
   async function handleCreateServer() {
@@ -43,7 +43,7 @@ export default function ServersScreen() {
     try {
       const server = await store.createServer(newName.trim());
       await store.selectServer(server.id);
-      router.push("/server/[id]" as any);
+      router.push(`/server/${server.id}`);
     } catch (e: any) {
       Alert.alert("Error", e.message);
     } finally {

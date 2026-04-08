@@ -213,6 +213,14 @@ export default function ProfileScreen() {
           <InfoRow label="Servers joined" value={String(store.servers.length)} />
         </Section>
 
+        {/* App */}
+        <Section title="App">
+          <Pressable style={s.actionRow} onPress={() => router.push("/settings")}> 
+            <Text style={s.actionLabel}>Open Full Settings</Text>
+            <Text style={s.chevron}>›</Text>
+          </Pressable>
+        </Section>
+
         {/* Danger */}
         <Pressable style={s.logoutBtn} onPress={handleLogout}>
           <Text style={s.logoutText}>Sign Out</Text>

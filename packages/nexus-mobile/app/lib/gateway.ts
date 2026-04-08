@@ -8,6 +8,7 @@ import type { Message } from "./api";
 
 export type GatewayEventType =
   | "MESSAGE_CREATE" | "MESSAGE_UPDATE" | "MESSAGE_DELETE"
+  | "MESSAGE_REACTION_ADD" | "MESSAGE_REACTION_REMOVE"
   | "TYPING_START" | "TYPING_STOP"
   | "PRESENCE_UPDATE" | "CHANNEL_UPDATE" | "CHANNEL_DELETE"
   | "GUILD_UPDATE" | "GUILD_DELETE"
@@ -179,36 +180,22 @@ export class GatewayClient {
       }
       case "MESSAGE_DELETE": {
         const del = d as { id: string; channel_id: string };
-        const msgs = store.messages[del.channel_id];
-        if (msgs) {
-          store.messages = {
-            ...store.messages,
-            [del.channel_id]: msgs.filter(m => m.id !== del.id),
-          };
-        }
+        store.onMessageDelete(del.channel_id, del.id);
         break;
       }
       case "TYPING_START": {
         const typing = d as { channel_id: string; username: string };
-        if (store.activeChannelId === typing.channel_id) {
-          const current = store.typingUsers[typing.channel_id] ?? [];
-          if (!current.includes(typing.username)) {
-            store.typingUsers = {
-              ...store.typingUsers,
-              [typing.channel_id]: [...current, typing.username],
-            };
-          }
-          // Auto-clear after 5s
-          setTimeout(() => {
-            const users = store.typingUsers[typing.channel_id] ?? [];
-            if (users.includes(typing.username)) {
-              store.typingUsers = {
-                ...store.typingUsers,
-                [typing.channel_id]: users.filter(u => u !== typing.username),
-              };
-            }
-          }, 5000);
-        }
+        store.onTypingStart(typing.channel_id, typing.username);
+        break;
+      }
+      case "MESSAGE_REACTION_ADD": {
+        const raw = d as { message_id: string; channel_id: string; user_id: string; emoji: string };
+        store.onReactionUpdate(raw.channel_id, raw.message_id, raw.emoji, 1, raw.user_id === store.session?.user.id);
+        break;
+      }
+      case "MESSAGE_REACTION_REMOVE": {
+        const raw = d as { message_id: string; channel_id: string; user_id: string; emoji: string };
+        store.onReactionUpdate(raw.channel_id, raw.message_id, raw.emoji, -1, raw.user_id === store.session?.user.id);
         break;
       }
     }

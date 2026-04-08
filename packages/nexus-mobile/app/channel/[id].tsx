@@ -118,13 +118,9 @@ export default function ChannelScreen() {
 
   // Gateway message handler
   useEffect(() => {
-    const unsub = gateway.on("MESSAGE_CREATE", (d) => {
-      const msg = d as unknown as Message;
-      if (msg.channelId === id) {
-        store.appendMessage(msg);
-      }
-    });
-    return () => { void unsub(); };
+    return () => {
+      // No-op: gateway updates now flow through the shared store reducer path.
+    };
   }, [id]);
 
   async function handleSend() {

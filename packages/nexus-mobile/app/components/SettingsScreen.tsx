@@ -8,23 +8,56 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { store, api } from "../lib/store";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+
+function nextOption(current: string, options: string[]): string {
+  if (!options.length) return current;
+  const index = options.indexOf(current);
+  return options[(index + 1) % options.length];
+}
 
 interface SettingSection {
   title: string;
   items: SettingItem[];
 }
 
-interface SettingItem {
+interface SettingBaseItem {
   id: string;
   label: string;
-  type: "toggle" | "select" | "button" | "text" | "danger";
-  value?: any;
-  options?: string[];
-  onPress?: () => void;
-  onChange?: (val: any) => void;
   description?: string;
 }
+
+interface ToggleSettingItem extends SettingBaseItem {
+  type: "toggle";
+  value: boolean;
+  onChange?: (val: boolean) => void;
+}
+
+interface SelectSettingItem extends SettingBaseItem {
+  type: "select";
+  value: string;
+  options: string[];
+  onChange: (val: string) => void;
+}
+
+interface TextSettingItem extends SettingBaseItem {
+  type: "text";
+  value?: string | null;
+  onPress?: () => void;
+  onChange?: (val: string) => void;
+}
+
+interface ButtonSettingItem extends SettingBaseItem {
+  type: "button";
+  value?: string;
+  onPress: () => void;
+}
+
+interface DangerSettingItem extends SettingBaseItem {
+  type: "danger";
+  onPress: () => void;
+}
+
+type SettingItem = ToggleSettingItem | SelectSettingItem | TextSettingItem | ButtonSettingItem | DangerSettingItem;
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -161,8 +194,7 @@ export default function SettingsScreen() {
           id: "2fa",
           label: "Two-Factor Authentication",
           type: "toggle",
-          value: user?.totpEnabled,
-          onPress: () => setActiveModal("2fa"),
+          value: !!user?.totpEnabled,
           description: "Add an extra layer of security"
         },
         {
@@ -190,7 +222,7 @@ export default function SettingsScreen() {
           type: "select",
           value: store.settings.dmPermission || "everyone",
           options: ["everyone", "friends", "nobody"],
-          onChange: (val) => store.updateSettings({ dmPermission: val })
+          onChange: (val: string) => store.updateSettings({ dmPermission: val as "everyone" | "friends" | "nobody" })
         },
         {
           id: "read_receipts",
@@ -317,7 +349,14 @@ export default function SettingsScreen() {
 
       case "select":
         return (
-          <Pressable style={styles.settingRow} onPress={() => setActiveModal(`select_${item.id}`)}>
+          <Pressable
+            style={styles.settingRow}
+            onPress={() => {
+              if (!item.options?.length || !item.onChange) return;
+              const current = String(item.value ?? "");
+              item.onChange(nextOption(current, item.options));
+            }}
+          >
             <View style={styles.settingInfo}>
               <Text style={styles.settingLabel}>{item.label}</Text>
             </View>

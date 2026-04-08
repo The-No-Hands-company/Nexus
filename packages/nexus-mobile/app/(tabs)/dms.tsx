@@ -34,7 +34,7 @@ export default function DMsScreen() {
     try {
       const dm = await store.createDM(userId);
       await store.selectDM(dm.id);
-      router.push("/channel/[id]" as any);
+      router.push(`/channel/${dm.id}`);
     } catch (e: any) {
       Alert.alert("Error", e.message);
     }
@@ -53,7 +53,7 @@ export default function DMsScreen() {
 
   const renderDM = ({ item }: { item: typeof store.dmChannels[0] }) => (
     <Pressable
-      onPress={async () => { await store.selectDM(item.id); router.push("/channel/[id]" as any); }}
+      onPress={async () => { await store.selectDM(item.id); router.push(`/channel/${item.id}`); }}
       style={styles.dmRow}
     >
       <View style={styles.avatar}>

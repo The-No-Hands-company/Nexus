@@ -59,6 +59,20 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="search"
+        options={{
+          title: "Search",
+          tabBarIcon: ({ color }) => <Text style={{ fontSize: 20, color }}>⌕</Text>,
+        }}
+      />
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: "Settings",
+          tabBarIcon: ({ color }) => <Text style={{ fontSize: 20, color }}>⚙</Text>,
+        }}
+      />
+      <Tabs.Screen
         name="profile"
         options={{
           title: "Profile",

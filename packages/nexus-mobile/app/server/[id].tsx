@@ -74,9 +74,16 @@ export default function ServerScreen() {
         renderItem={({ item }) => {
           const icon = CHANNEL_ICONS[item.kind] ?? CHANNEL_ICONS.default;
           const isUnread = !!store.unreadChannels[item.id];
+          const isVoice = item.kind === "voice" || item.kind === "stage";
           return (
             <Pressable
-              onPress={() => handleSelectChannel(item)}
+              onPress={() => {
+                if (isVoice) {
+                  store.joinVoice(item.id).then(() => router.push(`/voice/${item.id}`));
+                  return;
+                }
+                handleSelectChannel(item);
+              }}
               style={[styles.channelRow, isUnread && styles.channelRowUnread]}
             >
               <Text style={[styles.channelIcon, item.kind === "voice" && styles.voiceIcon]}>{icon}</Text>

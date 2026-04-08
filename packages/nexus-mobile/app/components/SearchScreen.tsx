@@ -100,10 +100,10 @@ export default function SearchScreen() {
     if (result.type === "messages" && result.channelId) {
       router.push(`/channel/${result.channelId}`);
     } else if (result.type === "users") {
-      router.push(`/user/${result.id}`);
+      router.push("/(tabs)/profile");
     } else if (result.type === "servers" && result.serverId) {
-      api.joinServer(result.serverId).then(() => {
-        store.servers = [...store.servers, { id: result.serverId!, name: result.title, ownerId: "", icon: undefined }];
+      api.joinServer(result.serverId).then(async () => {
+        await store.selectServer(result.serverId!);
         router.push(`/server/${result.serverId}`);
       }).catch(console.error);
     }

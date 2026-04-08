@@ -23,6 +23,42 @@ function initialServerOrigin(): string {
   return getDefaultServerOrigin() || "";
 }
 
+function sortMessages(messages: Message[]): Message[] {
+  return [...messages].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+}
+
+function updateReactionState(
+  messages: Message[],
+  messageId: string,
+  emoji: string,
+  delta: number,
+  mine: boolean,
+): Message[] {
+  return messages.map((m) => {
+    if (m.id !== messageId) return m;
+    const reactions = [...(m.reactions ?? [])];
+    const idx = reactions.findIndex((r) => r.emoji === emoji);
+    if (idx >= 0) {
+      const updated = [...reactions];
+      const nextCount = updated[idx].count + delta;
+      if (nextCount <= 0) {
+        updated.splice(idx, 1);
+      } else {
+        updated[idx] = {
+          ...updated[idx],
+          count: nextCount,
+          me: delta > 0 ? mine || updated[idx].me : (mine ? false : updated[idx].me),
+        };
+      }
+      return { ...m, reactions: updated };
+    }
+    if (delta > 0) {
+      return { ...m, reactions: [...reactions, { emoji, count: 1, me: mine }] };
+    }
+    return m;
+  });
+}
+
 class Store {
   session: Session | null = null;
   serverUrl = initialServerOrigin();
@@ -82,15 +118,13 @@ class Store {
         AsyncStorage.getItem(STORAGE_KEY_SETTINGS),
         AsyncStorage.getItem(STORAGE_KEY_SERVER_URL),
       ]);
-      const savedServerUrl = typeof serverUrlJson === "string" ? JSON.parse(serverUrlJson) : null;
-      if (typeof savedServerUrl === "string" && savedServerUrl.trim()) {
-        this.serverUrl = savedServerUrl.trim().replace(/\/$/, "");
-      } else {
-        this.serverUrl = initialServerOrigin();
+      if (serverUrlJson) {
+        const savedServerUrl = JSON.parse(serverUrlJson);
+        if (typeof savedServerUrl === "string" && savedServerUrl.trim()) {
+          this.serverUrl = savedServerUrl.trim().replace(/\/$/, "");
+        }
       }
-      if (this.serverUrl) {
-        api.setBaseUrl(this.serverUrl);
-      }
+      api.setBaseUrl(this.serverUrl);
       if (sessionJson) {
         const saved: Session = JSON.parse(sessionJson);
         api.setTokens(saved.accessToken, saved.refreshToken);
@@ -106,11 +140,11 @@ class Store {
   }
 
   async setServerUrl(url: string) {
-    const normalized = url.trim();
+    const normalized = normalizeApiBaseUrl(url).replace(/\/api\/v1$/, "");
     if (!normalized) {
       throw new Error("Server URL is required");
     }
-    this.serverUrl = normalizeApiBaseUrl(normalized).replace(/\/api\/v1$/, "");
+    this.serverUrl = normalized;
     api.setBaseUrl(this.serverUrl);
     await AsyncStorage.setItem(STORAGE_KEY_SERVER_URL, JSON.stringify(this.serverUrl)).catch(
       e => console.error("persistServerUrl error", e),
@@ -147,6 +181,7 @@ class Store {
       await this.loadInitialData();
     } catch (e: unknown) {
       this.error = e instanceof Error ? e.message : "Login failed";
+      throw e;
     } finally {
       this.loading = false; this.emit();
     }
@@ -161,6 +196,7 @@ class Store {
       await this.loadInitialData();
     } catch (e: unknown) {
       this.error = e instanceof Error ? e.message : "Registration failed";
+      throw e;
     } finally {
       this.loading = false; this.emit();
     }
@@ -173,6 +209,11 @@ class Store {
     this.channels = []; this.activeChannelId = null;
     this.messages = {}; this.dmChannels = [];
     this.relationships = []; this.members = {};
+    this.typingUsers = {};
+    this.unreadChannels = {};
+    this.voiceJoinedChannelId = null;
+    this.voiceMuted = false;
+    this.voiceDeafened = false;
     this._persistSession();
     this.emit();
   }
@@ -232,12 +273,9 @@ class Store {
   async loadMessages(channelId: string, before?: string) {
     try {
       const msgs = await api.getMessages(channelId, before);
-      if (before) {
-        const existing = this.messages[channelId] ?? [];
-        this.messages = { ...this.messages, [channelId]: [...existing, ...msgs] };
-      } else {
-        this.messages = { ...this.messages, [channelId]: msgs };
-      }
+      const existing = this.messages[channelId] ?? [];
+      const merged = before ? [...msgs, ...existing] : msgs;
+      this.messages = { ...this.messages, [channelId]: sortMessages(merged) };
       this.emit();
     } catch (e) { console.error("loadMessages error", e); }
   }
@@ -250,79 +288,92 @@ class Store {
   }
 
   async sendMessage(content: string, replyTo?: string) {
-    if (!this.activeChannelId) return;
+    if (!this.activeChannelId || !this.session) return;
     const optimistic: Message = {
-      id: "temp-" + Date.now(), channelId: this.activeChannelId,
-      authorId: this.session!.user.id, authorUsername: this.session!.user.username,
-      authorAvatar: this.session!.user.avatar, content, createdAt: new Date().toISOString(), replyTo,
+      id: "temp-" + Date.now(),
+      channelId: this.activeChannelId,
+      authorId: this.session.user.id,
+      authorUsername: this.session.user.username,
+      authorAvatar: this.session.user.avatar,
+      content,
+      createdAt: new Date().toISOString(),
+      replyTo,
     };
-    const msgs = [optimistic, ...(this.messages[this.activeChannelId] ?? [])];
-    this.messages = { ...this.messages, [this.activeChannelId]: msgs };
-    this.emit();
+    this.onMessageCreate(optimistic);
     try {
       const sent = await api.sendMessage(this.activeChannelId, content, replyTo);
-      const updated = this.messages[this.activeChannelId].map(m => m.id === optimistic.id ? sent : m);
-      this.messages = { ...this.messages, [this.activeChannelId]: updated };
+      const current = this.messages[this.activeChannelId] ?? [];
+      const updated = current.map(m => m.id === optimistic.id ? sent : m);
+      this.messages = { ...this.messages, [this.activeChannelId]: sortMessages(updated) };
       this.emit();
     } catch {
+      const current = this.messages[this.activeChannelId] ?? [];
       this.messages = {
         ...this.messages,
-        [this.activeChannelId]: this.messages[this.activeChannelId].filter(m => m.id !== optimistic.id),
+        [this.activeChannelId]: current.filter(m => m.id !== optimistic.id),
       };
       this.emit();
     }
   }
 
-  appendMessage(msg: Message) {
+  onMessageCreate(msg: Message) {
     const existing = this.messages[msg.channelId] ?? [];
     if (existing.some(m => m.id === msg.id)) return;
-    const msgs = [msg, ...existing];
-    this.messages = { ...this.messages, [msg.channelId]: msgs };
     const unread = { ...this.unreadChannels };
     if (this.activeChannelId !== msg.channelId) unread[msg.channelId] = true;
     this.unreadChannels = unread;
+    this.messages = { ...this.messages, [msg.channelId]: sortMessages([...existing, msg]) };
     this.emit();
+  }
+
+  onMessageDelete(channelId: string, messageId: string) {
+    const existing = this.messages[channelId] ?? [];
+    this.messages = { ...this.messages, [channelId]: existing.filter(m => m.id !== messageId) };
+    this.emit();
+  }
+
+  onTypingStart(channelId: string, username: string) {
+    const current = this.typingUsers[channelId] ?? [];
+    if (!current.includes(username)) {
+      this.typingUsers = { ...this.typingUsers, [channelId]: [...current, username] };
+      this.emit();
+    }
+    setTimeout(() => {
+      const users = this.typingUsers[channelId] ?? [];
+      if (users.includes(username)) {
+        this.typingUsers = { ...this.typingUsers, [channelId]: users.filter(u => u !== username) };
+        this.emit();
+      }
+    }, 5000);
+  }
+
+  onReactionUpdate(channelId: string, messageId: string, emoji: string, delta: number, mine: boolean) {
+    const existing = this.messages[channelId] ?? [];
+    this.messages = {
+      ...this.messages,
+      [channelId]: updateReactionState(existing, messageId, emoji, delta, mine),
+    };
+    this.emit();
+  }
+
+  appendMessage(msg: Message) {
+    this.onMessageCreate(msg);
   }
 
   prependOlderMessages(channelId: string, msgs: Message[]) {
     const existing = this.messages[channelId] ?? [];
-    this.messages = { ...this.messages, [channelId]: [...existing, ...msgs] };
+    this.messages = { ...this.messages, [channelId]: sortMessages([...msgs, ...existing]) };
     this.emit();
   }
 
   async addReaction(channelId: string, messageId: string, emoji: string) {
     await api.addReaction(channelId, messageId, emoji);
-    this.toggleReaction(channelId, messageId, emoji, true);
+    this.onReactionUpdate(channelId, messageId, emoji, 1, true);
   }
 
   async removeReaction(channelId: string, messageId: string, emoji: string) {
     await api.removeReaction(channelId, messageId, emoji);
-    this.toggleReaction(channelId, messageId, emoji, false);
-  }
-
-  private toggleReaction(channelId: string, messageId: string, emoji: string, add: boolean) {
-    const msgs = this.messages[channelId];
-    if (!msgs) return;
-    this.messages = {
-      ...this.messages,
-      [channelId]: msgs.map(m => {
-        if (m.id !== messageId) return m;
-        const reactions = [...(m.reactions ?? [])];
-        const idx = reactions.findIndex(r => r.emoji === emoji);
-        if (add) {
-          if (idx >= 0) { reactions[idx] = { ...reactions[idx], count: reactions[idx].count + 1, me: true }; }
-          else { reactions.push({ emoji, count: 1, me: true }); }
-        } else {
-          if (idx >= 0) {
-            const updated = { ...reactions[idx], count: reactions[idx].count - 1 };
-            if (updated.count <= 0) reactions.splice(idx, 1);
-            else reactions[idx] = updated;
-          }
-        }
-        return { ...m, reactions };
-      }),
-    };
-    this.emit();
+    this.onReactionUpdate(channelId, messageId, emoji, -1, true);
   }
 
   async createChannel(serverId: string, name: string, kind: Channel["kind"] = "text") {
