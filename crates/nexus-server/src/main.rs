@@ -32,6 +32,7 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 
 mod import_worker;
+mod nexus_cloud;
 mod scylla_sink;
 
 // ── CLI ───────────────────────────────────────────────────────────────────────
@@ -420,6 +421,35 @@ async fn run_server(
             // Broadcast to all servers; ignore error if all receivers already dropped.
             let _ = tx.send(());
         });
+    }
+
+    // ── Nexus Cloud registration (non-blocking best-effort) ─────────────────
+    if let (Ok(cloud_url), Ok(public_url)) = (
+        std::env::var("NEXUS_CLOUD_URL"),
+        std::env::var("PUBLIC_URL"),
+    ) {
+        let api_key = std::env::var("NEXUS_CLOUD_API_KEY").unwrap_or_default();
+        {
+            let cu = cloud_url.clone();
+            let pu = public_url.clone();
+            let ak = api_key.clone();
+            tokio::spawn(async move { nexus_cloud::register_with_cloud(&pu, &cu, &ak).await });
+        }
+        {
+            let mut hb_rx = shutdown_tx.subscribe();
+            tokio::spawn(async move {
+                let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop {
+                    tokio::select! {
+                        _ = interval.tick() => {
+                            nexus_cloud::send_heartbeat(&cloud_url, &api_key, &public_url).await;
+                        }
+                        _ = hb_rx.recv() => break,
+                    }
+                }
+            });
+        }
     }
 
     // ── Import worker (Phase 19-01) ─────────────────────────────────────────
