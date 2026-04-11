@@ -581,7 +581,7 @@ pub fn extract_client_ip(headers: &axum::http::HeaderMap) -> String {
 ///
 /// Headers applied:
 /// - `X-Content-Type-Options: nosniff` — prevents MIME sniffing
-/// - `X-Frame-Options: DENY` — prevents clickjacking
+/// - `X-Frame-Options: SAMEORIGIN` — allows embedding by same origin or Cloud portal
 /// - `X-XSS-Protection: 1; mode=block` — legacy XSS protection
 /// - `Referrer-Policy: strict-origin-when-cross-origin`
 /// - `Permissions-Policy` — disables camera, mic, geolocation
@@ -605,7 +605,7 @@ pub async fn security_headers(request: Request, next: Next) -> Response {
     );
     set!(
         axum::http::header::HeaderName::from_static("x-frame-options"),
-        "DENY"
+        "SAMEORIGIN"
     );
     set!(
         axum::http::header::HeaderName::from_static("x-xss-protection"),
@@ -633,7 +633,7 @@ pub async fn security_headers(request: Request, next: Next) -> Response {
          font-src 'self'; \
          media-src 'self' blob:; \
          worker-src 'self' blob:; \
-         frame-ancestors 'none'"
+         frame-ancestors *"
     );
 
     response
