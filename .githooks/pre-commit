@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+HOOK_BIN="/run/media/zajferx/Data/dev/The-No-hands-Company/projects/Active/Nexus-Systems/.venv/bin/detect-secrets-hook"
+
+staged_files=$(git diff --cached --name-only --diff-filter=ACM)
+if [[ -z "${staged_files}" ]]; then
+  exit 0
+fi
+
+if echo "${staged_files}" | rg -n '(^|/)\.env($|\.)|vite\.config\.ts\.timestamp-.*\.mjs$' >/dev/null; then
+  echo "Blocked: .env or vite timestamp temp file detected in staged changes."
+  exit 1
+fi
+
+if [[ ! -x "${HOOK_BIN}" ]]; then
+  echo "Missing detect-secrets hook binary at ${HOOK_BIN}."
+  exit 1
+fi
+
+# shellcheck disable=SC2086
+"${HOOK_BIN}" ${staged_files}
