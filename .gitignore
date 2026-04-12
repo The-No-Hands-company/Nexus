@@ -39,6 +39,7 @@ out/
 .nuxt/
 .output/
 *.tsbuildinfo
+packages/nexus-web/vite.config.ts.timestamp-*.mjs
 
 # ── Logs ──────────────────────────────────────────────────────────────────────
 *.log
