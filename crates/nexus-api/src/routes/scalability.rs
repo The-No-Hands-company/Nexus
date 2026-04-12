@@ -31,7 +31,7 @@ pub fn router() -> Router<Arc<AppState>> {
             get(list_scaling_configs_handler).post(upsert_scaling_config_handler),
         )
         .route(
-            "/admin/scaling-configs/:config_id",
+            "/admin/scaling-configs/{config_id}",
             get(get_scaling_config_handler),
         )
         // SFU nodes
@@ -41,16 +41,16 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/admin/federation-routes", get(list_federation_routes_handler))
         // Voice quality
         .route(
-            "/channels/:channel_id/voice-quality-logs",
+            "/channels/{channel_id}/voice-quality-logs",
             get(list_voice_quality_logs_handler).post(create_voice_quality_log_handler),
         )
         // Large-server tools
         .route(
-            "/servers/:server_id/prune-rules",
+            "/servers/{server_id}/prune-rules",
             get(get_prune_rule_handler).post(upsert_prune_rule_handler),
         )
         .route(
-            "/channels/:channel_id/slow-mode-overrides",
+            "/channels/{channel_id}/slow-mode-overrides",
             get(list_slow_mode_overrides_handler).post(upsert_slow_mode_override_handler),
         )
         // Ops metrics

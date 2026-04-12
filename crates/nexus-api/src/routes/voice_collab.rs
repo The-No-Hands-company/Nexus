@@ -25,7 +25,7 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         // Video layouts
         .route(
-            "/channels/:channel_id/video-layout",
+            "/channels/{channel_id}/video-layout",
             get(get_video_layout).post(upsert_video_layout),
         )
         // Virtual backgrounds
@@ -35,27 +35,27 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         // Live streams
         .route(
-            "/servers/:server_id/live-streams",
+            "/servers/{server_id}/live-streams",
             get(list_live_streams).post(create_live_stream),
         )
         // Breakout rooms
         .route(
-            "/channels/:channel_id/breakout-rooms",
+            "/channels/{channel_id}/breakout-rooms",
             get(list_breakout_rooms).post(create_breakout_room),
         )
         // Collab sessions
         .route(
-            "/channels/:channel_id/collab-sessions",
+            "/channels/{channel_id}/collab-sessions",
             get(list_collab_sessions).post(create_collab_session),
         )
         // Spatial audio configs
         .route(
-            "/channels/:channel_id/spatial-audio",
+            "/channels/{channel_id}/spatial-audio",
             get(get_spatial_audio).post(upsert_spatial_audio),
         )
         // Voice presets (global, read-only)
         .route("/voice-presets", get(list_voice_presets))
-        .route("/voice-presets/:preset_id", get(get_voice_preset))
+        .route("/voice-presets/{preset_id}", get(get_voice_preset))
         .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
 }
 

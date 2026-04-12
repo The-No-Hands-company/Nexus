@@ -40,19 +40,19 @@ pub fn router() -> Router<Arc<AppState>> {
             "/marketplace/plugins",
             get(search_plugins).post(publish_plugin),
         )
-        .route("/marketplace/plugins/:slug", get(get_plugin_by_slug))
+        .route("/marketplace/plugins/{slug}", get(get_plugin_by_slug))
         // Reviews (user ratings)
         .route(
-            "/marketplace/plugins/:plugin_id/reviews",
+            "/marketplace/plugins/{plugin_id}/reviews",
             get(list_reviews).post(submit_review).delete(delete_review),
         )
         // Store governance (admin endpoints)
         .route(
-            "/marketplace/plugins/:plugin_id/submit-review",
+            "/marketplace/plugins/{plugin_id}/submit-review",
             post(submit_plugin_for_review),
         )
         .route(
-            "/marketplace/plugins/:plugin_id/purchase-intent",
+            "/marketplace/plugins/{plugin_id}/purchase-intent",
             post(create_purchase_intent),
         )
         .route(
@@ -60,31 +60,31 @@ pub fn router() -> Router<Arc<AppState>> {
             get(get_review_queue),
         )
         .route(
-            "/marketplace/admin/plugins/:plugin_id/approve",
+            "/marketplace/admin/plugins/{plugin_id}/approve",
             post(approve_plugin),
         )
         .route(
-            "/marketplace/admin/plugins/:plugin_id/reject",
+            "/marketplace/admin/plugins/{plugin_id}/reject",
             post(reject_plugin),
         )
         .route(
-            "/marketplace/admin/plugins/:plugin_id/quarantine",
+            "/marketplace/admin/plugins/{plugin_id}/quarantine",
             post(quarantine_plugin),
         )
         .route(
-            "/marketplace/admin/plugins/:plugin_id/security-scan",
+            "/marketplace/admin/plugins/{plugin_id}/security-scan",
             post(trigger_security_scan),
         )
         .route(
-            "/marketplace/admin/plugins/:plugin_id/takedown",
+            "/marketplace/admin/plugins/{plugin_id}/takedown",
             post(request_takedown_admin),
         )
         .route(
-            "/marketplace/admin/takedowns/:takedown_id/review",
+            "/marketplace/admin/takedowns/{takedown_id}/review",
             post(review_takedown),
         )
         .route(
-            "/marketplace/admin/takedowns/:takedown_id/reinstate",
+            "/marketplace/admin/takedowns/{takedown_id}/reinstate",
             post(reinstate_plugin_admin),
         )
         // Creator vetting
@@ -97,7 +97,7 @@ pub fn router() -> Router<Arc<AppState>> {
             patch(update_creator_verification_materials),
         )
         .route(
-            "/marketplace/creator/plugins/:plugin_id/monetization",
+            "/marketplace/creator/plugins/{plugin_id}/monetization",
             get(get_creator_monetization).post(upsert_creator_monetization),
         )
         .route(
@@ -105,11 +105,11 @@ pub fn router() -> Router<Arc<AppState>> {
             get(get_vetting_queue),
         )
         .route(
-            "/marketplace/admin/creators/:user_id/approve",
+            "/marketplace/admin/creators/{user_id}/approve",
             post(approve_creator),
         )
         .route(
-            "/marketplace/admin/creators/:user_id/reject",
+            "/marketplace/admin/creators/{user_id}/reject",
             post(reject_creator),
         )
         .route(
@@ -118,11 +118,11 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         // Server installs
         .route(
-            "/servers/:server_id/plugin-installs",
+            "/servers/{server_id}/plugin-installs",
             post(install_plugin).get(list_installs),
         )
         .route(
-            "/servers/:server_id/plugin-installs/:plugin_id",
+            "/servers/{server_id}/plugin-installs/{plugin_id}",
             axum::routing::patch(toggle_install).delete(uninstall_plugin),
         )
         .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))

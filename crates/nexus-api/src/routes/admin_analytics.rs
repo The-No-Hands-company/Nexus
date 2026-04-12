@@ -24,7 +24,7 @@ use crate::{middleware::AuthContext, AppState};
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route(
-            "/servers/:server_id/analytics-snapshots",
+            "/servers/{server_id}/analytics-snapshots",
             get(list_snapshots).post(upsert_snapshot),
         )
         .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))

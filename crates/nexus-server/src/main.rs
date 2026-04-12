@@ -428,10 +428,14 @@ async fn run_server(
         std::env::var("NEXUS_CLOUD_URL"),
         std::env::var("PUBLIC_URL"),
     ) {
+        // NEXUS_CLOUD_UPSTREAM_URL overrides PUBLIC_URL for Cloud portal iframe embedding
+        // (e.g. point at the web frontend on 5174 rather than the raw API on 8080)
+        let upstream_url = std::env::var("NEXUS_CLOUD_UPSTREAM_URL")
+            .unwrap_or_else(|_| public_url.clone());
         let api_key = std::env::var("NEXUS_CLOUD_API_KEY").unwrap_or_default();
         {
             let cu = cloud_url.clone();
-            let pu = public_url.clone();
+            let pu = upstream_url.clone();
             let ak = api_key.clone();
             tokio::spawn(async move { nexus_cloud::register_with_cloud(&pu, &cu, &ak).await });
         }
@@ -443,7 +447,7 @@ async fn run_server(
                 loop {
                     tokio::select! {
                         _ = interval.tick() => {
-                            nexus_cloud::send_heartbeat(&cloud_url, &api_key, &public_url).await;
+                            nexus_cloud::send_heartbeat(&cloud_url, &api_key, &upstream_url).await;
                         }
                         _ = hb_rx.recv() => break,
                     }

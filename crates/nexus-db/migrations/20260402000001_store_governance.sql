@@ -61,7 +61,7 @@ CREATE INDEX IF NOT EXISTS idx_marketplace_plugins_review_queue
 -- Table for review audit trail
 CREATE TABLE IF NOT EXISTS marketplace_reviews (
     id UUID PRIMARY KEY,
-    plugin_id UUID NOT NULL REFERENCES marketplace_plugins(id) ON DELETE CASCADE,
+    plugin_id TEXT NOT NULL REFERENCES marketplace_plugins(id) ON DELETE CASCADE,
     reviewer_id UUID REFERENCES users(id) ON DELETE SET NULL,
     previous_status review_status NOT NULL,
     new_status review_status NOT NULL,
@@ -104,7 +104,7 @@ CREATE INDEX IF NOT EXISTS idx_creator_vetting_user
 -- TNHC facilitates download gating but never touches money.
 CREATE TABLE IF NOT EXISTS marketplace_monetization (
     id UUID PRIMARY KEY,
-    plugin_id UUID NOT NULL UNIQUE REFERENCES marketplace_plugins(id) ON DELETE CASCADE,
+    plugin_id TEXT NOT NULL UNIQUE REFERENCES marketplace_plugins(id) ON DELETE CASCADE,
     creator_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     is_monetized BOOLEAN DEFAULT FALSE,
     price_cents INTEGER,     -- NULL for free; >0 for paid (display only)
@@ -122,7 +122,7 @@ CREATE INDEX IF NOT EXISTS idx_marketplace_monetization_creator
 -- Quarantine and takedown workflow table
 CREATE TABLE IF NOT EXISTS marketplace_takedowns (
     id UUID PRIMARY KEY,
-    plugin_id UUID NOT NULL REFERENCES marketplace_plugins(id) ON DELETE CASCADE,
+    plugin_id TEXT NOT NULL REFERENCES marketplace_plugins(id) ON DELETE CASCADE,
     reported_by UUID REFERENCES users(id) ON DELETE SET NULL,
     reason VARCHAR(100) NOT NULL, -- 'copyright', 'malware', 'abuse', 'spam', 'tos_violation', etc.
     description TEXT NOT NULL,

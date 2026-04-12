@@ -29,12 +29,12 @@ pub fn router() -> Router<Arc<AppState>> {
             get(list_recommendations),
         )
         .route(
-            "/users/@me/recommendations/:rec_id/dismiss",
+            "/users/@me/recommendations/{rec_id}/dismiss",
             post(dismiss_recommendation),
         )
         // Onboarding flows
         .route(
-            "/servers/:server_id/onboarding-flow",
+            "/servers/{server_id}/onboarding-flow",
             get(get_onboarding_flow).post(upsert_onboarding_flow),
         )
         // Device sessions
@@ -44,19 +44,19 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         // Gamification config
         .route(
-            "/servers/:server_id/gamification",
+            "/servers/{server_id}/gamification",
             get(get_gamification_config).post(upsert_gamification_config),
         )
         // XP + leaderboard
-        .route("/servers/:server_id/xp", get(get_user_xp_handler).post(add_xp_handler))
-        .route("/servers/:server_id/xp/leaderboard", get(list_xp_leaderboard))
+        .route("/servers/{server_id}/xp", get(get_user_xp_handler).post(add_xp_handler))
+        .route("/servers/{server_id}/xp/leaderboard", get(list_xp_leaderboard))
         // Achievements
         .route(
-            "/servers/:server_id/achievements",
+            "/servers/{server_id}/achievements",
             get(list_achievements).post(create_achievement),
         )
         .route(
-            "/servers/:server_id/achievements/:achievement_id/award",
+            "/servers/{server_id}/achievements/{achievement_id}/award",
             post(award_achievement),
         )
         // Sync cursors

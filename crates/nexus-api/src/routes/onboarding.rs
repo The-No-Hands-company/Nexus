@@ -35,7 +35,7 @@ pub fn router() -> Router<Arc<AppState>> {
             get(list_templates).post(create_template),
         )
         .route(
-            "/server-templates/:template_id",
+            "/server-templates/{template_id}",
             get(get_template).delete(delete_template),
         )
         .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))

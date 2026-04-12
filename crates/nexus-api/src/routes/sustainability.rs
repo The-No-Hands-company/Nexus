@@ -28,25 +28,25 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/admin/protocol-versions", get(list_protocol_versions).post(upsert_protocol_version))
         // Governance polls
         .route(
-            "/servers/:server_id/governance/polls",
+            "/servers/{server_id}/governance/polls",
             get(list_governance_polls).post(create_governance_poll),
         )
         .route(
-            "/servers/:server_id/governance/polls/:poll_id/vote",
+            "/servers/{server_id}/governance/polls/{poll_id}/vote",
             post(cast_vote),
         )
         // Governance proposals
         .route(
-            "/servers/:server_id/governance/proposals",
+            "/servers/{server_id}/governance/proposals",
             get(list_governance_proposals).post(create_governance_proposal),
         )
         // Contributor badges
         .route(
-            "/users/:user_id/contributor-badges",
+            "/users/{user_id}/contributor-badges",
             get(list_contributor_badges),
         )
         .route(
-            "/users/:user_id/contributor-badges/award",
+            "/users/{user_id}/contributor-badges/award",
             post(award_contributor_badge),
         )
         // Security audits (admin)

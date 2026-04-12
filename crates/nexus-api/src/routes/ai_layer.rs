@@ -25,33 +25,33 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         // AI suggestions
         .route(
-            "/channels/:channel_id/ai-suggestions",
+            "/channels/{channel_id}/ai-suggestions",
             get(list_ai_suggestions).post(create_ai_suggestion),
         )
         // Thread summaries
         .route(
-            "/channels/:channel_id/thread-summary",
+            "/channels/{channel_id}/thread-summary",
             get(get_thread_summary).post(upsert_thread_summary),
         )
         // Toxicity
         .route(
-            "/servers/:server_id/toxicity-flags",
+            "/servers/{server_id}/toxicity-flags",
             get(list_flagged_toxicity),
         )
         // Raid detection
-        .route("/servers/:server_id/raids", get(list_raid_detections))
+        .route("/servers/{server_id}/raids", get(list_raid_detections))
         // Voice transcripts
         .route(
-            "/channels/:channel_id/voice-transcripts",
+            "/channels/{channel_id}/voice-transcripts",
             get(list_voice_transcripts),
         )
         // AI consent (per server)
         .route(
-            "/servers/:server_id/ai-consent",
+            "/servers/{server_id}/ai-consent",
             get(list_ai_consent).post(upsert_ai_consent),
         )
         // AI audit log (per server)
-        .route("/servers/:server_id/ai-audit-log", get(list_ai_audit_log))
+        .route("/servers/{server_id}/ai-audit-log", get(list_ai_audit_log))
         .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
 }
 

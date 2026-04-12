@@ -1,9 +1,9 @@
 //! Import & migration routes — Phase 19-01.
 //!
-//! POST   /servers/:server_id/imports           — Start a data import job
-//! GET    /servers/:server_id/imports           — List import jobs for a server
-//! GET    /servers/:server_id/imports/:import_id — Get import job status
-//! POST   /servers/:server_id/bulk-invite       — Send bulk email invitations
+//! POST   /servers/{server_id}/imports             — Start a data import job
+//! GET    /servers/{server_id}/imports             — List import jobs for a server
+//! GET    /servers/{server_id}/imports/{import_id} — Get import job status
+//! POST   /servers/{server_id}/bulk-invite         — Send bulk email invitations
 
 use axum::{
     extract::{Extension, Path, State},
@@ -31,15 +31,15 @@ use crate::{
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route(
-            "/servers/:server_id/imports",
+            "/servers/{server_id}/imports",
             post(create_import).get(list_imports),
         )
         .route(
-            "/servers/:server_id/imports/:import_id",
+            "/servers/{server_id}/imports/{import_id}",
             get(get_import),
         )
         .route(
-            "/servers/:server_id/bulk-invite",
+            "/servers/{server_id}/bulk-invite",
             post(create_bulk_invite),
         )
         .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))

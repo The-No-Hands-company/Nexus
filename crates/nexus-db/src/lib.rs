@@ -158,7 +158,7 @@ impl Database {
 
         // Guard migrations with a process-shared advisory lock so multiple nodes
         // starting together do not race inserts into `_sqlx_migrations`.
-        sqlx::query("SELECT pg_advisory_lock(?)")
+        sqlx::query("SELECT pg_advisory_lock($1)")
             .bind(POSTGRES_MIGRATION_LOCK_ID)
             .execute(&self.pool)
             .await?;
@@ -170,7 +170,7 @@ impl Database {
         }
         .await;
 
-        if let Err(err) = sqlx::query("SELECT pg_advisory_unlock(?)")
+        if let Err(err) = sqlx::query("SELECT pg_advisory_unlock($1)")
             .bind(POSTGRES_MIGRATION_LOCK_ID)
             .execute(&self.pool)
             .await
@@ -192,7 +192,7 @@ impl Database {
         };
 
         let applied = sqlx::query_as::<_, (bool, Vec<u8>)>(
-            "SELECT success, checksum FROM _sqlx_migrations WHERE version = ?",
+            "SELECT success, checksum FROM _sqlx_migrations WHERE version = $1",
         )
         .bind(LEGACY_RATCHET_MIGRATION_VERSION)
         .fetch_optional(&self.pool)
@@ -234,7 +234,7 @@ impl Database {
             return Ok(());
         }
 
-        sqlx::query("UPDATE _sqlx_migrations SET checksum = ? WHERE version = ?")
+        sqlx::query("UPDATE _sqlx_migrations SET checksum = $1 WHERE version = $2")
             .bind(expected_checksum)
             .bind(LEGACY_RATCHET_MIGRATION_VERSION)
             .execute(&self.pool)
