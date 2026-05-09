@@ -1,8 +1,8 @@
 //! Client plugin & custom theme models.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
 
 // ============================================================================
 // Plugins
@@ -40,7 +40,7 @@ pub struct SubmitPluginRequest {
     pub homepage: Option<String>,
     pub repository: Option<String>,
     pub engine_range: Option<String>,
-    /// Permissions this plugin requires (e.g. ["read_messages", "send_messages"])
+    /// Permissions this plugin requires (e.g. `"read_messages"`, `"send_messages"`).
     pub permissions: Vec<String>,
     pub bundle_url: String,
     pub bundle_hash: String,

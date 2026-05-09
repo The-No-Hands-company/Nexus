@@ -31,8 +31,8 @@ pub async fn create_attachment(
     spoiler: bool,
     sha256: Option<&str>,
 ) -> Result<AttachmentRow, sqlx::Error> {
-    sqlx::query_as::<_, AttachmentRow>(
-        &format!(r#"
+    sqlx::query_as::<_, AttachmentRow>(&format!(
+        r#"
         INSERT INTO attachments (
             id, uploader_id, server_id, channel_id,
             filename, content_type, size, storage_key,
@@ -48,8 +48,9 @@ pub async fn create_attachment(
             CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
         )
         RETURNING {}
-        "#, ATTACHMENT_COLS),
-    )
+        "#,
+        ATTACHMENT_COLS
+    ))
     .bind(id.to_string())
     .bind(uploader_id.to_string())
     .bind(server_id.map(|u| u.to_string()))
@@ -72,11 +73,17 @@ pub async fn create_attachment(
 // ============================================================
 
 /// Find an attachment by ID.
-pub async fn find_by_id(pool: &sqlx::AnyPool, id: Uuid) -> Result<Option<AttachmentRow>, sqlx::Error> {
-    sqlx::query_as::<_, AttachmentRow>(&format!("SELECT {} FROM attachments WHERE id = $1", ATTACHMENT_COLS))
-        .bind(id.to_string())
-        .fetch_optional(pool)
-        .await
+pub async fn find_by_id(
+    pool: &sqlx::AnyPool,
+    id: Uuid,
+) -> Result<Option<AttachmentRow>, sqlx::Error> {
+    sqlx::query_as::<_, AttachmentRow>(&format!(
+        "SELECT {} FROM attachments WHERE id = $1",
+        ATTACHMENT_COLS
+    ))
+    .bind(id.to_string())
+    .fetch_optional(pool)
+    .await
 }
 
 /// Find all attachments for a message.
@@ -84,9 +91,10 @@ pub async fn list_for_message(
     pool: &sqlx::AnyPool,
     message_id: Uuid,
 ) -> Result<Vec<AttachmentRow>, sqlx::Error> {
-    sqlx::query_as::<_, AttachmentRow>(
-        &format!("SELECT {} FROM attachments WHERE message_id = $1 ORDER BY created_at", ATTACHMENT_COLS),
-    )
+    sqlx::query_as::<_, AttachmentRow>(&format!(
+        "SELECT {} FROM attachments WHERE message_id = $1 ORDER BY created_at",
+        ATTACHMENT_COLS
+    ))
     .bind(message_id.to_string())
     .fetch_all(pool)
     .await
@@ -100,29 +108,31 @@ pub async fn list_for_uploader(
     before_id: Option<Uuid>,
 ) -> Result<Vec<AttachmentRow>, sqlx::Error> {
     if let Some(before) = before_id {
-        sqlx::query_as::<_, AttachmentRow>(
-            &format!(r#"
+        sqlx::query_as::<_, AttachmentRow>(&format!(
+            r#"
             SELECT {} FROM attachments a
             WHERE a.uploader_id = $1
               AND a.id < $2
             ORDER BY a.created_at DESC
             LIMIT $3
-            "#, ATTACHMENT_COLS_A),
-        )
+            "#,
+            ATTACHMENT_COLS_A
+        ))
         .bind(uploader_id.to_string())
         .bind(before.to_string())
         .bind(limit)
         .fetch_all(pool)
         .await
     } else {
-        sqlx::query_as::<_, AttachmentRow>(
-            &format!(r#"
+        sqlx::query_as::<_, AttachmentRow>(&format!(
+            r#"
             SELECT {} FROM attachments
             WHERE uploader_id = $1
             ORDER BY created_at DESC
             LIMIT $2
-            "#, ATTACHMENT_COLS),
-        )
+            "#,
+            ATTACHMENT_COLS
+        ))
         .bind(uploader_id.to_string())
         .bind(limit)
         .fetch_all(pool)
@@ -141,14 +151,15 @@ pub async fn mark_ready(
     url: &str,
     blurhash: Option<&str>,
 ) -> Result<AttachmentRow, sqlx::Error> {
-    sqlx::query_as::<_, AttachmentRow>(
-        &format!(r#"
+    sqlx::query_as::<_, AttachmentRow>(&format!(
+        r#"
         UPDATE attachments
         SET status = 'ready', url = $1, blurhash = $2, updated_at = CURRENT_TIMESTAMP
         WHERE id = $3
         RETURNING {}
-        "#, ATTACHMENT_COLS),
-    )
+        "#,
+        ATTACHMENT_COLS
+    ))
     .bind(id.to_string())
     .bind(url)
     .bind(blurhash)
@@ -193,12 +204,10 @@ pub async fn delete_attachment(
     id: Uuid,
     uploader_id: Uuid,
 ) -> Result<bool, sqlx::Error> {
-    let result = sqlx::query(
-        "DELETE FROM attachments WHERE id = $1 AND uploader_id = $2",
-    )
-    .bind(id.to_string())
-    .bind(uploader_id.to_string())
-    .execute(pool)
-    .await?;
+    let result = sqlx::query("DELETE FROM attachments WHERE id = $1 AND uploader_id = $2")
+        .bind(id.to_string())
+        .bind(uploader_id.to_string())
+        .execute(pool)
+        .await?;
     Ok(result.rows_affected() > 0)
 }

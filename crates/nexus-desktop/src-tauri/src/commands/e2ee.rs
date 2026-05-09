@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 use uuid::Uuid;
 
-use crate::state::AppState;
 use super::api_client;
+use crate::state::AppState;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RegisterDeviceDto {
@@ -76,7 +76,9 @@ pub async fn send_encrypted_message(
     let session = state.session_snapshot();
     let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
     let resp = client
-        .post(format!("{base}/api/v1/channels/{channel_id}/encrypted-messages"))
+        .post(format!(
+            "{base}/api/v1/channels/{channel_id}/encrypted-messages"
+        ))
         .json(&SendEncryptedDto {
             ciphertext_map,
             attachment_meta,
@@ -90,9 +92,7 @@ pub async fn send_encrypted_message(
 
 /// List all E2EE devices registered by the current user.
 #[tauri::command]
-pub async fn list_devices(
-    state: State<'_, AppState>,
-) -> Result<Vec<serde_json::Value>, String> {
+pub async fn list_devices(state: State<'_, AppState>) -> Result<Vec<serde_json::Value>, String> {
     let session = state.session_snapshot();
     let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
     let resp = client
@@ -114,10 +114,7 @@ pub async fn list_devices(
 
 /// Revoke (delete) one of the current user's registered E2EE devices.
 #[tauri::command]
-pub async fn delete_device(
-    state: State<'_, AppState>,
-    device_id: Uuid,
-) -> Result<(), String> {
+pub async fn delete_device(state: State<'_, AppState>, device_id: Uuid) -> Result<(), String> {
     let session = state.session_snapshot();
     let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
     let resp = client

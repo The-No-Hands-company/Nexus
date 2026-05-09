@@ -83,10 +83,7 @@ pub async fn update_status(
 }
 
 /// Delete a relationship by its id.
-pub async fn delete(
-    pool: &sqlx::AnyPool,
-    relationship_id: Uuid,
-) -> Result<(), sqlx::Error> {
+pub async fn delete(pool: &sqlx::AnyPool, relationship_id: Uuid) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM user_relationships WHERE id = $1::uuid")
         .bind(relationship_id.to_string())
         .execute(pool)

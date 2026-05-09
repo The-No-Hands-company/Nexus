@@ -25,12 +25,11 @@
 
 use std::collections::BTreeMap;
 
-
 use serde_json::Value;
 
 use crate::{
     error::FederationError,
-    keys::{verify_signature, ServerKeyPair},
+    keys::{ServerKeyPair, verify_signature},
 };
 
 // Reserved for future timestamp skew validation in inbound federation auth.
@@ -49,6 +48,7 @@ pub struct FedAuth {
 
 impl FedAuth {
     /// Build the `Authorization: NexusFederation …` header value.
+    #[must_use] 
     pub fn to_header(&self) -> String {
         format!(
             r#"NexusFederation origin="{}",key="{}",sig="{}""#,
@@ -67,6 +67,7 @@ impl FedAuth {
 /// * `method`      — HTTP method, uppercase (e.g. `"PUT"`)
 /// * `uri`         — request URI path + query (e.g. `"/_nexus/federation/v1/send/txn1"`)
 /// * `content`     — request body (pass `None` for GET requests)
+#[must_use] 
 pub fn sign_request(
     kp: &ServerKeyPair,
     origin: &str,
@@ -77,7 +78,11 @@ pub fn sign_request(
 ) -> FedAuth {
     let canonical = build_signing_object(origin, destination, method, uri, content);
     let sig = kp.sign_json(&canonical);
-    FedAuth { origin: origin.to_owned(), key_id: kp.key_id.clone(), sig }
+    FedAuth {
+        origin: origin.to_owned(),
+        key_id: kp.key_id.clone(),
+        sig,
+    }
 }
 
 /// Verify an inbound federation request.
@@ -86,6 +91,10 @@ pub fn sign_request(
 /// * `destination`   — this server's name; must match what the sender put in the signed object
 /// * `method`, `uri`, `content` — as received in the HTTP request
 /// * `pubkey_base64` — base64url public key fetched from the origin server's key document
+///
+/// # Errors
+/// Returns an error if the auth header is malformed, signature verification
+/// fails, or canonicalisation prerequisites are not met.
 pub fn verify_request(
     authorization: &str,
     destination: &str,
@@ -95,8 +104,7 @@ pub fn verify_request(
     pubkey_base64: &str,
 ) -> Result<String, FederationError> {
     let parsed = parse_auth_header(authorization)?;
-    let canonical =
-        build_signing_object(&parsed.origin, destination, method, uri, content);
+    let canonical = build_signing_object(&parsed.origin, destination, method, uri, content);
     verify_signature(pubkey_base64, &parsed.sig, canonical.as_bytes())?;
     Ok(parsed.origin)
 }
@@ -105,6 +113,14 @@ pub fn verify_request(
 
 /// Sign a federation event JSON object in-place, adding the server signature
 /// under `signatures.<server_name>.<key_id>`.
+///
+/// # Errors
+/// Returns an error if `event_json` is not a JSON object or canonicalisation
+/// fails.
+///
+/// # Panics
+/// Panics if the intermediate `signatures` structure is present but not a JSON
+/// object as expected by the federation event schema.
 pub fn sign_event(
     kp: &ServerKeyPair,
     server_name: &str,
@@ -112,10 +128,10 @@ pub fn sign_event(
 ) -> Result<(), FederationError> {
     // Remove existing signatures and hashes before signing (they aren't part of the payload).
     let mut signing_obj = event_json.clone();
-    signing_obj.as_object_mut().map(|obj| {
+    if let Some(obj) = signing_obj.as_object_mut() {
         obj.remove("signatures");
         obj.remove("hashes");
-    });
+    }
     let canonical = canonical_json(&signing_obj)?;
     let sig = kp.sign_json(&canonical);
 
@@ -159,9 +175,9 @@ fn build_signing_object(
 
 /// Parse the `NexusFederation` Authorization header.
 fn parse_auth_header(header: &str) -> Result<ParsedAuth, FederationError> {
-    let header = header
-        .strip_prefix("NexusFederation ")
-        .ok_or_else(|| FederationError::MalformedAuthHeader("must start with 'NexusFederation '".into()))?;
+    let header = header.strip_prefix("NexusFederation ").ok_or_else(|| {
+        FederationError::MalformedAuthHeader("must start with 'NexusFederation '".into())
+    })?;
 
     let mut origin = None;
     let mut key = None;
@@ -169,22 +185,33 @@ fn parse_auth_header(header: &str) -> Result<ParsedAuth, FederationError> {
 
     for part in header.split(',') {
         let part = part.trim();
-        if let Some(v) = part.strip_prefix("origin=\"").and_then(|s| s.strip_suffix('"')) {
+        if let Some(v) = part
+            .strip_prefix("origin=\"")
+            .and_then(|s| s.strip_suffix('"'))
+        {
             origin = Some(v.to_owned());
-        } else if let Some(v) = part.strip_prefix("key=\"").and_then(|s| s.strip_suffix('"')) {
+        } else if let Some(v) = part
+            .strip_prefix("key=\"")
+            .and_then(|s| s.strip_suffix('"'))
+        {
             key = Some(v.to_owned());
-        } else if let Some(v) = part.strip_prefix("sig=\"").and_then(|s| s.strip_suffix('"')) {
+        } else if let Some(v) = part
+            .strip_prefix("sig=\"")
+            .and_then(|s| s.strip_suffix('"'))
+        {
             sig = Some(v.to_owned());
         }
     }
 
     Ok(ParsedAuth {
-        origin: origin.ok_or_else(|| FederationError::MalformedAuthHeader("missing 'origin'".into()))?,
+        origin: origin
+            .ok_or_else(|| FederationError::MalformedAuthHeader("missing 'origin'".into()))?,
         _key_id: key.ok_or_else(|| FederationError::MalformedAuthHeader("missing 'key'".into()))?,
         sig: sig.ok_or_else(|| FederationError::MalformedAuthHeader("missing 'sig'".into()))?,
     })
 }
 
+#[derive(Debug)]
 struct ParsedAuth {
     origin: String,
     _key_id: String,
@@ -195,6 +222,9 @@ struct ParsedAuth {
 ///
 /// Nexus canonical JSON is a subset of RFC 7159 following the Matrix canonical
 /// JSON spec: keys sorted lexicographically, no trailing spaces/newlines.
+///
+/// # Errors
+/// Returns an error if canonical JSON generation fails.
 pub fn canonical_json(value: &Value) -> Result<String, FederationError> {
     Ok(sort_keys(value).to_string())
 }
@@ -268,7 +298,10 @@ mod tests {
         let val = json!({ "items": [3, 1, 2] });
         let result = canonical_json(&val).unwrap();
         // Elements must not be sorted — arrays are order-sensitive
-        assert!(result.contains("[3,1,2]"), "array order must be preserved: {result}");
+        assert!(
+            result.contains("[3,1,2]"),
+            "array order must be preserved: {result}"
+        );
     }
 
     #[test]
@@ -278,18 +311,22 @@ mod tests {
             json!("hello"),
             json!(true),
             json!(null),
-            json!(3.14),
+            json!(std::f64::consts::PI),
         ] {
             let result = canonical_json(val).unwrap();
             let reparsed: serde_json::Value = serde_json::from_str(&result).unwrap();
-            assert_eq!(&reparsed, val, "primitive must survive canonical round-trip");
+            assert_eq!(
+                &reparsed, val,
+                "primitive must survive canonical round-trip"
+            );
         }
     }
 
     #[test]
     fn parse_auth_header_valid_nexus_header() {
         // Must start with "NexusFederation " prefix
-        let header = "NexusFederation origin=\"nexus.example.com\",key=\"ed25519:key1\",sig=\"abc123\"";
+        let header =
+            "NexusFederation origin=\"nexus.example.com\",key=\"ed25519:key1\",sig=\"abc123\"";
         let result = parse_auth_header(header);
         assert!(result.is_ok(), "valid header should parse: {result:?}");
         let parsed = result.unwrap();

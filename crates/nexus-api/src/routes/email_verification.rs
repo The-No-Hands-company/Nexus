@@ -5,11 +5,11 @@
 //!   POST /auth/resend-verification    — resend verification email (authenticated)
 
 use axum::{
+    Json, Router,
     extract::{Extension, Query, State},
     http::HeaderMap,
     middleware,
     routing::{get, post},
-    Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_db::repository::email_verification;
@@ -17,8 +17,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use crate::{
-    middleware::{check_rate_limit_with_fallback, extract_client_ip, AuthContext},
     AppState,
+    middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip},
 };
 
 pub fn router() -> Router<Arc<AppState>> {
@@ -28,7 +28,9 @@ pub fn router() -> Router<Arc<AppState>> {
     // Resend requires authentication
     let protected = Router::new()
         .route("/auth/resend-verification", post(resend_verification))
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware));
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ));
 
     public.merge(protected)
 }
@@ -69,14 +71,12 @@ async fn verify_email(
         .ok_or(NexusError::InvalidToken)?;
 
     // Set EMAIL_VERIFIED flag (bit 2)
-    sqlx::query(
-        "UPDATE users SET flags = flags | $1, updated_at = NOW() WHERE id = $2::uuid",
-    )
-    .bind(nexus_common::models::user::user_flags::EMAIL_VERIFIED)
-    .bind(user_id.to_string())
-    .execute(&state.db.pool)
-    .await
-    .map_err(|e| NexusError::Internal(e.into()))?;
+    sqlx::query("UPDATE users SET flags = flags | $1, updated_at = NOW() WHERE id = $2::uuid")
+        .bind(nexus_common::models::user::user_flags::EMAIL_VERIFIED)
+        .bind(user_id.to_string())
+        .execute(&state.db.pool)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
 
     tracing::info!(user_id = %user_id, "Email verified");
     Ok(Json(VerifyResponse { verified: true }))
@@ -110,7 +110,9 @@ async fn resend_verification(
 
     let user = nexus_db::repository::users::find_by_id(&state.db.pool, auth_ctx.user_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "User".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "User".into(),
+        })?;
 
     // Silently succeed if already verified or no email registered
     if user.email.is_none()
@@ -141,11 +143,14 @@ async fn resend_verification(
         .map_err(|e| NexusError::Internal(e.into()))?;
 
     // Send verification email via Resend (no-op if API key not configured)
-    if let Some(ref email_addr) = user.email {
-        if let Err(e) = state.email.send_verification_email(email_addr, &user.username, &raw_token).await {
+    if let Some(ref email_addr) = user.email
+        && let Err(e) = state
+            .email
+            .send_verification_email(email_addr, &user.username, &raw_token)
+            .await
+        {
             tracing::warn!(user_id = %user.id, error = %e, "Failed to send verification email");
         }
-    }
     tracing::debug!(
         user_id = %user.id,
         token = %raw_token,

@@ -13,24 +13,23 @@
 //! DELETE /channels/:id/stage-instance/raise-hand       — Retract raise-hand
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, State},
     middleware,
     routing::post,
-    Json, Router,
 };
 use chrono::{DateTime, Utc};
 use nexus_common::{
     error::{NexusError, NexusResult},
     gateway_event::GatewayEvent,
     permissions::Permissions,
-
 };
 use nexus_db::repository::{channels, members, roles, servers};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 // ============================================================
 // Router
@@ -56,7 +55,9 @@ pub fn router() -> Router<Arc<AppState>> {
             "/channels/{channel_id}/stage-instance/raise-hand",
             post(raise_hand).delete(lower_hand),
         )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ============================================================
@@ -112,34 +113,41 @@ impl TryFrom<StageRow> for StageInstance {
     type Error = NexusError;
 
     fn try_from(r: StageRow) -> Result<Self, Self::Error> {
-        let speaker_ids: Vec<Uuid> =
-            serde_json::from_str::<Vec<String>>(&r.speaker_ids)
-                .unwrap_or_default()
-                .into_iter()
-                .filter_map(|s| s.parse().ok())
-                .collect();
+        let speaker_ids: Vec<Uuid> = serde_json::from_str::<Vec<String>>(&r.speaker_ids)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|s| s.parse().ok())
+            .collect();
 
-        let hand_raised_ids: Vec<Uuid> =
-            serde_json::from_str::<Vec<String>>(&r.hand_raised_ids)
-                .unwrap_or_default()
-                .into_iter()
-                .filter_map(|s| s.parse().ok())
-                .collect();
+        let hand_raised_ids: Vec<Uuid> = serde_json::from_str::<Vec<String>>(&r.hand_raised_ids)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|s| s.parse().ok())
+            .collect();
 
         Ok(StageInstance {
-            id: r.id.parse().map_err(|_| NexusError::Internal(anyhow::anyhow!("invalid uuid")))?,
-            channel_id: r.channel_id.parse().map_err(|_| NexusError::Internal(anyhow::anyhow!("invalid uuid")))?,
+            id: r
+                .id
+                .parse()
+                .map_err(|_| NexusError::Internal(anyhow::anyhow!("invalid uuid")))?,
+            channel_id: r
+                .channel_id
+                .parse()
+                .map_err(|_| NexusError::Internal(anyhow::anyhow!("invalid uuid")))?,
             guild_id: r.guild_id.and_then(|s| s.parse().ok()),
             topic: r.topic,
             privacy_level: r.privacy_level,
             speaker_ids,
             hand_raised_ids,
-            started_at: parse_dt(&r.started_at)
-                .map_err(|_| NexusError::Internal(anyhow::anyhow!("invalid started_at timestamp")))?,
-            created_at: parse_dt(&r.created_at)
-                .map_err(|_| NexusError::Internal(anyhow::anyhow!("invalid created_at timestamp")))?,
-            updated_at: parse_dt(&r.updated_at)
-                .map_err(|_| NexusError::Internal(anyhow::anyhow!("invalid updated_at timestamp")))?,
+            started_at: parse_dt(&r.started_at).map_err(|_| {
+                NexusError::Internal(anyhow::anyhow!("invalid started_at timestamp"))
+            })?,
+            created_at: parse_dt(&r.created_at).map_err(|_| {
+                NexusError::Internal(anyhow::anyhow!("invalid created_at timestamp"))
+            })?,
+            updated_at: parse_dt(&r.updated_at).map_err(|_| {
+                NexusError::Internal(anyhow::anyhow!("invalid updated_at timestamp"))
+            })?,
         })
     }
 }
@@ -190,7 +198,9 @@ async fn require_channel_permission(
 ) -> NexusResult<Uuid> {
     let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Channel".into(),
+        })?;
 
     let server_id = channel.server_id.ok_or(NexusError::MissingPermission {
         permission: format!("{required:?}"),
@@ -198,7 +208,9 @@ async fn require_channel_permission(
 
     let server = servers::find_by_id(&state.db.pool, server_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Server".into(),
+        })?;
 
     if user_id == server.owner_id {
         return Ok(server_id);
@@ -207,7 +219,9 @@ async fn require_channel_permission(
     let member = members::find_member(&state.db.pool, user_id, server_id)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?
-        .ok_or(NexusError::MissingPermission { permission: format!("{required:?}") })?;
+        .ok_or(NexusError::MissingPermission {
+            permission: format!("{required:?}"),
+        })?;
 
     let all_roles = roles::list_server_roles(&state.db.pool, server_id)
         .await
@@ -228,7 +242,9 @@ async fn require_channel_permission(
     if effective.has(required) {
         Ok(server_id)
     } else {
-        Err(NexusError::MissingPermission { permission: format!("{required:?}") })
+        Err(NexusError::MissingPermission {
+            permission: format!("{required:?}"),
+        })
     }
 }
 
@@ -256,7 +272,9 @@ async fn fetch_stage(pool: &sqlx::AnyPool, channel_id: Uuid) -> NexusResult<Stag
     .fetch_optional(pool)
     .await?;
 
-    let row = row.ok_or(NexusError::NotFound { resource: "StageInstance".into() })?;
+    let row = row.ok_or(NexusError::NotFound {
+        resource: "StageInstance".into(),
+    })?;
     row.try_into()
 }
 
@@ -283,9 +301,14 @@ async fn create_stage(
     // Verify channel is a stage type
     let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Channel".into(),
+        })?;
 
-    if !matches!(channel.channel_type, nexus_common::models::channel::ChannelType::Stage) {
+    if !matches!(
+        channel.channel_type,
+        nexus_common::models::channel::ChannelType::Stage
+    ) {
         return Err(NexusError::Validation {
             message: "Channel is not a stage channel".into(),
         });
@@ -434,7 +457,9 @@ async fn end_stage(
     .rows_affected();
 
     if rows_affected == 0 {
-        return Err(NexusError::NotFound { resource: "StageInstance".into() });
+        return Err(NexusError::NotFound {
+            resource: "StageInstance".into(),
+        });
     }
 
     let _ = state.gateway_tx.send(GatewayEvent {
@@ -461,15 +486,16 @@ async fn add_speaker(
     State(state): State<Arc<AppState>>,
     Path((channel_id, target_user_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<StageInstance>> {
-    let server_id = require_channel_permission(
-        &state, channel_id, auth.user_id, Permissions::MUTE_MEMBERS,
-    )
-    .await?;
+    let server_id =
+        require_channel_permission(&state, channel_id, auth.user_id, Permissions::MUTE_MEMBERS)
+            .await?;
 
     let stage = fetch_stage(&state.db.pool, channel_id).await?;
 
     if stage.speaker_ids.contains(&target_user_id) {
-        return Err(NexusError::Validation { message: "User is already a speaker".into() });
+        return Err(NexusError::Validation {
+            message: "User is already a speaker".into(),
+        });
     }
 
     let mut new_speakers = stage.speaker_ids.clone();
@@ -504,10 +530,9 @@ async fn remove_speaker(
     State(state): State<Arc<AppState>>,
     Path((channel_id, target_user_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<StageInstance>> {
-    let server_id = require_channel_permission(
-        &state, channel_id, auth.user_id, Permissions::MUTE_MEMBERS,
-    )
-    .await?;
+    let server_id =
+        require_channel_permission(&state, channel_id, auth.user_id, Permissions::MUTE_MEMBERS)
+            .await?;
 
     let stage = fetch_stage(&state.db.pool, channel_id).await?;
 
@@ -517,7 +542,13 @@ async fn remove_speaker(
         .filter(|&id| id != target_user_id)
         .collect();
 
-    update_stage_arrays(&state.db.pool, channel_id, &new_speakers, &stage.hand_raised_ids).await?;
+    update_stage_arrays(
+        &state.db.pool,
+        channel_id,
+        &new_speakers,
+        &stage.hand_raised_ids,
+    )
+    .await?;
 
     let updated = fetch_stage(&state.db.pool, channel_id).await?;
 
@@ -597,15 +628,13 @@ async fn update_stage_arrays(
     speakers: &[Uuid],
     raised: &[Uuid],
 ) -> NexusResult<()> {
-    let speakers_json = serde_json::to_string(
-        &speakers.iter().map(|u| u.to_string()).collect::<Vec<_>>(),
-    )
-    .unwrap_or_else(|_| "[]".into());
+    let speakers_json =
+        serde_json::to_string(&speakers.iter().map(|u| u.to_string()).collect::<Vec<_>>())
+            .unwrap_or_else(|_| "[]".into());
 
-    let raised_json = serde_json::to_string(
-        &raised.iter().map(|u| u.to_string()).collect::<Vec<_>>(),
-    )
-    .unwrap_or_else(|_| "[]".into());
+    let raised_json =
+        serde_json::to_string(&raised.iter().map(|u| u.to_string()).collect::<Vec<_>>())
+            .unwrap_or_else(|_| "[]".into());
 
     sqlx::query(
         "UPDATE stage_instances SET speaker_ids = $1, hand_raised_ids = $2, updated_at = NOW() \

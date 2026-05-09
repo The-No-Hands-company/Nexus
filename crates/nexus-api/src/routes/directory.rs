@@ -16,14 +16,14 @@
 use std::sync::Arc;
 
 use axum::{
+    Json, Router,
     extract::{Path, Query, State},
     http::StatusCode,
     middleware,
     routing::{get, post},
-    Json, Router,
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sqlx::Row as _;
 use tracing::{info, warn};
 
@@ -41,8 +41,9 @@ pub fn router() -> Router<Arc<AppState>> {
         // Authenticated actions
         .route(
             "/directory/rooms/join",
-            post(join_federated_room)
-                .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware)),
+            post(join_federated_room).route_layer(middleware::from_fn(
+                crate::middleware::combined_auth_middleware,
+            )),
         )
 }
 
@@ -130,11 +131,11 @@ async fn list_servers(
         Ok(rows) => rows
             .into_iter()
             .map(|r| ServerEntry {
-                server_name:      r.try_get("server_name").unwrap_or_default(),
-                description:      r.try_get("description").ok().flatten(),
-                icon_url:         r.try_get("icon_url").ok().flatten(),
-                public_room_count:r.try_get::<i32, _>("public_room_count").unwrap_or(0) as u64,
-                total_users:      r.try_get::<i32, _>("total_users").unwrap_or(0) as u64,
+                server_name: r.try_get("server_name").unwrap_or_default(),
+                description: r.try_get("description").ok().flatten(),
+                icon_url: r.try_get("icon_url").ok().flatten(),
+                public_room_count: r.try_get::<i32, _>("public_room_count").unwrap_or(0) as u64,
+                total_users: r.try_get::<i32, _>("total_users").unwrap_or(0) as u64,
             })
             .collect(),
         Err(e) => {
@@ -150,16 +151,20 @@ async fn list_servers(
             0,
             ServerEntry {
                 server_name: this_name,
-                description:      Some("This Nexus server".into()),
-                icon_url:         None,
+                description: Some("This Nexus server".into()),
+                icon_url: None,
                 public_room_count: 0,
-                total_users:       0,
+                total_users: 0,
             },
         );
     }
 
     let total_count = servers.len() as u64;
-    Json(PaginatedServers { servers, total_count, next_batch: None })
+    Json(PaginatedServers {
+        servers,
+        total_count,
+        next_batch: None,
+    })
 }
 
 /// `GET /api/v1/directory/rooms`
@@ -187,13 +192,13 @@ async fn list_rooms(
         Ok(rows) => rows
             .into_iter()
             .map(|r| RoomEntry {
-                room_id:      r.try_get("room_id").unwrap_or_default(),
-                name:         r.try_get("room_name").ok().flatten(),
-                topic:        r.try_get("room_topic").ok().flatten(),
+                room_id: r.try_get("room_id").unwrap_or_default(),
+                name: r.try_get("room_name").ok().flatten(),
+                topic: r.try_get("room_topic").ok().flatten(),
                 member_count: r.try_get::<i32, _>("member_count").unwrap_or(0) as u64,
-                server_name:  r.try_get("origin_server").unwrap_or_default(),
-                join_rule:    r.try_get("join_rule").unwrap_or_else(|_| "public".into()),
-                tags:         vec![],
+                server_name: r.try_get("origin_server").unwrap_or_default(),
+                join_rule: r.try_get("join_rule").unwrap_or_else(|_| "public".into()),
+                tags: vec![],
             })
             .collect(),
         Err(e) => {
@@ -203,7 +208,11 @@ async fn list_rooms(
     };
 
     let total_count = rooms.len() as u64;
-    Json(PaginatedRooms { rooms, total_count, next_batch: None })
+    Json(PaginatedRooms {
+        rooms,
+        total_count,
+        next_batch: None,
+    })
 }
 
 /// `GET /api/v1/directory/rooms/search?q=<query>&server=<server>&limit=<n>`
@@ -252,13 +261,13 @@ async fn search_rooms(
         Ok(rows) => rows
             .into_iter()
             .map(|r| RoomEntry {
-                room_id:      r.try_get("room_id").unwrap_or_default(),
-                name:         r.try_get("room_name").ok().flatten(),
-                topic:        r.try_get("room_topic").ok().flatten(),
+                room_id: r.try_get("room_id").unwrap_or_default(),
+                name: r.try_get("room_name").ok().flatten(),
+                topic: r.try_get("room_topic").ok().flatten(),
                 member_count: r.try_get::<i32, _>("member_count").unwrap_or(0) as u64,
-                server_name:  r.try_get("origin_server").unwrap_or_default(),
-                join_rule:    r.try_get("join_rule").unwrap_or_else(|_| "public".into()),
-                tags:         vec![],
+                server_name: r.try_get("origin_server").unwrap_or_default(),
+                join_rule: r.try_get("join_rule").unwrap_or_else(|_| "public".into()),
+                tags: vec![],
             })
             .collect(),
         Err(e) => {
@@ -268,7 +277,11 @@ async fn search_rooms(
     };
 
     let total_count = rooms.len() as u64;
-    Json(PaginatedRooms { rooms, total_count, next_batch: None })
+    Json(PaginatedRooms {
+        rooms,
+        total_count,
+        next_batch: None,
+    })
 }
 
 /// `GET /api/v1/directory/resolve/:server_name`
@@ -324,7 +337,10 @@ async fn join_federated_room(
     Json(body): Json<JoinRoomRequest>,
 ) -> (StatusCode, Json<Value>) {
     let room_id = body.room_id;
-    info!("Federated join request for room {} by {}", room_id, auth.username);
+    info!(
+        "Federated join request for room {} by {}",
+        room_id, auth.username
+    );
 
     // Parse `!channel:server_name` — extract the remote server part.
     let remote_server = match room_id.split(':').nth(1) {
@@ -360,7 +376,10 @@ async fn join_federated_room(
     {
         Ok(r) => r,
         Err(e) => {
-            warn!("make_join failed for {} on {}: {}", room_id, remote_server, e);
+            warn!(
+                "make_join failed for {} on {}: {}",
+                room_id, remote_server, e
+            );
             return (
                 StatusCode::BAD_GATEWAY,
                 Json(json!({ "error": format!("make_join failed: {}", e) })),
@@ -413,7 +432,10 @@ async fn join_federated_room(
             .execute(&state.db.pool)
             .await
             {
-                warn!("Failed to track federated room membership for {}: {}", room_id, e);
+                warn!(
+                    "Failed to track federated room membership for {}: {}",
+                    room_id, e
+                );
             }
 
             (
@@ -427,7 +449,10 @@ async fn join_federated_room(
             )
         }
         Err(e) => {
-            warn!("send_join failed for {} on {}: {}", room_id, remote_server, e);
+            warn!(
+                "send_join failed for {} on {}: {}",
+                room_id, remote_server, e
+            );
             (
                 StatusCode::BAD_GATEWAY,
                 Json(json!({ "error": format!("send_join failed: {}", e) })),

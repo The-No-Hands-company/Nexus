@@ -6,10 +6,10 @@
 //! DELETE /media/filters/:id                — Delete a saved filter preset
 
 use axum::{
-    extract::{Extension, Query, State, Path},
+    Json, Router,
+    extract::{Extension, Path, Query, State},
     middleware,
     routing::{delete, get, post},
-    Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_common::snowflake;
@@ -18,14 +18,16 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/media/browse", get(browse_media))
         .route("/media/filters", post(create_filter).get(list_filters))
         .route("/media/filters/{id}", delete(delete_filter))
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ── Request / Response ────────────────────────────────────────────────────────

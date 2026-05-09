@@ -10,23 +10,23 @@
 //! GET    /channels/:id/threads/:thread_id/members      — List members
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, Query, State},
     middleware,
     routing::{get, post},
-    Json, Router,
 };
+use nexus_common::gateway_event::GatewayEvent;
 use nexus_common::{
     error::{NexusError, NexusResult},
     models::rich::{CreateThreadRequest, Thread, ThreadRow, UpdateThreadRequest},
     validation::validate_request,
 };
 use nexus_db::repository::{channels, threads};
-use nexus_common::gateway_event::GatewayEvent;
 use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -52,7 +52,9 @@ pub fn router() -> Router<Arc<AppState>> {
             "/channels/{channel_id}/threads/{thread_id}/members",
             get(list_thread_members),
         )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ============================================================
@@ -178,7 +180,8 @@ async fn create_thread(
         user_id: Some(auth.user_id),
     });
 
-    metrics::counter!("nexus_threads_requests_total", "route" => "create", "outcome" => "ok").increment(1);
+    metrics::counter!("nexus_threads_requests_total", "route" => "create", "outcome" => "ok")
+        .increment(1);
 
     Ok(Json(thread))
 }
@@ -204,7 +207,8 @@ async fn list_active_threads(
 
     let rows = threads::list_active(&state.db.pool, channel_id, limit).await?;
     let list: Vec<Thread> = rows.into_iter().map(thread_response).collect();
-    metrics::counter!("nexus_threads_requests_total", "route" => "list_active", "outcome" => "ok").increment(1);
+    metrics::counter!("nexus_threads_requests_total", "route" => "list_active", "outcome" => "ok")
+        .increment(1);
     Ok(Json(list))
 }
 
@@ -258,7 +262,8 @@ async fn get_thread(
         });
     }
 
-    metrics::counter!("nexus_threads_requests_total", "route" => "get", "outcome" => "ok").increment(1);
+    metrics::counter!("nexus_threads_requests_total", "route" => "get", "outcome" => "ok")
+        .increment(1);
 
     Ok(Json(thread_response(row)))
 }
@@ -320,7 +325,8 @@ async fn update_thread(
         user_id: Some(auth.user_id),
     });
 
-    metrics::counter!("nexus_threads_requests_total", "route" => "update", "outcome" => "ok").increment(1);
+    metrics::counter!("nexus_threads_requests_total", "route" => "update", "outcome" => "ok")
+        .increment(1);
 
     Ok(Json(thread))
 }
@@ -349,7 +355,8 @@ async fn join_thread(
     }
 
     threads::add_member(&state.db.pool, thread_id, auth.user_id).await?;
-    metrics::counter!("nexus_threads_requests_total", "route" => "join", "outcome" => "ok").increment(1);
+    metrics::counter!("nexus_threads_requests_total", "route" => "join", "outcome" => "ok")
+        .increment(1);
     Ok(Json(serde_json::json!({ "joined": true })))
 }
 
@@ -373,7 +380,8 @@ async fn leave_thread(
     }
 
     let removed = threads::remove_member(&state.db.pool, thread_id, auth.user_id).await?;
-    metrics::counter!("nexus_threads_requests_total", "route" => "leave", "outcome" => "ok").increment(1);
+    metrics::counter!("nexus_threads_requests_total", "route" => "leave", "outcome" => "ok")
+        .increment(1);
     Ok(Json(serde_json::json!({ "left": removed })))
 }
 
@@ -397,7 +405,7 @@ async fn list_thread_members(
     }
 
     let members = threads::list_members(&state.db.pool, thread_id).await?;
-    metrics::counter!("nexus_threads_requests_total", "route" => "list_members", "outcome" => "ok").increment(1);
+    metrics::counter!("nexus_threads_requests_total", "route" => "list_members", "outcome" => "ok")
+        .increment(1);
     Ok(Json(members))
 }
-

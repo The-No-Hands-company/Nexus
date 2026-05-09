@@ -21,10 +21,10 @@
 
 use axum::http::HeaderMap;
 use axum::{
+    Json, Router,
     extract::{Extension, Path, Query, State},
     middleware,
-    routing::{get},
-    Json, Router,
+    routing::get,
 };
 use chrono::Utc;
 use nexus_common::{
@@ -39,8 +39,8 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{
-    middleware::{check_rate_limit_with_fallback, extract_client_ip, AuthContext},
     AppState,
+    middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip},
 };
 
 pub fn router() -> Router<Arc<AppState>> {
@@ -51,11 +51,12 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         .route(
             "/users/@me/relationships/{user_id}",
-            axum::routing::patch(update_relationship)
-                .delete(delete_relationship),
+            axum::routing::patch(update_relationship).delete(delete_relationship),
         )
         .route("/users/search", get(search_users))
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ── Request/Response shapes ───────────────────────────────────────────────────
@@ -199,13 +200,15 @@ async fn send_friend_request(
         format!("rl:friendreq:user:{}", auth.user_id),
         20,
         3600,
-    ).await?;
+    )
+    .await?;
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:friendreq:ip:{ip}"),
         40,
         3600,
-    ).await?;
+    )
+    .await?;
 
     // Detect federated username (`user@server.tld`)
     if let Some((target_username, target_server)) = parse_federated_username(&body.username) {
@@ -215,7 +218,9 @@ async fn send_friend_request(
     // ── Local path ────────────────────────────────────────────────────────────
     let target = users::find_by_username(&state.db.pool, &body.username)
         .await?
-        .ok_or(NexusError::NotFound { resource: "User".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "User".into(),
+        })?;
 
     if target.id == auth.user_id {
         return Err(NexusError::Validation {
@@ -223,21 +228,17 @@ async fn send_friend_request(
         });
     }
 
-    if let Some(_existing) = relationships::find_between(&state.db.pool, auth.user_id, target.id).await? {
+    if let Some(_existing) =
+        relationships::find_between(&state.db.pool, auth.user_id, target.id).await?
+    {
         return Err(NexusError::Validation {
             message: "A relationship with this user already exists".into(),
         });
     }
 
     let rel_id = snowflake::generate_id();
-    let _rel = relationships::create(
-        &state.db.pool,
-        rel_id,
-        auth.user_id,
-        target.id,
-        "pending",
-    )
-    .await?;
+    let _rel =
+        relationships::create(&state.db.pool, rel_id, auth.user_id, target.id, "pending").await?;
 
     Ok(Json(RelationshipResponse {
         id: target.id,
@@ -262,24 +263,33 @@ async fn send_federated_friend_request(
     // Load our own profile so we can send our metadata to the remote server.
     let me = users::find_by_id(&state.db.pool, auth.user_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "User".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "User".into(),
+        })?;
 
     // Resolve the remote user's public profile via the S2S federation API.
     let profile = state
         .federation_client
         .get_user_profile(target_server, target_username)
         .await
-        .map_err(|e| NexusError::Internal(anyhow::anyhow!(
-            "Could not reach remote server {}: {}", target_server, e
-        )))?;
+        .map_err(|e| {
+            NexusError::Internal(anyhow::anyhow!(
+                "Could not reach remote server {}: {}",
+                target_server,
+                e
+            ))
+        })?;
 
     // The remote server must return `"id"` (UUID) for us to link the relationship.
-    let remote_id_str = profile
-        .get("id")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| NexusError::Validation {
-            message: "Remote server did not return a user ID — it may be running an older version".into(),
-        })?;
+    let remote_id_str =
+        profile
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| NexusError::Validation {
+                message:
+                    "Remote server did not return a user ID — it may be running an older version"
+                        .into(),
+            })?;
 
     let remote_id = Uuid::parse_str(remote_id_str).map_err(|_| NexusError::Validation {
         message: "Remote server returned an invalid user ID".into(),
@@ -342,7 +352,8 @@ async fn send_federated_friend_request(
         tracing::warn!(
             "Failed to deliver federated friend request to {}: {}. \
              Relationship stored locally — will sync on next contact.",
-            target_server, e
+            target_server,
+            e
         );
     }
 
@@ -369,7 +380,9 @@ async fn update_relationship(
 ) -> NexusResult<Json<RelationshipResponse>> {
     let rel = relationships::find_between(&state.db.pool, auth.user_id, other_user_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Relationship".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Relationship".into(),
+        })?;
 
     let new_status = match body.action.as_str() {
         "accept" => {
@@ -388,7 +401,9 @@ async fn update_relationship(
             relationships::delete(&state.db.pool, rel.id).await?;
             let other = users::find_by_id(&state.db.pool, other_user_id)
                 .await?
-                .ok_or(NexusError::NotFound { resource: "User".into() })?;
+                .ok_or(NexusError::NotFound {
+                    resource: "User".into(),
+                })?;
 
             // Forward denial to remote server if the requester is federated.
             maybe_forward_friend_response(&auth, &state, &rel, &other, "denied").await;
@@ -417,7 +432,9 @@ async fn update_relationship(
 
     let other = users::find_by_id(&state.db.pool, other_user_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "User".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "User".into(),
+        })?;
 
     // Forward acceptance to remote server if the requester is federated.
     if new_status == "accepted" {
@@ -486,7 +503,9 @@ async fn maybe_forward_friend_response(
     {
         tracing::warn!(
             "Failed to forward friend {} response to {}: {}",
-            action, server_name, e
+            action,
+            server_name,
+            e
         );
     }
 }
@@ -499,7 +518,9 @@ async fn delete_relationship(
 ) -> NexusResult<axum::http::StatusCode> {
     let rel = relationships::find_between(&state.db.pool, auth.user_id, other_user_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Relationship".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Relationship".into(),
+        })?;
 
     relationships::delete(&state.db.pool, rel.id).await?;
     Ok(axum::http::StatusCode::NO_CONTENT)
@@ -519,13 +540,15 @@ async fn search_users(
         format!("rl:search:user:{}", auth.user_id),
         60,
         60,
-    ).await?;
+    )
+    .await?;
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:search:ip:{ip}"),
         120,
         60,
-    ).await?;
+    )
+    .await?;
 
     if params.q.len() < 2 {
         return Err(NexusError::Validation {

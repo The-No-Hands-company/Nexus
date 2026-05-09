@@ -5,33 +5,36 @@
 
 use axum::http::HeaderMap;
 use axum::{
+    Json, Router,
     extract::{Extension, Path, State},
     middleware,
     routing::{get, post, put},
-    Json, Router,
 };
 use nexus_common::{
     error::{NexusError, NexusResult},
+    gateway_event::GatewayEvent,
     models::channel::Channel,
     snowflake,
-    gateway_event::GatewayEvent,
 };
-use nexus_db::{repository::{audit_log, channels}, select_cols::CHANNEL_COLS_C};
+use nexus_db::{
+    repository::{audit_log, channels},
+    select_cols::CHANNEL_COLS_C,
+};
 use serde::Deserialize;
 use sqlx::Row;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
+use crate::{
+    AppState,
+    middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip},
+};
 
 /// DM routes — mounted under /users/@me/channels.
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
-        .route(
-            "/users/@me/channels",
-            get(list_dm_channels).post(create_dm),
-        )
+        .route("/users/@me/channels", get(list_dm_channels).post(create_dm))
         .route(
             "/users/@me/channels/{channel_id}",
             get(get_dm_channel).patch(update_group_dm),
@@ -46,7 +49,9 @@ pub fn router() -> Router<Arc<AppState>> {
             "/users/@me/channels/{channel_id}/owner",
             put(transfer_dm_owner),
         )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -193,12 +198,13 @@ async fn create_dm(
 
         let recipient = nexus_db::repository::users::find_by_id(&state.db.pool, recipient_id)
             .await?
-            .ok_or(NexusError::NotFound { resource: "User".into() })?;
+            .ok_or(NexusError::NotFound {
+                resource: "User".into(),
+            })?;
 
         let dm_id = snowflake::generate_id();
         let dm =
-            channels::find_or_create_dm(&state.db.pool, dm_id, auth.user_id, recipient_id)
-                .await?;
+            channels::find_or_create_dm(&state.db.pool, dm_id, auth.user_id, recipient_id).await?;
 
         // Audit log
         let _ = audit_log::write_entry(
@@ -257,11 +263,8 @@ async fn create_dm(
         let mut all_participants = unique_recipient_ids.clone();
         all_participants.push(auth.user_id);
 
-        let participants_map = nexus_db::repository::users::find_by_ids_map(
-            &state.db.pool,
-            &all_participants,
-        )
-        .await?;
+        let participants_map =
+            nexus_db::repository::users::find_by_ids_map(&state.db.pool, &all_participants).await?;
         if participants_map.len() != all_participants.len() {
             return Err(NexusError::NotFound {
                 resource: "One or more users".into(),
@@ -283,9 +286,8 @@ async fn create_dm(
         )
         .await?;
 
-        let mut qb = sqlx::QueryBuilder::new(
-            "INSERT INTO dm_participants (channel_id, user_id) VALUES ",
-        );
+        let mut qb =
+            sqlx::QueryBuilder::new("INSERT INTO dm_participants (channel_id, user_id) VALUES ");
         {
             let mut separated = qb.separated(", ");
             for uid in &all_participants {
@@ -343,19 +345,22 @@ async fn get_dm_channel(
     .await?;
 
     if row.is_none() {
-        return Err(NexusError::NotFound { resource: "Channel".into() });
+        return Err(NexusError::NotFound {
+            resource: "Channel".into(),
+        });
     }
 
     let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Channel".into(),
+        })?;
 
-    let participants: Vec<(String,)> = sqlx::query_as(
-        "SELECT user_id::text FROM dm_participants WHERE channel_id = $1::uuid",
-    )
-    .bind(channel_id.to_string())
-    .fetch_all(&state.db.pool)
-    .await?;
+    let participants: Vec<(String,)> =
+        sqlx::query_as("SELECT user_id::text FROM dm_participants WHERE channel_id = $1::uuid")
+            .bind(channel_id.to_string())
+            .fetch_all(&state.db.pool)
+            .await?;
 
     let other_ids: Vec<Uuid> = participants
         .iter()
@@ -365,7 +370,8 @@ async fn get_dm_channel(
         .into_iter()
         .collect();
 
-    let users_map = nexus_db::repository::users::find_by_ids_map(&state.db.pool, &other_ids).await?;
+    let users_map =
+        nexus_db::repository::users::find_by_ids_map(&state.db.pool, &other_ids).await?;
     let users = other_ids
         .iter()
         .filter_map(|uid| users_map.get(uid))
@@ -421,21 +427,22 @@ async fn require_group_dm_participant(
     .fetch_optional(&state.db.pool)
     .await?;
 
-    row.ok_or(NexusError::NotFound { resource: "Channel".into() })?;
+    row.ok_or(NexusError::NotFound {
+        resource: "Channel".into(),
+    })?;
     Ok(())
 }
 
 /// Get the current owner of a group DM channel (owner_id column, nullable).
 /// Falls back to the first participant if no owner is set.
 async fn get_dm_owner(state: &AppState, channel_id: Uuid) -> Option<Uuid> {
-    let row: Option<(Option<String>,)> = sqlx::query_as(
-        "SELECT owner_id::text FROM channels WHERE id = $1::uuid",
-    )
-    .bind(channel_id.to_string())
-    .fetch_optional(&state.db.pool)
-    .await
-    .ok()
-    .flatten();
+    let row: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT owner_id::text FROM channels WHERE id = $1::uuid")
+            .bind(channel_id.to_string())
+            .fetch_optional(&state.db.pool)
+            .await
+            .ok()
+            .flatten();
 
     row.and_then(|(s,)| s).and_then(|s| s.parse().ok())
 }
@@ -449,13 +456,12 @@ async fn update_group_dm(
 ) -> NexusResult<Json<serde_json::Value>> {
     require_group_dm_participant(&state, channel_id, auth.user_id).await?;
 
-    if let Some(ref name) = body.name {
-        if name.len() > 100 {
+    if let Some(ref name) = body.name
+        && name.len() > 100 {
             return Err(NexusError::Validation {
                 message: "Group DM name must be at most 100 characters".into(),
             });
         }
-    }
 
     // Update name if provided
     if let Some(ref name) = body.name {
@@ -468,7 +474,11 @@ async fn update_group_dm(
 
     // Update icon if provided (null string clears the icon)
     if let Some(ref icon) = body.icon {
-        let icon_val: Option<&str> = if icon.is_empty() { None } else { Some(icon.as_str()) };
+        let icon_val: Option<&str> = if icon.is_empty() {
+            None
+        } else {
+            Some(icon.as_str())
+        };
         sqlx::query("UPDATE channels SET icon = $1, updated_at = NOW() WHERE id = $2::uuid")
             .bind(icon_val)
             .bind(channel_id.to_string())
@@ -477,14 +487,15 @@ async fn update_group_dm(
     }
 
     // Fetch the updated channel row
-    let row: Option<(String, Option<String>, Option<String>)> = sqlx::query_as(
-        "SELECT id::text, name, icon FROM channels WHERE id = $1::uuid",
-    )
-    .bind(channel_id.to_string())
-    .fetch_optional(&state.db.pool)
-    .await?;
+    let row: Option<(String, Option<String>, Option<String>)> =
+        sqlx::query_as("SELECT id::text, name, icon FROM channels WHERE id = $1::uuid")
+            .bind(channel_id.to_string())
+            .fetch_optional(&state.db.pool)
+            .await?;
 
-    let (id_str, name, icon) = row.ok_or(NexusError::NotFound { resource: "Channel".into() })?;
+    let (id_str, name, icon) = row.ok_or(NexusError::NotFound {
+        resource: "Channel".into(),
+    })?;
 
     let _ = state.gateway_tx.send(GatewayEvent {
         event_type: nexus_common::gateway_event::event_types::CHANNEL_UPDATE.to_string(),
@@ -520,12 +531,11 @@ async fn add_recipient(
     }
 
     // Check participant count (max 10)
-    let count: (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM dm_participants WHERE channel_id = $1::uuid",
-    )
-    .bind(channel_id.to_string())
-    .fetch_one(&state.db.pool)
-    .await?;
+    let count: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM dm_participants WHERE channel_id = $1::uuid")
+            .bind(channel_id.to_string())
+            .fetch_one(&state.db.pool)
+            .await?;
 
     if count.0 >= 10 {
         return Err(NexusError::Validation {
@@ -536,7 +546,9 @@ async fn add_recipient(
     // Verify target user exists
     nexus_db::repository::users::find_by_id(&state.db.pool, target_user_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "User".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "User".into(),
+        })?;
 
     sqlx::query(
         "INSERT INTO dm_participants (channel_id, user_id) \
@@ -555,7 +567,9 @@ async fn add_recipient(
         user_id: Some(target_user_id),
     });
 
-    Ok(Json(serde_json::json!({ "channel_id": channel_id, "user_id": target_user_id })))
+    Ok(Json(
+        serde_json::json!({ "channel_id": channel_id, "user_id": target_user_id }),
+    ))
 }
 
 /// DELETE /api/v1/users/@me/channels/:channel_id/recipients/:user_id
@@ -578,13 +592,11 @@ async fn remove_recipient(
         }
     }
 
-    sqlx::query(
-        "DELETE FROM dm_participants WHERE channel_id = $1::uuid AND user_id = $2::uuid",
-    )
-    .bind(channel_id.to_string())
-    .bind(target_user_id.to_string())
-    .execute(&state.db.pool)
-    .await?;
+    sqlx::query("DELETE FROM dm_participants WHERE channel_id = $1::uuid AND user_id = $2::uuid")
+        .bind(channel_id.to_string())
+        .bind(target_user_id.to_string())
+        .execute(&state.db.pool)
+        .await?;
 
     let _ = state.gateway_tx.send(GatewayEvent {
         event_type: nexus_common::gateway_event::event_types::CHANNEL_RECIPIENT_REMOVE.to_string(),
@@ -594,7 +606,9 @@ async fn remove_recipient(
         user_id: Some(target_user_id),
     });
 
-    Ok(Json(serde_json::json!({ "channel_id": channel_id, "user_id": target_user_id, "removed": true })))
+    Ok(Json(
+        serde_json::json!({ "channel_id": channel_id, "user_id": target_user_id, "removed": true }),
+    ))
 }
 
 /// PUT /api/v1/users/@me/channels/:channel_id/owner

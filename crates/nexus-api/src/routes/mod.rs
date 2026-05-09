@@ -4,33 +4,33 @@ pub mod auth;
 pub mod bots;
 pub mod channels;
 pub mod directory;
-pub mod email_verification;
-pub mod experience;
-pub mod password_reset;
-pub mod files;
 pub mod dms;
 pub mod e2ee;
+pub mod email_verification;
 pub mod emoji;
+pub mod experience;
 pub mod extensibility;
 pub mod federation;
+pub mod files;
+pub mod password_reset;
 // v0.8.5 Federation UX — admin management endpoints
+pub mod bookmarks;
+pub mod drafts;
 pub mod federation_admin;
 pub mod forum;
 pub mod health;
 pub mod keys;
-pub mod metrics;
 pub mod messages;
+pub mod metrics;
 pub mod moderation;
+pub mod polls;
 pub mod presence;
 pub mod relationships;
+pub mod scheduled_messages;
 pub mod search;
 pub mod servers;
 pub mod sessions;
 pub mod slash_commands;
-pub mod bookmarks;
-pub mod drafts;
-pub mod polls;
-pub mod scheduled_messages;
 pub mod stages;
 pub mod threads;
 pub mod two_fa;
@@ -55,22 +55,22 @@ pub mod discovery;
 pub mod monetization;
 
 // v1.5 Collaboration & Productivity
-pub mod tasks;
+pub mod ai_assists;
 pub mod calendar;
 pub mod file_versions;
-pub mod ai_assists;
+pub mod tasks;
 
 // v1.6 Multimedia & Expression
-pub mod voice_notes;
-pub mod stories;
 pub mod drawings;
-pub mod voice_settings;
 pub mod media_gallery;
+pub mod stories;
+pub mod voice_notes;
+pub mod voice_settings;
 
 // v1.7 Accessibility & Inclusivity
 pub mod accessibility;
-pub mod voice_captions;
 pub mod translations;
+pub mod voice_captions;
 
 // v1.8 Ecosystem & Onboarding
 pub mod admin_analytics;
@@ -93,9 +93,9 @@ pub mod growth;
 // v2.x Sustainability & Extensibility
 pub mod sustainability;
 
+pub mod admin;
 /// Web Push notification subscription management
 pub mod push;
-pub mod admin;
 
 /// Instance-admin user management (list, suspend, disable)
 pub mod admin_users;

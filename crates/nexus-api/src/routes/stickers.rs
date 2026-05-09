@@ -7,15 +7,15 @@
 //! DELETE /servers/{id}/stickers/{sid}           — delete sticker
 
 use axum::{
+    Json, Router,
     extract::{Extension, Multipart, Path, State},
     middleware,
     routing::{get, patch},
-    Json, Router,
 };
 use chrono::{DateTime, Utc};
 use nexus_common::{
     error::{NexusError, NexusResult},
-    gateway_event::{event_types, GatewayEvent},
+    gateway_event::{GatewayEvent, event_types},
     permissions::Permissions,
     snowflake,
 };
@@ -26,7 +26,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -39,7 +39,9 @@ pub fn router() -> Router<Arc<AppState>> {
             "/servers/{server_id}/stickers/{sticker_id}",
             patch(rename_sticker).delete(delete_sticker),
         )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -113,7 +115,9 @@ async fn require_manage_emojis(
 ) -> NexusResult<()> {
     let server = servers::find_by_id(&state.db.pool, server_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Server".into(),
+        })?;
     if user_id == server.owner_id {
         return Ok(());
     }
@@ -121,17 +125,22 @@ async fn require_manage_emojis(
         .await?
         .ok_or(NexusError::Forbidden)?;
     let all_roles = roles::list_server_roles(&state.db.pool, server_id).await?;
-    let base = all_roles.iter().find(|r| r.is_default)
+    let base = all_roles
+        .iter()
+        .find(|r| r.is_default)
         .map(|r| Permissions::from_bits_truncate(r.permissions))
         .unwrap_or_else(Permissions::empty);
-    let effective = all_roles.iter()
+    let effective = all_roles
+        .iter()
         .filter(|r| !r.is_default && member.roles.contains(&r.id))
         .map(|r| Permissions::from_bits_truncate(r.permissions))
         .fold(base, |acc, rp| acc | rp);
     if effective.has(Permissions::MANAGE_EMOJIS) || effective.has(Permissions::ADMINISTRATOR) {
         Ok(())
     } else {
-        Err(NexusError::MissingPermission { permission: "MANAGE_EMOJIS".into() })
+        Err(NexusError::MissingPermission {
+            permission: "MANAGE_EMOJIS".into(),
+        })
     }
 }
 
@@ -169,7 +178,9 @@ async fn list_global_packs(
         result.push(StickerPack {
             id: pack_id,
             name: row.try_get("name").unwrap_or_default(),
-            description: row.try_get::<Option<String>, _>("description").unwrap_or(None),
+            description: row
+                .try_get::<Option<String>, _>("description")
+                .unwrap_or(None),
             server_id: None,
             is_premium: row.try_get::<bool, _>("is_premium").unwrap_or(false),
             stickers,
@@ -198,21 +209,38 @@ async fn list_server_stickers(
     .await
     .map_err(NexusError::Database)?;
 
-    let stickers = rows.iter().filter_map(|r| {
-        let id: Uuid = r.try_get::<String, _>("id").unwrap_or_default().parse().ok()?;
-        let pack_id: Uuid = r.try_get::<String, _>("pack_id").unwrap_or_default().parse().ok()?;
-        let created_at = r.try_get::<String, _>("created_at").ok()
-            .as_deref().and_then(parse_pg_dt).unwrap_or_else(Utc::now);
-        Some(Sticker {
-            id,
-            pack_id,
-            name: r.try_get("name").unwrap_or_default(),
-            description: r.try_get::<Option<String>, _>("description").unwrap_or(None),
-            asset_url: r.try_get("asset_url").unwrap_or_default(),
-            sticker_type: r.try_get("sticker_type").unwrap_or_else(|_| "png".into()),
-            created_at,
+    let stickers = rows
+        .iter()
+        .filter_map(|r| {
+            let id: Uuid = r
+                .try_get::<String, _>("id")
+                .unwrap_or_default()
+                .parse()
+                .ok()?;
+            let pack_id: Uuid = r
+                .try_get::<String, _>("pack_id")
+                .unwrap_or_default()
+                .parse()
+                .ok()?;
+            let created_at = r
+                .try_get::<String, _>("created_at")
+                .ok()
+                .as_deref()
+                .and_then(parse_pg_dt)
+                .unwrap_or_else(Utc::now);
+            Some(Sticker {
+                id,
+                pack_id,
+                name: r.try_get("name").unwrap_or_default(),
+                description: r
+                    .try_get::<Option<String>, _>("description")
+                    .unwrap_or(None),
+                asset_url: r.try_get("asset_url").unwrap_or_default(),
+                sticker_type: r.try_get("sticker_type").unwrap_or_else(|_| "png".into()),
+                created_at,
+            })
         })
-    }).collect();
+        .collect();
 
     Ok(Json(stickers))
 }
@@ -227,13 +255,11 @@ async fn upload_sticker(
     require_manage_emojis(&state, auth.user_id, server_id).await?;
 
     // Count existing server stickers — max 60
-    let count_row = sqlx::query(
-        "SELECT COUNT(*) AS cnt FROM stickers WHERE server_id = $1::uuid",
-    )
-    .bind(server_id.to_string())
-    .fetch_one(&state.db.pool)
-    .await
-    .map_err(NexusError::Database)?;
+    let count_row = sqlx::query("SELECT COUNT(*) AS cnt FROM stickers WHERE server_id = $1::uuid")
+        .bind(server_id.to_string())
+        .fetch_one(&state.db.pool)
+        .await
+        .map_err(NexusError::Database)?;
 
     let count: i64 = count_row.try_get::<i64, _>("cnt").unwrap_or(0);
     if count >= 60 {
@@ -248,39 +274,61 @@ async fn upload_sticker(
     let mut asset_bytes: Vec<u8> = Vec::new();
     let mut filename = "sticker.png".to_string();
 
-    while let Some(field) = multipart.next_field().await.map_err(|e| {
-        NexusError::Validation { message: format!("multipart error: {e}") }
-    })? {
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| NexusError::Validation {
+            message: format!("multipart error: {e}"),
+        })?
+    {
         let field_name = field.name().unwrap_or("").to_string();
         match field_name.as_str() {
             "name" => {
-                name = field.text().await.map_err(|e| NexusError::Validation { message: e.to_string() })?;
+                name = field.text().await.map_err(|e| NexusError::Validation {
+                    message: e.to_string(),
+                })?;
             }
             "description" => {
-                let text = field.text().await.map_err(|e| NexusError::Validation { message: e.to_string() })?;
+                let text = field.text().await.map_err(|e| NexusError::Validation {
+                    message: e.to_string(),
+                })?;
                 description = Some(text);
             }
             "type" => {
-                sticker_type = field.text().await.map_err(|e| NexusError::Validation { message: e.to_string() })?;
+                sticker_type = field.text().await.map_err(|e| NexusError::Validation {
+                    message: e.to_string(),
+                })?;
             }
             "file" => {
                 if let Some(fname) = field.file_name() {
                     filename = fname.to_string();
                 }
-                asset_bytes = field.bytes().await.map_err(|e| NexusError::Validation { message: e.to_string() })?.to_vec();
+                asset_bytes = field
+                    .bytes()
+                    .await
+                    .map_err(|e| NexusError::Validation {
+                        message: e.to_string(),
+                    })?
+                    .to_vec();
             }
             _ => {}
         }
     }
 
     if name.trim().is_empty() || name.len() > 64 {
-        return Err(NexusError::Validation { message: "name must be 1–64 characters".into() });
+        return Err(NexusError::Validation {
+            message: "name must be 1–64 characters".into(),
+        });
     }
     if asset_bytes.is_empty() {
-        return Err(NexusError::Validation { message: "file is required".into() });
+        return Err(NexusError::Validation {
+            message: "file is required".into(),
+        });
     }
     if !["png", "apng", "lottie"].contains(&sticker_type.as_str()) {
-        return Err(NexusError::Validation { message: "type must be png, apng, or lottie".into() });
+        return Err(NexusError::Validation {
+            message: "type must be png, apng, or lottie".into(),
+        });
     }
 
     // Upload to storage
@@ -296,7 +344,7 @@ async fn upload_sticker(
         .storage
         .put_object(&storage_key, asset_bytes, media_type)
         .await
-        .map_err(|e| NexusError::Internal(e))?;
+        .map_err(NexusError::Internal)?;
     // 10-year presigned URL effectively serves as a permanent CDN URL for stickers
     let asset_url = state
         .storage
@@ -355,17 +403,17 @@ async fn rename_sticker(
 ) -> NexusResult<Json<serde_json::Value>> {
     require_manage_emojis(&state, auth.user_id, server_id).await?;
     if body.name.trim().is_empty() || body.name.len() > 64 {
-        return Err(NexusError::Validation { message: "name must be 1–64 characters".into() });
+        return Err(NexusError::Validation {
+            message: "name must be 1–64 characters".into(),
+        });
     }
-    sqlx::query(
-        "UPDATE stickers SET name = $1 WHERE id = $2::uuid AND server_id = $3::uuid",
-    )
-    .bind(body.name.trim().to_string())
-    .bind(sticker_id.to_string())
-    .bind(server_id.to_string())
-    .execute(&state.db.pool)
-    .await
-    .map_err(NexusError::Database)?;
+    sqlx::query("UPDATE stickers SET name = $1 WHERE id = $2::uuid AND server_id = $3::uuid")
+        .bind(body.name.trim().to_string())
+        .bind(sticker_id.to_string())
+        .bind(server_id.to_string())
+        .execute(&state.db.pool)
+        .await
+        .map_err(NexusError::Database)?;
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
@@ -377,14 +425,12 @@ async fn delete_sticker(
 ) -> NexusResult<Json<serde_json::Value>> {
     require_manage_emojis(&state, auth.user_id, server_id).await?;
 
-    sqlx::query(
-        "DELETE FROM stickers WHERE id = $1::uuid AND server_id = $2::uuid",
-    )
-    .bind(sticker_id.to_string())
-    .bind(server_id.to_string())
-    .execute(&state.db.pool)
-    .await
-    .map_err(NexusError::Database)?;
+    sqlx::query("DELETE FROM stickers WHERE id = $1::uuid AND server_id = $2::uuid")
+        .bind(sticker_id.to_string())
+        .bind(server_id.to_string())
+        .execute(&state.db.pool)
+        .await
+        .map_err(NexusError::Database)?;
 
     let _ = state.gateway_tx.send(GatewayEvent {
         event_type: event_types::GUILD_STICKERS_UPDATE.into(),
@@ -457,7 +503,9 @@ async fn fetch_stickers_for_packs(
             id,
             pack_id: pid,
             name: r.try_get("name").unwrap_or_default(),
-            description: r.try_get::<Option<String>, _>("description").unwrap_or(None),
+            description: r
+                .try_get::<Option<String>, _>("description")
+                .unwrap_or(None),
             asset_url: r.try_get("asset_url").unwrap_or_default(),
             sticker_type: r.try_get("sticker_type").unwrap_or_else(|_| "png".into()),
             created_at,
@@ -469,13 +517,12 @@ async fn fetch_stickers_for_packs(
 
 /// Find or create the default server sticker pack for `server_id`.
 async fn ensure_server_pack(state: &AppState, server_id: Uuid) -> NexusResult<Uuid> {
-    let existing = sqlx::query(
-        "SELECT id::text AS id FROM sticker_packs WHERE server_id = $1::uuid LIMIT 1",
-    )
-    .bind(server_id.to_string())
-    .fetch_optional(&state.db.pool)
-    .await
-    .map_err(NexusError::Database)?;
+    let existing =
+        sqlx::query("SELECT id::text AS id FROM sticker_packs WHERE server_id = $1::uuid LIMIT 1")
+            .bind(server_id.to_string())
+            .fetch_optional(&state.db.pool)
+            .await
+            .map_err(NexusError::Database)?;
 
     if let Some(row) = existing {
         let id_str: String = row.try_get("id").unwrap_or_default();
@@ -487,7 +534,9 @@ async fn ensure_server_pack(state: &AppState, server_id: Uuid) -> NexusResult<Uu
     let pack_id = snowflake::generate_id();
     let server = servers::find_by_id(&state.db.pool, server_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Server".into(),
+        })?;
     sqlx::query(
         "INSERT INTO sticker_packs (id, name, server_id, is_premium) VALUES ($1::uuid, $2, $3::uuid, FALSE)",
     )

@@ -77,8 +77,22 @@ pub async fn create_message(
     mention_everyone: bool,
 ) -> Result<MessageRow, sqlx::Error> {
     // Build Postgres array literals: '{}' for empty, '{uuid1,uuid2}' for populated.
-    let mentions_arr = format!("{{{}}}", mentions.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","));
-    let mention_roles_arr = format!("{{{}}}", mention_roles.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(","));
+    let mentions_arr = format!(
+        "{{{}}}",
+        mentions
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let mention_roles_arr = format!(
+        "{{{}}}",
+        mention_roles
+            .iter()
+            .map(|x| x.to_string())
+            .collect::<Vec<_>>()
+            .join(",")
+    );
 
     let q = format!(
         "INSERT INTO messages ( \
@@ -96,18 +110,18 @@ pub async fn create_message(
          ) RETURNING {MESSAGE_COLS}"
     );
     sqlx::query_as::<_, MessageRow>(&q)
-    .bind(id.to_string())
-    .bind(channel_id.to_string())
-    .bind(author_id.to_string())
-    .bind(content)
-    .bind(message_type)
-    .bind(&mentions_arr)
-    .bind(&mention_roles_arr)
-    .bind(mention_everyone)
-    .bind(reference_message_id.map(|x| x.to_string()))
-    .bind(reference_channel_id.map(|x| x.to_string()))
-    .fetch_one(pool)
-    .await
+        .bind(id.to_string())
+        .bind(channel_id.to_string())
+        .bind(author_id.to_string())
+        .bind(content)
+        .bind(message_type)
+        .bind(&mentions_arr)
+        .bind(&mention_roles_arr)
+        .bind(mention_everyone)
+        .bind(reference_message_id.map(|x| x.to_string()))
+        .bind(reference_channel_id.map(|x| x.to_string()))
+        .fetch_one(pool)
+        .await
 }
 
 /// Find a message by ID.
@@ -143,10 +157,7 @@ pub async fn find_by_ids_map(
     }
     qb.push(")");
 
-    let rows = qb
-        .build_query_as::<MessageRow>()
-        .fetch_all(pool)
-        .await?;
+    let rows = qb.build_query_as::<MessageRow>().fetch_all(pool).await?;
 
     Ok(rows.into_iter().map(|row| (row.id, row)).collect())
 }
@@ -176,11 +187,11 @@ pub async fn list_channel_messages(
              LIMIT $3"
         );
         sqlx::query_as::<_, MessageRow>(&q)
-        .bind(channel_id.to_string())
-        .bind(before_id.to_string())
-        .bind(limit)
-        .fetch_all(pool)
-        .await
+            .bind(channel_id.to_string())
+            .bind(before_id.to_string())
+            .bind(limit)
+            .fetch_all(pool)
+            .await
     } else if let Some(after_id) = after {
         let q = format!(
             "SELECT * FROM ( \
@@ -192,11 +203,11 @@ pub async fn list_channel_messages(
              ) sub ORDER BY created_at DESC"
         );
         sqlx::query_as::<_, MessageRow>(&q)
-        .bind(channel_id.to_string())
-        .bind(after_id.to_string())
-        .bind(limit)
-        .fetch_all(pool)
-        .await
+            .bind(channel_id.to_string())
+            .bind(after_id.to_string())
+            .bind(limit)
+            .fetch_all(pool)
+            .await
     } else {
         let q = format!(
             "SELECT {MESSAGE_COLS} FROM messages \
@@ -205,10 +216,10 @@ pub async fn list_channel_messages(
              LIMIT $2"
         );
         sqlx::query_as::<_, MessageRow>(&q)
-        .bind(channel_id.to_string())
-        .bind(limit)
-        .fetch_all(pool)
-        .await
+            .bind(channel_id.to_string())
+            .bind(limit)
+            .fetch_all(pool)
+            .await
     }
 }
 
@@ -285,11 +296,11 @@ pub async fn list_channel_messages_with_author(
              LIMIT $3"
         );
         sqlx::query_as::<_, MessageWithAuthor>(&q)
-        .bind(channel_id.to_string())
-        .bind(before_id.to_string())
-        .bind(limit)
-        .fetch_all(pool)
-        .await
+            .bind(channel_id.to_string())
+            .bind(before_id.to_string())
+            .bind(limit)
+            .fetch_all(pool)
+            .await
     } else if let Some(after_id) = after {
         let q = format!(
             "SELECT * FROM ( \
@@ -303,11 +314,11 @@ pub async fn list_channel_messages_with_author(
              ) sub ORDER BY created_at DESC"
         );
         sqlx::query_as::<_, MessageWithAuthor>(&q)
-        .bind(channel_id.to_string())
-        .bind(after_id.to_string())
-        .bind(limit)
-        .fetch_all(pool)
-        .await
+            .bind(channel_id.to_string())
+            .bind(after_id.to_string())
+            .bind(limit)
+            .fetch_all(pool)
+            .await
     } else {
         let q = format!(
             "SELECT {MESSAGE_COLS_M}, u.username AS author_username \
@@ -318,10 +329,10 @@ pub async fn list_channel_messages_with_author(
              LIMIT $2"
         );
         sqlx::query_as::<_, MessageWithAuthor>(&q)
-        .bind(channel_id.to_string())
-        .bind(limit)
-        .fetch_all(pool)
-        .await
+            .bind(channel_id.to_string())
+            .bind(limit)
+            .fetch_all(pool)
+            .await
     }
 }
 
@@ -339,10 +350,10 @@ pub async fn update_message(
          RETURNING {MESSAGE_COLS}"
     );
     sqlx::query_as::<_, MessageRow>(&q)
-    .bind(content)
-    .bind(id.to_string())
-    .fetch_one(pool)
-    .await
+        .bind(content)
+        .bind(id.to_string())
+        .fetch_one(pool)
+        .await
 }
 
 /// Delete a single message.
@@ -369,20 +380,24 @@ pub async fn bulk_delete_messages(pool: &sqlx::AnyPool, ids: &[Uuid]) -> Result<
 
 /// Pin a message.
 pub async fn pin_message(pool: &sqlx::AnyPool, id: Uuid) -> Result<MessageRow, sqlx::Error> {
-    let q = format!("UPDATE messages SET pinned = true, updated_at = CURRENT_TIMESTAMP WHERE id = $1::uuid RETURNING {MESSAGE_COLS}");
+    let q = format!(
+        "UPDATE messages SET pinned = true, updated_at = CURRENT_TIMESTAMP WHERE id = $1::uuid RETURNING {MESSAGE_COLS}"
+    );
     sqlx::query_as::<_, MessageRow>(&q)
-    .bind(id.to_string())
-    .fetch_one(pool)
-    .await
+        .bind(id.to_string())
+        .fetch_one(pool)
+        .await
 }
 
 /// Unpin a message.
 pub async fn unpin_message(pool: &sqlx::AnyPool, id: Uuid) -> Result<MessageRow, sqlx::Error> {
-    let q = format!("UPDATE messages SET pinned = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1::uuid RETURNING {MESSAGE_COLS}");
+    let q = format!(
+        "UPDATE messages SET pinned = false, updated_at = CURRENT_TIMESTAMP WHERE id = $1::uuid RETURNING {MESSAGE_COLS}"
+    );
     sqlx::query_as::<_, MessageRow>(&q)
-    .bind(id.to_string())
-    .fetch_one(pool)
-    .await
+        .bind(id.to_string())
+        .fetch_one(pool)
+        .await
 }
 
 /// Get pinned messages in a channel.
@@ -390,11 +405,13 @@ pub async fn get_pinned_messages(
     pool: &sqlx::AnyPool,
     channel_id: Uuid,
 ) -> Result<Vec<MessageRow>, sqlx::Error> {
-    let q = format!("SELECT {MESSAGE_COLS} FROM messages WHERE channel_id = $1::uuid AND pinned = true ORDER BY created_at DESC");
+    let q = format!(
+        "SELECT {MESSAGE_COLS} FROM messages WHERE channel_id = $1::uuid AND pinned = true ORDER BY created_at DESC"
+    );
     sqlx::query_as::<_, MessageRow>(&q)
-    .bind(channel_id.to_string())
-    .fetch_all(pool)
-    .await
+        .bind(channel_id.to_string())
+        .fetch_all(pool)
+        .await
 }
 
 /// Search messages using full-text search (PostgreSQL only; returns empty for SQLite).
@@ -416,13 +433,13 @@ pub async fn search_messages(
              LIMIT $4 OFFSET $5"
         );
         sqlx::query_as::<_, MessageRow>(&q)
-        .bind(cid.to_string())
-        .bind(query)
-        .bind(query)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(pool)
-        .await
+            .bind(cid.to_string())
+            .bind(query)
+            .bind(query)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(pool)
+            .await
     } else {
         let q = format!(
             "SELECT {MESSAGE_COLS} FROM messages \
@@ -431,12 +448,12 @@ pub async fn search_messages(
              LIMIT $3 OFFSET $4"
         );
         sqlx::query_as::<_, MessageRow>(&q)
-        .bind(query)
-        .bind(query)
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(pool)
-        .await
+            .bind(query)
+            .bind(query)
+            .bind(limit)
+            .bind(offset)
+            .fetch_all(pool)
+            .await
     }
 }
 

@@ -31,8 +31,8 @@ pub async fn create_thread(
     tags: &[String],
 ) -> Result<ThreadRow, sqlx::Error> {
     let tags_json = serde_json::to_string(tags).unwrap_or_else(|_| "[]".to_string());
-    sqlx::query_as::<_, ThreadRow>(
-        &format!(r#"
+    sqlx::query_as::<_, ThreadRow>(&format!(
+        r#"
         INSERT INTO threads (
             channel_id, parent_message_id, owner_id, title,
             message_count, member_count, auto_archive_minutes,
@@ -41,8 +41,9 @@ pub async fn create_thread(
         )
         VALUES ($1, $2, $3, $4, 0, 1, $5, false, false, $6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         RETURNING {}, $7 AS parent_channel_id
-        "#, THREAD_COLS),
-    )
+        "#,
+        THREAD_COLS
+    ))
     .bind(channel_id.to_string())
     .bind(parent_message_id.map(|x| x.to_string()))
     .bind(owner_id.to_string())
@@ -59,15 +60,19 @@ pub async fn create_thread(
 // ============================================================
 
 /// Get a thread by its channel ID, including parent_channel_id.
-pub async fn find_by_id(pool: &sqlx::AnyPool, channel_id: Uuid) -> Result<Option<ThreadRow>, sqlx::Error> {
-    sqlx::query_as::<_, ThreadRow>(
-        &format!(r#"
+pub async fn find_by_id(
+    pool: &sqlx::AnyPool,
+    channel_id: Uuid,
+) -> Result<Option<ThreadRow>, sqlx::Error> {
+    sqlx::query_as::<_, ThreadRow>(&format!(
+        r#"
         SELECT {}, c.parent_id::text AS parent_channel_id
         FROM threads t
         JOIN channels c ON c.id = t.channel_id
         WHERE t.channel_id = $1
-        "#, THREAD_COLS_T),
-    )
+        "#,
+        THREAD_COLS_T
+    ))
     .bind(channel_id.to_string())
     .fetch_optional(pool)
     .await
@@ -79,8 +84,8 @@ pub async fn list_active(
     parent_channel_id: Uuid,
     limit: i64,
 ) -> Result<Vec<ThreadRow>, sqlx::Error> {
-    sqlx::query_as::<_, ThreadRow>(
-        &format!(r#"
+    sqlx::query_as::<_, ThreadRow>(&format!(
+        r#"
         SELECT {}, c.parent_id::text AS parent_channel_id
         FROM threads t
         JOIN channels c ON c.id = t.channel_id
@@ -89,8 +94,9 @@ pub async fn list_active(
           AND t.locked = false
         ORDER BY t.updated_at DESC
         LIMIT $2
-        "#, THREAD_COLS_T),
-    )
+        "#,
+        THREAD_COLS_T
+    ))
     .bind(parent_channel_id.to_string())
     .bind(limit)
     .fetch_all(pool)
@@ -105,8 +111,8 @@ pub async fn list_archived(
     before: Option<chrono::DateTime<chrono::Utc>>,
 ) -> Result<Vec<ThreadRow>, sqlx::Error> {
     if let Some(b) = before {
-        sqlx::query_as::<_, ThreadRow>(
-            &format!(r#"
+        sqlx::query_as::<_, ThreadRow>(&format!(
+            r#"
             SELECT {}, c.parent_id::text AS parent_channel_id
             FROM threads t
             JOIN channels c ON c.id = t.channel_id
@@ -115,16 +121,17 @@ pub async fn list_archived(
               AND t.archived_at < $2
             ORDER BY t.archived_at DESC
             LIMIT $3
-            "#, THREAD_COLS_T),
-        )
+            "#,
+            THREAD_COLS_T
+        ))
         .bind(parent_channel_id.to_string())
         .bind(b.to_rfc3339())
         .bind(limit)
         .fetch_all(pool)
         .await
     } else {
-        sqlx::query_as::<_, ThreadRow>(
-            &format!(r#"
+        sqlx::query_as::<_, ThreadRow>(&format!(
+            r#"
             SELECT {}, c.parent_id::text AS parent_channel_id
             FROM threads t
             JOIN channels c ON c.id = t.channel_id
@@ -132,8 +139,9 @@ pub async fn list_archived(
               AND t.archived = true
             ORDER BY t.archived_at DESC
             LIMIT $2
-            "#, THREAD_COLS_T),
-        )
+            "#,
+            THREAD_COLS_T
+        ))
         .bind(parent_channel_id.to_string())
         .bind(limit)
         .fetch_all(pool)
@@ -162,11 +170,11 @@ pub async fn update_thread(
     } else {
         ""
     };
-    let tags_json: Option<String> = tags.map(|t| serde_json::to_string(t).unwrap_or_else(|_| "[]".to_string()));
+    let tags_json: Option<String> =
+        tags.map(|t| serde_json::to_string(t).unwrap_or_else(|_| "[]".to_string()));
 
-    let row = sqlx::query_as::<_, ThreadRow>(
-        &format!(
-            r#"
+    let row = sqlx::query_as::<_, ThreadRow>(&format!(
+        r#"
             UPDATE threads
             SET
                 title = COALESCE($1, title),
@@ -179,10 +187,8 @@ pub async fn update_thread(
             WHERE channel_id = $6
             RETURNING {}, (SELECT parent_id FROM channels WHERE id = $7)::text AS parent_channel_id
             "#,
-            archived_at_clause,
-            THREAD_COLS,
-        ),
-    )
+        archived_at_clause, THREAD_COLS,
+    ))
     .bind(title)
     .bind(archived)
     .bind(locked)
@@ -197,7 +203,10 @@ pub async fn update_thread(
 }
 
 /// Increment the thread message count.
-pub async fn increment_message_count(pool: &sqlx::AnyPool, channel_id: Uuid) -> Result<(), sqlx::Error> {
+pub async fn increment_message_count(
+    pool: &sqlx::AnyPool,
+    channel_id: Uuid,
+) -> Result<(), sqlx::Error> {
     sqlx::query(
         "UPDATE threads SET message_count = message_count + 1, updated_at = CURRENT_TIMESTAMP WHERE channel_id = $1",
     )
@@ -212,7 +221,11 @@ pub async fn increment_message_count(pool: &sqlx::AnyPool, channel_id: Uuid) -> 
 // ============================================================
 
 /// Add a user as a thread member.
-pub async fn add_member(pool: &sqlx::AnyPool, thread_id: Uuid, user_id: Uuid) -> Result<(), sqlx::Error> {
+pub async fn add_member(
+    pool: &sqlx::AnyPool,
+    thread_id: Uuid,
+    user_id: Uuid,
+) -> Result<(), sqlx::Error> {
     sqlx::query(
         r#"
         INSERT INTO thread_members (thread_id, user_id, joined_at)
@@ -248,13 +261,11 @@ pub async fn remove_member(
     thread_id: Uuid,
     user_id: Uuid,
 ) -> Result<bool, sqlx::Error> {
-    let result = sqlx::query(
-        "DELETE FROM thread_members WHERE thread_id = $1 AND user_id = $2",
-    )
-    .bind(thread_id.to_string())
-    .bind(user_id.to_string())
-    .execute(pool)
-    .await?;
+    let result = sqlx::query("DELETE FROM thread_members WHERE thread_id = $1 AND user_id = $2")
+        .bind(thread_id.to_string())
+        .bind(user_id.to_string())
+        .execute(pool)
+        .await?;
 
     if result.rows_affected() > 0 {
         sqlx::query(
@@ -275,14 +286,16 @@ pub async fn remove_member(
 }
 
 /// Check if a user is a member of a thread.
-pub async fn is_member(pool: &sqlx::AnyPool, thread_id: Uuid, user_id: Uuid) -> Result<bool, sqlx::Error> {
-    let row = sqlx::query(
-        "SELECT 1 FROM thread_members WHERE thread_id = $1 AND user_id = $2",
-    )
-    .bind(thread_id.to_string())
-    .bind(user_id.to_string())
-    .fetch_optional(pool)
-    .await?;
+pub async fn is_member(
+    pool: &sqlx::AnyPool,
+    thread_id: Uuid,
+    user_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let row = sqlx::query("SELECT 1 FROM thread_members WHERE thread_id = $1 AND user_id = $2")
+        .bind(thread_id.to_string())
+        .bind(user_id.to_string())
+        .fetch_optional(pool)
+        .await?;
     Ok(row.is_some())
 }
 

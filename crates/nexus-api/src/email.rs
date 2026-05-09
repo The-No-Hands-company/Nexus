@@ -121,27 +121,27 @@ impl EmailService {
         self.send(to_email, "Verify your Nexus email", &html).await
     }
 
-        /// Send a password reset email with a clickable one-time link.
-        pub async fn send_password_reset_email(
-                &self,
-                to_email: &str,
-                username: &str,
-                raw_token: &str,
-        ) -> Result<(), String> {
-                if !self.is_enabled() {
-                        tracing::debug!(
-                                to = to_email,
-                                token = raw_token,
-                                "Password reset email not sent (no API key configured — token logged for dev)"
-                        );
-                        return Ok(());
-                }
+    /// Send a password reset email with a clickable one-time link.
+    pub async fn send_password_reset_email(
+        &self,
+        to_email: &str,
+        username: &str,
+        raw_token: &str,
+    ) -> Result<(), String> {
+        if !self.is_enabled() {
+            tracing::debug!(
+                to = to_email,
+                token = raw_token,
+                "Password reset email not sent (no API key configured — token logged for dev)"
+            );
+            return Ok(());
+        }
 
-                let base = self.config.base_url.trim_end_matches('/');
-                let reset_url = format!("{base}/reset-password?token={raw_token}");
+        let base = self.config.base_url.trim_end_matches('/');
+        let reset_url = format!("{base}/reset-password?token={raw_token}");
 
-                let html = format!(
-                        r#"<!DOCTYPE html>
+        let html = format!(
+            r#"<!DOCTYPE html>
 <html>
 <head><meta charset=\"utf-8\"></head>
 <body style=\"font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 40px;\">
@@ -160,8 +160,9 @@ impl EmailService {
     </div>
 </body>
 </html>"#
-                );
+        );
 
-                self.send(to_email, "Reset your Nexus password", &html).await
-        }
+        self.send(to_email, "Reset your Nexus password", &html)
+            .await
+    }
 }

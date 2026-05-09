@@ -15,7 +15,7 @@
 //!    Mozilla Autopush, etc.).
 //! 4. Endpoints that return 410 Gone are removed (user unsubscribed externally).
 
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine as _};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD as B64};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sqlx::AnyPool;
@@ -109,8 +109,7 @@ impl PushSender {
         user_id: Uuid,
         payload: &PushPayload,
     ) -> anyhow::Result<()> {
-        let subs =
-            nexus_db::repository::push_subscriptions::list_for_user(pool, user_id).await?;
+        let subs = nexus_db::repository::push_subscriptions::list_for_user(pool, user_id).await?;
 
         if subs.is_empty() {
             return Ok(());
@@ -125,11 +124,8 @@ impl PushSender {
                 .await
             {
                 Ok(()) => {
-                    let _ = nexus_db::repository::push_subscriptions::touch(
-                        pool,
-                        &sub.endpoint,
-                    )
-                    .await;
+                    let _ =
+                        nexus_db::repository::push_subscriptions::touch(pool, &sub.endpoint).await;
                 }
                 Err(PushError::Gone) => {
                     gone_endpoints.push(sub.endpoint.clone());
@@ -146,11 +142,8 @@ impl PushSender {
         }
 
         if !gone_endpoints.is_empty() {
-            let _ = nexus_db::repository::push_subscriptions::delete_gone(
-                pool,
-                &gone_endpoints,
-            )
-            .await;
+            let _ =
+                nexus_db::repository::push_subscriptions::delete_gone(pool, &gone_endpoints).await;
         }
 
         Ok(())
@@ -178,7 +171,10 @@ impl PushSender {
         let resp = self
             .http
             .post(endpoint)
-            .header("Authorization", format!("vapid t={vapid_token},k={}", self.public_key_b64))
+            .header(
+                "Authorization",
+                format!("vapid t={vapid_token},k={}", self.public_key_b64),
+            )
             .header("Content-Encoding", "aes128gcm")
             .header("Content-Type", "application/octet-stream")
             .header("TTL", "86400") // 24 hour TTL
@@ -188,23 +184,21 @@ impl PushSender {
             .map_err(|e| PushError::Network(e.to_string()))?;
 
         match resp.status().as_u16() {
-            200 | 201 | 202 => Ok(()),
+            200..=202 => Ok(()),
             410 => Err(PushError::Gone),
             404 => Err(PushError::Gone),
             413 => Err(PushError::PayloadTooLarge),
-            status => Err(PushError::Remote(status, resp.text().await.unwrap_or_default())),
+            status => Err(PushError::Remote(
+                status,
+                resp.text().await.unwrap_or_default(),
+            )),
         }
     }
 
     fn build_vapid_token(&self, endpoint: &str) -> Result<String, PushError> {
         // Extract the audience (scheme + host) from the endpoint URL
-        let url = url::Url::parse(endpoint)
-            .map_err(|_| PushError::InvalidEndpoint)?;
-        let audience = format!(
-            "{}://{}",
-            url.scheme(),
-            url.host_str().unwrap_or("unknown")
-        );
+        let url = url::Url::parse(endpoint).map_err(|_| PushError::InvalidEndpoint)?;
+        let audience = format!("{}://{}", url.scheme(), url.host_str().unwrap_or("unknown"));
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -222,11 +216,10 @@ impl PushSender {
         let signing_input = format!("{header}.{claims_b64}");
 
         // Sign with P-256 ECDSA
-        use p256::ecdsa::{signature::Signer, Signature, SigningKey};
-        let signing_key = SigningKey::from_slice(&self.private_key_bytes)
-            .map_err(|_| PushError::KeyError)?;
-        let signature: Signature = signing_key
-            .sign(signing_input.as_bytes());
+        use p256::ecdsa::{Signature, SigningKey, signature::Signer};
+        let signing_key =
+            SigningKey::from_slice(&self.private_key_bytes).map_err(|_| PushError::KeyError)?;
+        let signature: Signature = signing_key.sign(signing_input.as_bytes());
         let sig_b64 = B64.encode(signature.to_bytes().as_slice());
 
         Ok(format!("{signing_input}.{sig_b64}"))
@@ -244,7 +237,7 @@ impl PushSender {
         // 3. Derive shared ECDH secret + HKDF to get content encryption key + nonce
         // 4. AES-128-GCM encrypt the plaintext with one-byte padding record delimiter
 
-        use aes_gcm::{aead::Aead, aead::KeyInit, Aes128Gcm};
+        use aes_gcm::{Aes128Gcm, aead::Aead, aead::KeyInit};
         use p256::{PublicKey, SecretKey};
         use rand_core::OsRng;
 
@@ -283,8 +276,18 @@ impl PushSender {
         // HKDF to derive PRK from auth secret + shared secret
         // RFC 8291 §3.3
         let prk = hkdf_extract(&auth_bytes, shared_secret.as_slice());
-        let key_info = build_info("Content-Encryption-Key", &auth_bytes, &recipient_pub_bytes, sender_pub_bytes_slice);
-        let nonce_info = build_info("Content-Encryption-Nonce", &auth_bytes, &recipient_pub_bytes, sender_pub_bytes_slice);
+        let key_info = build_info(
+            "Content-Encryption-Key",
+            &auth_bytes,
+            &recipient_pub_bytes,
+            sender_pub_bytes_slice,
+        );
+        let nonce_info = build_info(
+            "Content-Encryption-Nonce",
+            &auth_bytes,
+            &recipient_pub_bytes,
+            sender_pub_bytes_slice,
+        );
 
         let cek: [u8; 16] = hkdf_expand(&prk, &key_info, 16)
             .try_into()
@@ -306,7 +309,8 @@ impl PushSender {
         // Build the aes128gcm content-coding header (RFC 8188 §2.1):
         // salt (16) || rs (4, big-endian) || idlen (1) || keyid (sender pub key, 65 bytes) || ciphertext
         let rs: u32 = (plaintext.len() as u32) + 2 + 16; // record size = plaintext + delimiter + GCM tag
-        let mut output = Vec::with_capacity(16 + 4 + 1 + sender_pub_bytes_slice.len() + ciphertext.len());
+        let mut output =
+            Vec::with_capacity(16 + 4 + 1 + sender_pub_bytes_slice.len() + ciphertext.len());
         output.extend_from_slice(&salt);
         output.extend_from_slice(&rs.to_be_bytes());
         output.push(sender_pub_bytes_slice.len() as u8);

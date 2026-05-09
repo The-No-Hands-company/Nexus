@@ -56,10 +56,10 @@ impl SessionManager {
 
     /// Remove a session.
     pub async fn remove(&self, session_id: &str) {
-        if let Some(session) = self.sessions.write().await.remove(session_id) {
-            if let Some(sessions) = self.user_sessions.write().await.get_mut(&session.user_id) {
-                sessions.retain(|s| s != session_id);
-            }
+        if let Some(session) = self.sessions.write().await.remove(session_id)
+            && let Some(sessions) = self.user_sessions.write().await.get_mut(&session.user_id)
+        {
+            sessions.retain(|s| s != session_id);
         }
     }
 
@@ -98,8 +98,12 @@ impl Default for SessionManager {
 mod tests {
     use super::*;
 
-    fn uid() -> Uuid { Uuid::new_v4() }
-    fn sid() -> String { Uuid::new_v4().to_string() }
+    fn uid() -> Uuid {
+        Uuid::new_v4()
+    }
+    fn sid() -> String {
+        Uuid::new_v4().to_string()
+    }
 
     // ── register / active_count ───────────────────────────────────────────────
 
@@ -154,7 +158,10 @@ mod tests {
         assert!(mgr.is_online(user).await, "still online with one session");
 
         mgr.remove(&s2).await;
-        assert!(!mgr.is_online(user).await, "offline after all sessions removed");
+        assert!(
+            !mgr.is_online(user).await,
+            "offline after all sessions removed"
+        );
     }
 
     // ── remove ────────────────────────────────────────────────────────────────

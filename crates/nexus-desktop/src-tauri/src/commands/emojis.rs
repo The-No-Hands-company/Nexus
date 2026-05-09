@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 use uuid::Uuid;
 
-use crate::state::AppState;
 use super::api_client;
+use crate::state::AppState;
 
 /// Emoji as returned to the TypeScript frontend (camelCase).
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -93,7 +93,9 @@ pub async fn rename_emoji(
     let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
     let body = serde_json::json!({ "name": name });
     let resp = client
-        .patch(format!("{base}/api/v1/servers/{server_id}/emojis/{emoji_id}"))
+        .patch(format!(
+            "{base}/api/v1/servers/{server_id}/emojis/{emoji_id}"
+        ))
         .json(&body)
         .send()
         .await
@@ -116,7 +118,9 @@ pub async fn delete_emoji(
     let session = state.session_snapshot();
     let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
     let resp = client
-        .delete(format!("{base}/api/v1/servers/{server_id}/emojis/{emoji_id}"))
+        .delete(format!(
+            "{base}/api/v1/servers/{server_id}/emojis/{emoji_id}"
+        ))
         .send()
         .await
         .map_err(|e| e.to_string())?;

@@ -7,8 +7,7 @@
 
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::UpdaterExt;
-use tokio::time::{interval, Duration};
-
+use tokio::time::{Duration, interval};
 
 /// Spawn a background task that polls for updates on a fixed interval.
 ///

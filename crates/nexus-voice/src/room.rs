@@ -167,9 +167,15 @@ impl VoiceRoom {
 mod tests {
     use super::*;
 
-    fn channel() -> Uuid { Uuid::new_v4() }
-    fn user()    -> Uuid { Uuid::new_v4() }
-    fn session() -> String { Uuid::new_v4().to_string() }
+    fn channel() -> Uuid {
+        Uuid::new_v4()
+    }
+    fn user() -> Uuid {
+        Uuid::new_v4()
+    }
+    fn session() -> String {
+        Uuid::new_v4().to_string()
+    }
 
     // ── VoiceRoom construction ────────────────────────────────────────────────
 
@@ -303,7 +309,8 @@ mod tests {
         let uid = user();
         room.join(uid, session()).await;
 
-        room.update_state(uid, None, None, Some(true), Some(true)).await;
+        room.update_state(uid, None, None, Some(true), Some(true))
+            .await;
         let p = room.get_participant(uid).await.unwrap();
         assert!(p.video);
         assert!(p.screen_share);
@@ -313,7 +320,8 @@ mod tests {
     async fn update_state_no_op_for_unknown_user() {
         let room = VoiceRoom::new(channel());
         // Should not panic for a user who isn't in the room
-        room.update_state(user(), Some(true), Some(true), Some(true), Some(true)).await;
+        room.update_state(user(), Some(true), Some(true), Some(true), Some(true))
+            .await;
     }
 
     // ── sync_from_voice_state ─────────────────────────────────────────────────

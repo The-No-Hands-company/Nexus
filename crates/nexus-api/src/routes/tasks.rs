@@ -17,10 +17,10 @@
 //! DELETE /reminders/:id                              — Delete reminder
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, Query, State},
     middleware,
     routing::{delete, get, patch, post},
-    Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_common::snowflake;
@@ -29,12 +29,15 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         // Server-scoped tasks
-        .route("/servers/{server_id}/tasks", post(create_task).get(list_tasks))
+        .route(
+            "/servers/{server_id}/tasks",
+            post(create_task).get(list_tasks),
+        )
         .route(
             "/servers/{server_id}/tasks/{task_id}",
             get(get_task).patch(update_task).delete(delete_task),
@@ -54,7 +57,9 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/tasks/{task_id}/reminders", post(create_reminder))
         .route("/users/@me/reminders", get(my_reminders))
         .route("/reminders/{reminder_id}", delete(delete_reminder))
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ── Request / Response ────────────────────────────────────────────────────────
@@ -159,7 +164,8 @@ async fn create_task(
         Some(task.id),
         &serde_json::json!({"title": task.title, "status": task.status}),
         None,
-    ).await;
+    )
+    .await;
 
     Ok(Json(task))
 }
@@ -192,7 +198,9 @@ async fn list_tasks(
         .await
     };
 
-    results.map(Json).map_err(|e| NexusError::Internal(e.into()))
+    results
+        .map(Json)
+        .map_err(|e| NexusError::Internal(e.into()))
 }
 
 async fn get_task(
@@ -213,13 +221,12 @@ async fn update_task(
     Path((_server_id, task_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<UpdateTaskRequest>,
 ) -> NexusResult<Json<nexus_common::models::collaboration::Task>> {
-    if let Some(ref s) = body.status {
-        if !matches!(s.as_str(), "open" | "in_progress" | "done" | "cancelled") {
+    if let Some(ref s) = body.status
+        && !matches!(s.as_str(), "open" | "in_progress" | "done" | "cancelled") {
             return Err(NexusError::Validation {
                 message: "Invalid status".into(),
             });
         }
-    }
     let task = tasks::update_task(
         &state.db.pool,
         task_id,
@@ -228,9 +235,7 @@ async fn update_task(
         body.status.as_deref(),
         body.priority.as_deref(),
         body.assignee_id,
-        body.due_at
-            .as_ref()
-            .map(|o| o.as_deref()),
+        body.due_at.as_ref().map(|o| o.as_deref()),
         body.position,
     )
     .await

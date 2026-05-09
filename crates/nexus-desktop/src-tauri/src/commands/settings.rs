@@ -3,8 +3,8 @@
 use serde_json::json;
 use tauri::State;
 
-use crate::state::AppState;
 use super::api_client;
+use crate::state::AppState;
 
 /// Get all current settings as a JSON object.
 #[tauri::command]
@@ -24,23 +24,17 @@ pub async fn set_setting(
     key: String,
     value: serde_json::Value,
 ) -> Result<(), String> {
-    match key.as_str() {
-        "server_url" => {
-            if let Some(url) = value.as_str() {
-                state.session.lock().unwrap().server_url = url.to_owned();
-            }
-        }
-        _ => {}
+    if key.as_str() == "server_url"
+        && let Some(url) = value.as_str()
+    {
+        state.session.lock().unwrap().server_url = url.to_owned();
     }
     Ok(())
 }
 
 /// Convenience: set just the server URL.
 #[tauri::command]
-pub async fn set_server_url(
-    state: State<'_, AppState>,
-    url: String,
-) -> Result<(), String> {
+pub async fn set_server_url(state: State<'_, AppState>, url: String) -> Result<(), String> {
     let url = url.trim_end_matches('/').to_owned();
     state.session.lock().unwrap().server_url = url;
     Ok(())
@@ -110,10 +104,7 @@ pub async fn change_password(
 
 /// Request account deletion with a password confirmation.
 #[tauri::command]
-pub async fn delete_account(
-    state: State<'_, AppState>,
-    password: String,
-) -> Result<(), String> {
+pub async fn delete_account(state: State<'_, AppState>, password: String) -> Result<(), String> {
     let session = state.session_snapshot();
     let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
     let resp = client
@@ -133,9 +124,7 @@ pub async fn delete_account(
 
 /// Cancel a pending account deletion.
 #[tauri::command]
-pub async fn cancel_account_deletion(
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub async fn cancel_account_deletion(state: State<'_, AppState>) -> Result<(), String> {
     let session = state.session_snapshot();
     let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
     let resp = client

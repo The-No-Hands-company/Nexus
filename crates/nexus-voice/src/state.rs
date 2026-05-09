@@ -294,9 +294,15 @@ pub struct VoiceGlobalStats {
 mod tests {
     use super::*;
 
-    fn uid() -> Uuid { Uuid::new_v4() }
-    fn cid() -> Uuid { Uuid::new_v4() }
-    fn sid() -> String { Uuid::new_v4().to_string() }
+    fn uid() -> Uuid {
+        Uuid::new_v4()
+    }
+    fn cid() -> Uuid {
+        Uuid::new_v4()
+    }
+    fn sid() -> String {
+        Uuid::new_v4().to_string()
+    }
 
     // ── join ──────────────────────────────────────────────────────────────────
 
@@ -340,8 +346,16 @@ mod tests {
         mgr.join(user, chan1, None, sid()).await;
         mgr.join(user, chan2, None, sid()).await;
 
-        assert_eq!(mgr.get_channel_count(chan1).await, 0, "old channel must be empty");
-        assert_eq!(mgr.get_channel_count(chan2).await, 1, "new channel has the user");
+        assert_eq!(
+            mgr.get_channel_count(chan1).await,
+            0,
+            "old channel must be empty"
+        );
+        assert_eq!(
+            mgr.get_channel_count(chan2).await,
+            1,
+            "new channel has the user"
+        );
     }
 
     // ── leave ─────────────────────────────────────────────────────────────────
@@ -538,8 +552,18 @@ mod tests {
         mgr.join(u2, chan, None, sid()).await;
 
         // Set u1 streaming and u2 on video
-        let s1 = VoiceStateUpdate { self_stream: Some(true), self_mute: None, self_deaf: None, self_video: None };
-        let s2 = VoiceStateUpdate { self_video: Some(true), self_mute: None, self_deaf: None, self_stream: None };
+        let s1 = VoiceStateUpdate {
+            self_stream: Some(true),
+            self_mute: None,
+            self_deaf: None,
+            self_video: None,
+        };
+        let s2 = VoiceStateUpdate {
+            self_video: Some(true),
+            self_mute: None,
+            self_deaf: None,
+            self_stream: None,
+        };
         mgr.update_self_state(u1, &s1).await;
         mgr.update_self_state(u2, &s2).await;
 

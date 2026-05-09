@@ -9,10 +9,10 @@
 
 use axum::http::HeaderMap;
 use axum::{
+    Json, Router,
     extract::{Extension, Path, State},
     middleware,
     routing::{delete, get},
-    Json, Router,
 };
 use chrono::{DateTime, Utc};
 use nexus_common::error::{NexusError, NexusResult};
@@ -23,7 +23,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
+use crate::{
+    AppState,
+    middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip},
+};
 
 // ============================================================
 // Router
@@ -35,11 +38,10 @@ pub fn router() -> Router<Arc<AppState>> {
             "/users/@me/bookmarks",
             get(list_bookmarks).post(add_bookmark),
         )
-        .route(
-            "/users/@me/bookmarks/{message_id}",
-            delete(remove_bookmark),
-        )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route("/users/@me/bookmarks/{message_id}", delete(remove_bookmark))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ============================================================
@@ -108,10 +110,22 @@ impl TryFrom<BookmarkRow> for Bookmark {
     type Error = NexusError;
     fn try_from(r: BookmarkRow) -> Result<Self, Self::Error> {
         Ok(Self {
-            id: r.id.parse::<Uuid>().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
-            user_id: r.user_id.parse::<Uuid>().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
-            message_id: r.message_id.parse::<Uuid>().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
-            channel_id: r.channel_id.parse::<Uuid>().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
+            id: r
+                .id
+                .parse::<Uuid>()
+                .map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
+            user_id: r
+                .user_id
+                .parse::<Uuid>()
+                .map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
+            message_id: r
+                .message_id
+                .parse::<Uuid>()
+                .map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
+            channel_id: r
+                .channel_id
+                .parse::<Uuid>()
+                .map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
             note: r.note,
             created_at: parse_dt(&r.created_at)
                 .map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
@@ -228,17 +242,18 @@ async fn remove_bookmark(
     Extension(ctx): Extension<AuthContext>,
     Path(message_id): Path<Uuid>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    let result = sqlx::query(
-        "DELETE FROM message_bookmarks WHERE user_id = $1 AND message_id = $2",
-    )
-    .bind(ctx.user_id.to_string())
-    .bind(message_id.to_string())
-    .execute(&state.db.pool)
-    .await
-    .map_err(|e| NexusError::Internal(e.into()))?;
+    let result =
+        sqlx::query("DELETE FROM message_bookmarks WHERE user_id = $1 AND message_id = $2")
+            .bind(ctx.user_id.to_string())
+            .bind(message_id.to_string())
+            .execute(&state.db.pool)
+            .await
+            .map_err(|e| NexusError::Internal(e.into()))?;
 
     if result.rows_affected() == 0 {
-        return Err(NexusError::NotFound { resource: "Bookmark".into() });
+        return Err(NexusError::NotFound {
+            resource: "Bookmark".into(),
+        });
     }
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -296,7 +311,11 @@ async fn list_bookmarks(
             .map_err(|e| NexusError::Internal(e.into()))?;
 
         for row in rows {
-            let id = match row.try_get::<String, _>("id").ok().and_then(|s| s.parse::<Uuid>().ok()) {
+            let id = match row
+                .try_get::<String, _>("id")
+                .ok()
+                .and_then(|s| s.parse::<Uuid>().ok())
+            {
                 Some(v) => v,
                 None => continue,
             };
@@ -374,7 +393,13 @@ async fn hydrate_message(state: &AppState, message_id: Uuid) -> Option<Bookmarke
     .ok()
     .flatten();
 
-    let HydrateRow { id: id_str, content, author_id: author_id_str, username: username_opt, channel_id: channel_id_str } = row?;
+    let HydrateRow {
+        id: id_str,
+        content,
+        author_id: author_id_str,
+        username: username_opt,
+        channel_id: channel_id_str,
+    } = row?;
 
     let parse_dt_local = |s: &str| -> Option<DateTime<Utc>> {
         chrono::DateTime::parse_from_rfc3339(s)
@@ -383,14 +408,13 @@ async fn hydrate_message(state: &AppState, message_id: Uuid) -> Option<Bookmarke
     };
 
     // Fetch created_at separately — avoids a 6-tuple which gets complex
-    let created_at_str: Option<(String,)> = sqlx::query_as(
-        "SELECT created_at::text FROM messages WHERE id = $1",
-    )
-    .bind(message_id.to_string())
-    .fetch_optional(&state.db.pool)
-    .await
-    .ok()
-    .flatten();
+    let created_at_str: Option<(String,)> =
+        sqlx::query_as("SELECT created_at::text FROM messages WHERE id = $1")
+            .bind(message_id.to_string())
+            .fetch_optional(&state.db.pool)
+            .await
+            .ok()
+            .flatten();
 
     Some(BookmarkedMessagePreview {
         id: id_str.parse().ok()?,

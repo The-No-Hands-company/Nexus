@@ -80,20 +80,15 @@ pub async fn consume_token(
     .execute(pool)
     .await?;
 
-    let user_id: Uuid = user_id_str
-        .parse()
-        .map_err(|_| sqlx::Error::ColumnDecode {
-            index: "user_id".to_string(),
-            source: Box::new(std::fmt::Error),
-        })?;
+    let user_id: Uuid = user_id_str.parse().map_err(|_| sqlx::Error::ColumnDecode {
+        index: "user_id".to_string(),
+        source: Box::new(std::fmt::Error),
+    })?;
 
     Ok(Some(user_id))
 }
 
-pub async fn has_pending_token(
-    pool: &sqlx::AnyPool,
-    user_id: Uuid,
-) -> Result<bool, sqlx::Error> {
+pub async fn has_pending_token(pool: &sqlx::AnyPool, user_id: Uuid) -> Result<bool, sqlx::Error> {
     let row: (i64,) = sqlx::query_as(
         "SELECT COUNT(*) FROM password_reset_tokens \
          WHERE user_id = $1::uuid AND used_at IS NULL AND expires_at > NOW()",

@@ -4,20 +4,20 @@
 //! raid detection, voice transcripts, consent & audit.
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, Query, State},
     middleware,
     routing::get,
-    Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
+use nexus_common::models::Member;
 use nexus_common::models::ai_intelligence::*;
 use nexus_db::repository::{ai_intelligence, channels, members};
-use nexus_common::models::Member;
 use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 // ── Router ─────────────────────────────────────────────────────────────────
 
@@ -52,13 +52,17 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         // AI audit log (per server)
         .route("/servers/{server_id}/ai-audit-log", get(list_ai_audit_log))
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ── Request / Query ────────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
-struct LimitQuery { limit: Option<i64> }
+struct LimitQuery {
+    limit: Option<i64>,
+}
 
 #[derive(Debug, Deserialize)]
 struct CreateAiSuggestionReq {
@@ -94,8 +98,13 @@ async fn list_ai_suggestions(
     ensure_channel_server_membership(&state, ctx.user_id, channel_id).await?;
 
     let rows = ai_intelligence::list_ai_suggestions(
-        &state.db.pool, ctx.user_id, channel_id, q.limit.unwrap_or(50),
-    ).await.map_err(|e| NexusError::Internal(e.into()))?;
+        &state.db.pool,
+        ctx.user_id,
+        channel_id,
+        q.limit.unwrap_or(50),
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(rows))
 }
 
@@ -116,13 +125,12 @@ async fn create_ai_suggestion(
             message: "content must be 4000 characters or fewer".into(),
         });
     }
-    if let Some(ref model) = body.model_name {
-        if model.len() > 64 {
+    if let Some(ref model) = body.model_name
+        && model.len() > 64 {
             return Err(NexusError::Validation {
                 message: "model_name must be 64 characters or fewer".into(),
             });
         }
-    }
     // Validate context_ids size to prevent abuse
     if let Some(ref ctx) = body.context_ids {
         let ctx_str = serde_json::to_string(ctx).unwrap_or_default();
@@ -140,11 +148,17 @@ async fn create_ai_suggestion(
     let model_name = body.model_name.as_deref().unwrap_or("default");
 
     let row = ai_intelligence::create_ai_suggestion(
-        &state.db.pool, Uuid::new_v4(), ctx.user_id, channel_id,
-        &body.suggestion_type, &body.content,
+        &state.db.pool,
+        Uuid::new_v4(),
+        ctx.user_id,
+        channel_id,
+        &body.suggestion_type,
+        &body.content,
         &body.context_ids.unwrap_or(serde_json::json!([])),
         model_name,
-    ).await.map_err(|e| NexusError::Internal(e.into()))?;
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
 
     let _ = ai_intelligence::create_ai_audit_entry(
         &state.db.pool,
@@ -175,7 +189,8 @@ async fn get_thread_summary(
 
     // channel_id is used as thread_id for lookup
     let row = ai_intelligence::get_thread_summary(&state.db.pool, channel_id)
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(row))
 }
 
@@ -193,11 +208,17 @@ async fn upsert_thread_summary(
     let model_version = body.model_version.as_deref().unwrap_or("1.0");
 
     let row = ai_intelligence::upsert_thread_summary(
-        &state.db.pool, Uuid::new_v4(), body.thread_id, channel_id,
-        &body.summary, body.message_count.unwrap_or(0),
+        &state.db.pool,
+        Uuid::new_v4(),
+        body.thread_id,
+        channel_id,
+        &body.summary,
+        body.message_count.unwrap_or(0),
         model_name,
         model_version,
-    ).await.map_err(|e| NexusError::Internal(e.into()))?;
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
 
     let _ = ai_intelligence::create_ai_audit_entry(
         &state.db.pool,
@@ -221,7 +242,10 @@ async fn upsert_thread_summary(
 }
 
 fn ensure_ai_generation_writes_enabled() -> NexusResult<()> {
-    if nexus_common::config::get().features.enable_ai_generation_writes {
+    if nexus_common::config::get()
+        .features
+        .enable_ai_generation_writes
+    {
         Ok(())
     } else {
         Err(NexusError::Validation {
@@ -237,11 +261,16 @@ async fn list_flagged_toxicity(
     Query(q): Query<LimitQuery>,
 ) -> NexusResult<Json<Vec<ToxicityScore>>> {
     let _m: Option<Member> = members::find_member(&state.db.pool, ctx.user_id, server_id)
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
-    if _m.is_none() { return Err(NexusError::Forbidden); }
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    if _m.is_none() {
+        return Err(NexusError::Forbidden);
+    }
 
-    let rows = ai_intelligence::list_flagged_toxicity(&state.db.pool, server_id, q.limit.unwrap_or(100))
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
+    let rows =
+        ai_intelligence::list_flagged_toxicity(&state.db.pool, server_id, q.limit.unwrap_or(100))
+            .await
+            .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(rows))
 }
 
@@ -252,11 +281,16 @@ async fn list_raid_detections(
     Query(q): Query<LimitQuery>,
 ) -> NexusResult<Json<Vec<RaidDetection>>> {
     let _m: Option<Member> = members::find_member(&state.db.pool, ctx.user_id, server_id)
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
-    if _m.is_none() { return Err(NexusError::Forbidden); }
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    if _m.is_none() {
+        return Err(NexusError::Forbidden);
+    }
 
-    let rows = ai_intelligence::list_raid_detections(&state.db.pool, server_id, q.limit.unwrap_or(50))
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
+    let rows =
+        ai_intelligence::list_raid_detections(&state.db.pool, server_id, q.limit.unwrap_or(50))
+            .await
+            .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(rows))
 }
 
@@ -268,8 +302,10 @@ async fn list_voice_transcripts(
 ) -> NexusResult<Json<Vec<VoiceTranscript>>> {
     ensure_channel_server_membership(&state, ctx.user_id, channel_id).await?;
 
-    let rows = ai_intelligence::list_voice_transcripts(&state.db.pool, channel_id, q.limit.unwrap_or(100))
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
+    let rows =
+        ai_intelligence::list_voice_transcripts(&state.db.pool, channel_id, q.limit.unwrap_or(100))
+            .await
+            .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(rows))
 }
 
@@ -286,7 +322,8 @@ async fn list_ai_consent(
     }
 
     let rows = ai_intelligence::list_ai_consent(&state.db.pool, ctx.user_id, server_id)
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(rows))
 }
 
@@ -304,8 +341,14 @@ async fn upsert_ai_consent(
     }
 
     let row = ai_intelligence::upsert_ai_consent(
-        &state.db.pool, ctx.user_id, server_id, &body.feature, body.enabled,
-    ).await.map_err(|e| NexusError::Internal(e.into()))?;
+        &state.db.pool,
+        ctx.user_id,
+        server_id,
+        &body.feature,
+        body.enabled,
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(row))
 }
 
@@ -316,11 +359,16 @@ async fn list_ai_audit_log(
     Query(q): Query<LimitQuery>,
 ) -> NexusResult<Json<Vec<AiAuditEntry>>> {
     let _m: Option<Member> = members::find_member(&state.db.pool, ctx.user_id, server_id)
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
-    if _m.is_none() { return Err(NexusError::Forbidden); }
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    if _m.is_none() {
+        return Err(NexusError::Forbidden);
+    }
 
-    let rows = ai_intelligence::list_ai_audit_log(&state.db.pool, server_id, q.limit.unwrap_or(200))
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
+    let rows =
+        ai_intelligence::list_ai_audit_log(&state.db.pool, server_id, q.limit.unwrap_or(200))
+            .await
+            .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(rows))
 }
 

@@ -233,10 +233,7 @@ pub async fn is_banned(
 }
 
 /// List all active (non-expired) bans for a server, newest first.
-pub async fn list_bans(
-    pool: &sqlx::AnyPool,
-    server_id: Uuid,
-) -> Result<Vec<BanRow>, sqlx::Error> {
+pub async fn list_bans(pool: &sqlx::AnyPool, server_id: Uuid) -> Result<Vec<BanRow>, sqlx::Error> {
     let q = format!(
         "SELECT {BAN_COLS} FROM bans \
          WHERE server_id = $1::uuid \
@@ -255,12 +252,11 @@ pub async fn remove_ban(
     user_id: Uuid,
     server_id: Uuid,
 ) -> Result<bool, sqlx::Error> {
-    let result =
-        sqlx::query("DELETE FROM bans WHERE user_id = $1::uuid AND server_id = $2::uuid")
-            .bind(user_id.to_string())
-            .bind(server_id.to_string())
-            .execute(pool)
-            .await?;
+    let result = sqlx::query("DELETE FROM bans WHERE user_id = $1::uuid AND server_id = $2::uuid")
+        .bind(user_id.to_string())
+        .bind(server_id.to_string())
+        .execute(pool)
+        .await?;
     Ok(result.rows_affected() > 0)
 }
 
@@ -313,8 +309,7 @@ impl<'r> sqlx::FromRow<'r, sqlx::any::AnyRow> for ReportRow {
     }
 }
 
-const REPORT_COLS: &str =
-    "id::text          AS id, \
+const REPORT_COLS: &str = "id::text          AS id, \
      message_id::text  AS message_id, \
      channel_id::text  AS channel_id, \
      server_id::text   AS server_id, \
@@ -472,8 +467,7 @@ impl<'r> sqlx::FromRow<'r, sqlx::any::AnyRow> for WordFilter {
     }
 }
 
-const FILTER_COLS: &str =
-    "id::text         AS id, \
+const FILTER_COLS: &str = "id::text         AS id, \
      server_id::text  AS server_id, \
      pattern, action, \
      created_by::text AS created_by, \

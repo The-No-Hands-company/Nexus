@@ -54,11 +54,13 @@ pub async fn dismiss_recommendation(
     user_id: Uuid,
     rec_id: Uuid,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE server_recommendations SET dismissed = TRUE WHERE id = $1 AND user_id = $2")
-        .bind(rec_id.to_string())
-        .bind(user_id.to_string())
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "UPDATE server_recommendations SET dismissed = TRUE WHERE id = $1 AND user_id = $2",
+    )
+    .bind(rec_id.to_string())
+    .bind(user_id.to_string())
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -179,9 +181,8 @@ pub async fn get_gamification_config(
     pool: &AnyPool,
     server_id: Uuid,
 ) -> Result<Option<GamificationConfig>, sqlx::Error> {
-    let q = format!(
-        "SELECT {GAMIFICATION_CONFIG_COLS} FROM gamification_configs WHERE server_id = $1"
-    );
+    let q =
+        format!("SELECT {GAMIFICATION_CONFIG_COLS} FROM gamification_configs WHERE server_id = $1");
     sqlx::query_as::<_, GamificationConfig>(&q)
         .bind(server_id.to_string())
         .fetch_optional(pool)
@@ -213,9 +214,7 @@ pub async fn get_user_xp(
     user_id: Uuid,
     server_id: Uuid,
 ) -> Result<Option<UserXp>, sqlx::Error> {
-    let q = format!(
-        "SELECT {USER_XP_COLS} FROM user_xp WHERE user_id = $1 AND server_id = $2"
-    );
+    let q = format!("SELECT {USER_XP_COLS} FROM user_xp WHERE user_id = $1 AND server_id = $2");
     sqlx::query_as::<_, UserXp>(&q)
         .bind(user_id.to_string())
         .bind(server_id.to_string())
@@ -269,9 +268,8 @@ pub async fn list_achievements(
     pool: &AnyPool,
     server_id: Uuid,
 ) -> Result<Vec<Achievement>, sqlx::Error> {
-    let q = format!(
-        "SELECT {ACHIEVEMENT_COLS} FROM achievements WHERE server_id = $1 ORDER BY name"
-    );
+    let q =
+        format!("SELECT {ACHIEVEMENT_COLS} FROM achievements WHERE server_id = $1 ORDER BY name");
     sqlx::query_as::<_, Achievement>(&q)
         .bind(server_id.to_string())
         .fetch_all(pool)

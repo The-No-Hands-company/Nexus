@@ -10,25 +10,22 @@
 //! when relevant events occur (new @mention, DM, etc.).
 
 use axum::{
+    Json, Router,
     extract::{Extension, State},
     middleware,
     routing::{get, post},
-    Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_db::repository::push_subscriptions;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/push/vapid-public-key", get(get_vapid_public_key))
-        .route(
-            "/push/subscriptions",
-            post(subscribe).delete(unsubscribe),
-        )
+        .route("/push/subscriptions", post(subscribe).delete(unsubscribe))
         .route_layer(middleware::from_fn(crate::middleware::auth_middleware))
 }
 
@@ -77,12 +74,11 @@ struct UnsubscribeRequest {
 async fn get_vapid_public_key(
     State(state): State<Arc<AppState>>,
 ) -> NexusResult<Json<VapidKeyResponse>> {
-    let public_key = state
-        .vapid_public_key
-        .clone()
-        .ok_or_else(|| NexusError::Internal(anyhow::anyhow!(
+    let public_key = state.vapid_public_key.clone().ok_or_else(|| {
+        NexusError::Internal(anyhow::anyhow!(
             "VAPID keys not configured. Set NEXUS__PUSH__VAPID_PRIVATE_KEY."
-        )))?;
+        ))
+    })?;
 
     Ok(Json(VapidKeyResponse { public_key }))
 }
@@ -141,13 +137,10 @@ async fn unsubscribe(
     State(state): State<Arc<AppState>>,
     Json(body): Json<UnsubscribeRequest>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    let removed = push_subscriptions::delete_by_endpoint(
-        &state.db.pool,
-        auth.user_id,
-        &body.endpoint,
-    )
-    .await
-    .map_err(|e| NexusError::Internal(e.into()))?;
+    let removed =
+        push_subscriptions::delete_by_endpoint(&state.db.pool, auth.user_id, &body.endpoint)
+            .await
+            .map_err(|e| NexusError::Internal(e.into()))?;
 
     Ok(Json(serde_json::json!({ "unsubscribed": removed })))
 }

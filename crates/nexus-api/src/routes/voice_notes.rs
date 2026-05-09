@@ -13,10 +13,10 @@
 //! DELETE /video-notes/:id                   — Delete video note
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, Query, State},
     middleware,
     routing::{get, patch, post},
-    Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_common::snowflake;
@@ -25,7 +25,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -34,16 +34,24 @@ pub fn router() -> Router<Arc<AppState>> {
             "/channels/{channel_id}/voice-notes",
             post(create_voice_note).get(list_voice_notes),
         )
-        .route("/voice-notes/{id}", get(get_voice_note).delete(delete_voice_note))
+        .route(
+            "/voice-notes/{id}",
+            get(get_voice_note).delete(delete_voice_note),
+        )
         .route("/voice-notes/{id}/transcript", patch(set_voice_transcript))
         // Video notes
         .route(
             "/channels/{channel_id}/video-notes",
             post(create_video_note).get(list_video_notes),
         )
-        .route("/video-notes/{id}", get(get_video_note).delete(delete_video_note))
+        .route(
+            "/video-notes/{id}",
+            get(get_video_note).delete(delete_video_note),
+        )
         .route("/video-notes/{id}/transcript", patch(set_video_transcript))
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ── Request / Response ────────────────────────────────────────────────────────

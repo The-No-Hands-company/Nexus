@@ -38,10 +38,7 @@ pub async fn create_drawing(
         .await
 }
 
-pub async fn find_drawing(
-    pool: &AnyPool,
-    id: Uuid,
-) -> Result<Option<Drawing>, sqlx::Error> {
+pub async fn find_drawing(pool: &AnyPool, id: Uuid) -> Result<Option<Drawing>, sqlx::Error> {
     let q = format!("SELECT {DRAWING_COLS} FROM drawings WHERE id = $1");
     sqlx::query_as::<_, Drawing>(&q)
         .bind(id.to_string())
@@ -106,12 +103,10 @@ pub async fn delete_drawing(
     id: Uuid,
     author_id: Uuid,
 ) -> Result<bool, sqlx::Error> {
-    let res = sqlx::query(
-        "DELETE FROM drawings WHERE id = $1 AND author_id = $2",
-    )
-    .bind(id.to_string())
-    .bind(author_id.to_string())
-    .execute(pool)
-    .await?;
+    let res = sqlx::query("DELETE FROM drawings WHERE id = $1 AND author_id = $2")
+        .bind(id.to_string())
+        .bind(author_id.to_string())
+        .execute(pool)
+        .await?;
     Ok(res.rows_affected() > 0)
 }

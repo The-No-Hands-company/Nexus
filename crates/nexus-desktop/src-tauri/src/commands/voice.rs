@@ -1,9 +1,9 @@
 //! Voice state commands.
 
+use super::api_client;
+use crate::state::AppState;
 use tauri::State;
 use uuid::Uuid;
-use crate::state::AppState;
-use super::api_client;
 
 #[tauri::command]
 pub async fn get_voice_state(

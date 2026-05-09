@@ -14,24 +14,24 @@
 //! DELETE /channels/:id/tags/:tag_id               — Delete forum tag (MANAGE_CHANNELS)
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, Query, State},
     middleware,
     routing::{get, post},
-    Json, Router,
 };
 use chrono::{DateTime, Utc};
+use nexus_common::permissions::Permissions;
 use nexus_common::{
     error::{NexusError, NexusResult},
     gateway_event::GatewayEvent,
     snowflake,
 };
 use nexus_db::repository::{channels, members, roles, servers, threads};
-use nexus_common::permissions::Permissions;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 // ============================================================
 // Router
@@ -61,7 +61,9 @@ pub fn router() -> Router<Arc<AppState>> {
             "/channels/{channel_id}/tags/{tag_id}",
             axum::routing::patch(update_tag).delete(delete_tag),
         )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ============================================================
@@ -135,7 +137,9 @@ async fn require_channel_permission(
 ) -> NexusResult<Uuid> {
     let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Channel".into(),
+        })?;
 
     let server_id = channel.server_id.ok_or(NexusError::MissingPermission {
         permission: format!("{required:?}"),
@@ -143,7 +147,9 @@ async fn require_channel_permission(
 
     let server = servers::find_by_id(&state.db.pool, server_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Server".into(),
+        })?;
 
     if user_id == server.owner_id {
         return Ok(server_id);
@@ -152,7 +158,9 @@ async fn require_channel_permission(
     let member = members::find_member(&state.db.pool, user_id, server_id)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?
-        .ok_or(NexusError::MissingPermission { permission: format!("{required:?}") })?;
+        .ok_or(NexusError::MissingPermission {
+            permission: format!("{required:?}"),
+        })?;
 
     let all_roles = roles::list_server_roles(&state.db.pool, server_id)
         .await
@@ -173,7 +181,9 @@ async fn require_channel_permission(
     if effective.has(required) {
         Ok(server_id)
     } else {
-        Err(NexusError::MissingPermission { permission: format!("{required:?}") })
+        Err(NexusError::MissingPermission {
+            permission: format!("{required:?}"),
+        })
     }
 }
 
@@ -190,9 +200,14 @@ async fn list_posts(
     // Verify this is a forum channel
     let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Channel".into(),
+        })?;
 
-    if !matches!(channel.channel_type, nexus_common::models::channel::ChannelType::Forum) {
+    if !matches!(
+        channel.channel_type,
+        nexus_common::models::channel::ChannelType::Forum
+    ) {
         return Err(NexusError::Validation {
             message: "Channel is not a forum channel".into(),
         });
@@ -248,7 +263,9 @@ async fn list_posts(
     // Honour before-cursor ordering (already sorted by DB, just truncate)
     posts.truncate(limit as usize);
 
-    Ok(Json(serde_json::json!({ "posts": posts, "has_more": posts.len() == limit as usize })))
+    Ok(Json(
+        serde_json::json!({ "posts": posts, "has_more": posts.len() == limit as usize }),
+    ))
 }
 
 /// POST /api/v1/channels/:channel_id/posts
@@ -271,9 +288,14 @@ async fn create_post(
 
     let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Channel".into(),
+        })?;
 
-    if !matches!(channel.channel_type, nexus_common::models::channel::ChannelType::Forum) {
+    if !matches!(
+        channel.channel_type,
+        nexus_common::models::channel::ChannelType::Forum
+    ) {
         return Err(NexusError::Validation {
             message: "Channel is not a forum channel".into(),
         });
@@ -376,26 +398,34 @@ async fn update_post(
     let thread = threads::find_by_id(&state.db.pool, thread_id)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?
-        .ok_or(NexusError::NotFound { resource: "Post".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Post".into(),
+        })?;
 
     if thread.parent_channel_id.unwrap_or(thread.channel_id) != channel_id {
-        return Err(NexusError::NotFound { resource: "Post".into() });
+        return Err(NexusError::NotFound {
+            resource: "Post".into(),
+        });
     }
 
     // Only the post owner or someone with MANAGE_THREADS may edit
     let is_owner = thread.owner_id == auth.user_id;
     if !is_owner {
-        require_channel_permission(&state, channel_id, auth.user_id, Permissions::MANAGE_THREADS)
-            .await?;
+        require_channel_permission(
+            &state,
+            channel_id,
+            auth.user_id,
+            Permissions::MANAGE_THREADS,
+        )
+        .await?;
     }
 
-    if let Some(title) = &body.title {
-        if title.trim().is_empty() || title.len() > 100 {
+    if let Some(title) = &body.title
+        && (title.trim().is_empty() || title.len() > 100) {
             return Err(NexusError::Validation {
                 message: "Post title must be 1-100 characters".into(),
             });
         }
-    }
 
     // Validate tags if provided
     let tags = if let Some(ref new_tags) = body.tags {
@@ -462,17 +492,22 @@ async fn lock_post(
     State(state): State<Arc<AppState>>,
     Path((channel_id, thread_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    require_channel_permission(&state, channel_id, auth.user_id, Permissions::MANAGE_THREADS)
-        .await?;
-
-    sqlx::query(
-        "UPDATE threads SET locked = true, updated_at = NOW() WHERE channel_id = $1::uuid",
+    require_channel_permission(
+        &state,
+        channel_id,
+        auth.user_id,
+        Permissions::MANAGE_THREADS,
     )
-    .bind(thread_id.to_string())
-    .execute(&state.db.pool)
     .await?;
 
-    Ok(Json(serde_json::json!({ "locked": true, "post_id": thread_id })))
+    sqlx::query("UPDATE threads SET locked = true, updated_at = NOW() WHERE channel_id = $1::uuid")
+        .bind(thread_id.to_string())
+        .execute(&state.db.pool)
+        .await?;
+
+    Ok(Json(
+        serde_json::json!({ "locked": true, "post_id": thread_id }),
+    ))
 }
 
 /// DELETE /api/v1/channels/:channel_id/posts/:thread_id/lock
@@ -481,8 +516,13 @@ async fn unlock_post(
     State(state): State<Arc<AppState>>,
     Path((channel_id, thread_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    require_channel_permission(&state, channel_id, auth.user_id, Permissions::MANAGE_THREADS)
-        .await?;
+    require_channel_permission(
+        &state,
+        channel_id,
+        auth.user_id,
+        Permissions::MANAGE_THREADS,
+    )
+    .await?;
 
     sqlx::query(
         "UPDATE threads SET locked = false, updated_at = NOW() WHERE channel_id = $1::uuid",
@@ -491,7 +531,9 @@ async fn unlock_post(
     .execute(&state.db.pool)
     .await?;
 
-    Ok(Json(serde_json::json!({ "locked": false, "post_id": thread_id })))
+    Ok(Json(
+        serde_json::json!({ "locked": false, "post_id": thread_id }),
+    ))
 }
 
 // ============================================================
@@ -520,8 +562,13 @@ async fn create_tag(
         });
     }
 
-    require_channel_permission(&state, channel_id, auth.user_id, Permissions::MANAGE_CHANNELS)
-        .await?;
+    require_channel_permission(
+        &state,
+        channel_id,
+        auth.user_id,
+        Permissions::MANAGE_CHANNELS,
+    )
+    .await?;
 
     let tag_id = Uuid::new_v4();
     let moderated = body.moderated.unwrap_or(false);
@@ -539,7 +586,9 @@ async fn create_tag(
     .await
     .map_err(|e| {
         if e.to_string().contains("unique") || e.to_string().contains("duplicate") {
-            NexusError::Validation { message: format!("Tag '{}' already exists", body.name) }
+            NexusError::Validation {
+                message: format!("Tag '{}' already exists", body.name),
+            }
         } else {
             NexusError::Internal(e.into())
         }
@@ -562,16 +611,20 @@ async fn update_tag(
     Path((channel_id, tag_id)): Path<(Uuid, Uuid)>,
     Json(body): Json<UpdateTagRequest>,
 ) -> NexusResult<Json<ForumTag>> {
-    require_channel_permission(&state, channel_id, auth.user_id, Permissions::MANAGE_CHANNELS)
-        .await?;
+    require_channel_permission(
+        &state,
+        channel_id,
+        auth.user_id,
+        Permissions::MANAGE_CHANNELS,
+    )
+    .await?;
 
-    if let Some(ref name) = body.name {
-        if name.trim().is_empty() || name.len() > 20 {
+    if let Some(ref name) = body.name
+        && (name.trim().is_empty() || name.len() > 20) {
             return Err(NexusError::Validation {
                 message: "Tag name must be 1-20 characters".into(),
             });
         }
-    }
 
     #[allow(dead_code)]
     #[derive(sqlx::FromRow)]
@@ -593,7 +646,9 @@ async fn update_tag(
     .fetch_optional(&state.db.pool)
     .await?;
 
-    let existing = existing.ok_or(NexusError::NotFound { resource: "Tag".into() })?;
+    let existing = existing.ok_or(NexusError::NotFound {
+        resource: "Tag".into(),
+    })?;
 
     let new_name = body.name.as_deref().unwrap_or(&existing.name);
     let new_emoji = body.emoji.as_deref().or(existing.emoji.as_deref());
@@ -617,8 +672,7 @@ async fn update_tag(
         name: new_name.to_string(),
         emoji: new_emoji.map(str::to_string),
         moderated: new_moderated,
-        created_at: parse_dt(&existing.created_at)
-            .unwrap_or_else(|_| chrono::Utc::now()),
+        created_at: parse_dt(&existing.created_at).unwrap_or_else(|_| chrono::Utc::now()),
     }))
 }
 
@@ -628,8 +682,13 @@ async fn delete_tag(
     State(state): State<Arc<AppState>>,
     Path((channel_id, tag_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    require_channel_permission(&state, channel_id, auth.user_id, Permissions::MANAGE_CHANNELS)
-        .await?;
+    require_channel_permission(
+        &state,
+        channel_id,
+        auth.user_id,
+        Permissions::MANAGE_CHANNELS,
+    )
+    .await?;
 
     sqlx::query("DELETE FROM forum_tags WHERE id = $1::uuid AND channel_id = $2::uuid")
         .bind(tag_id.to_string())
@@ -645,10 +704,7 @@ async fn delete_tag(
 // ============================================================
 
 /// Fetch the tag list for a forum channel from the DB.
-async fn fetch_channel_tags(
-    pool: &sqlx::AnyPool,
-    channel_id: Uuid,
-) -> NexusResult<Vec<ForumTag>> {
+async fn fetch_channel_tags(pool: &sqlx::AnyPool, channel_id: Uuid) -> NexusResult<Vec<ForumTag>> {
     #[allow(dead_code)]
     #[derive(sqlx::FromRow)]
     struct TagRow {

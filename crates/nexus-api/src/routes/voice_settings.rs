@@ -10,10 +10,10 @@
 //! DELETE /channels/:id/music-queue              — Clear queue
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, State},
     middleware,
     routing::{get, patch, post},
-    Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_common::snowflake;
@@ -22,7 +22,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -38,7 +38,9 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         .route("/music-queue/{id}", patch(update_queue_status))
         .route("/channels/{channel_id}/music-queue/skip", post(skip_track))
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ── Request / Response ────────────────────────────────────────────────────────
@@ -98,20 +100,18 @@ async fn update_settings(
     Extension(ctx): Extension<AuthContext>,
     Json(body): Json<UpdateSettingsRequest>,
 ) -> NexusResult<Json<nexus_common::models::multimedia::VoiceSettings>> {
-    if let Some(ref level) = body.echo_cancel_level {
-        if !matches!(level.as_str(), "off" | "low" | "moderate" | "aggressive") {
+    if let Some(ref level) = body.echo_cancel_level
+        && !matches!(level.as_str(), "off" | "low" | "moderate" | "aggressive") {
             return Err(NexusError::Validation {
                 message: "echo_cancel_level must be off, low, moderate, or aggressive".into(),
             });
         }
-    }
-    if let Some(threshold) = body.noise_gate_threshold {
-        if !(-100.0..=0.0).contains(&threshold) {
+    if let Some(threshold) = body.noise_gate_threshold
+        && !(-100.0..=0.0).contains(&threshold) {
             return Err(NexusError::Validation {
                 message: "noise_gate_threshold must be between -100.0 and 0.0 dB".into(),
             });
         }
-    }
 
     let settings = voice_settings::upsert_voice_settings(
         &state.db.pool,
@@ -177,7 +177,10 @@ async fn update_queue_status(
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateQueueStatusRequest>,
 ) -> NexusResult<Json<nexus_common::models::multimedia::VoiceMusicQueueItem>> {
-    if !matches!(body.status.as_str(), "queued" | "playing" | "played" | "skipped") {
+    if !matches!(
+        body.status.as_str(),
+        "queued" | "playing" | "played" | "skipped"
+    ) {
         return Err(NexusError::Validation {
             message: "status must be queued, playing, played, or skipped".into(),
         });

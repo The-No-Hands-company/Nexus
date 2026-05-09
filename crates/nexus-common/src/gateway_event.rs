@@ -67,7 +67,7 @@ pub mod event_types {
     pub const GUILD_SCHEDULED_EVENT_UPDATE: &str = "GUILD_SCHEDULED_EVENT_UPDATE";
     /// A server event was cancelled or completed.
     pub const GUILD_SCHEDULED_EVENT_DELETE: &str = "GUILD_SCHEDULED_EVENT_DELETE";
-    /// A user RSVPed to a server event.
+    /// A user `RSVP`ed to a server event.
     pub const GUILD_SCHEDULED_EVENT_USER_ADD: &str = "GUILD_SCHEDULED_EVENT_USER_ADD";
     /// A user removed their RSVP from a server event.
     pub const GUILD_SCHEDULED_EVENT_USER_REMOVE: &str = "GUILD_SCHEDULED_EVENT_USER_REMOVE";
@@ -101,7 +101,7 @@ pub mod event_types {
 /// forwards them to all connected clients whose subscriptions match.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GatewayEvent {
-    /// Event type (e.g., "MESSAGE_CREATE", "TYPING_START", "PRESENCE_UPDATE")
+    /// Event type (e.g., `MESSAGE_CREATE`, `TYPING_START`, `PRESENCE_UPDATE`).
     pub event_type: String,
     /// Event payload as JSON
     pub data: serde_json::Value,

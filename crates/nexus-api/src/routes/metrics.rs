@@ -10,11 +10,11 @@
 //! on join / leave.
 
 use axum::{
+    Router,
     extract::State,
-    http::{header, HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header},
     response::IntoResponse,
     routing::get,
-    Router,
 };
 use std::sync::Arc;
 
@@ -75,10 +75,8 @@ async fn metrics_handler(
     } else {
         // No token configured: restrict to loopback only.
         let ip = crate::middleware::extract_client_ip(&headers);
-        let is_loopback = ip == "unknown"
-            || ip == "127.0.0.1"
-            || ip == "::1"
-            || ip.starts_with("::ffff:127.");
+        let is_loopback =
+            ip == "unknown" || ip == "127.0.0.1" || ip == "::1" || ip.starts_with("::ffff:127.");
         if !is_loopback {
             return Err((
                 StatusCode::FORBIDDEN,
@@ -90,7 +88,10 @@ async fn metrics_handler(
     let body = state.prometheus.render();
     Ok((
         StatusCode::OK,
-        [(header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
+        [(
+            header::CONTENT_TYPE,
+            "text/plain; version=0.0.4; charset=utf-8",
+        )],
         body,
     ))
 }

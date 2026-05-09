@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 use uuid::Uuid;
 
-use crate::state::AppState;
 use super::{api_client, friendly_api_error, friendly_network_error};
+use crate::state::AppState;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct LoginRequest {
@@ -57,7 +57,11 @@ pub async fn register(
 
     let resp = client
         .post(format!("{base}/api/v1/auth/register"))
-        .json(&RegisterRequest { username, email, password })
+        .json(&RegisterRequest {
+            username,
+            email,
+            password,
+        })
         .send()
         .await
         .map_err(friendly_network_error)?;
@@ -131,9 +135,7 @@ pub async fn logout(state: State<'_, AppState>) -> Result<(), String> {
 
 /// Refresh the access token using the stored refresh token.
 #[tauri::command]
-pub async fn refresh_token(
-    state: State<'_, AppState>,
-) -> Result<String, String> {
+pub async fn refresh_token(state: State<'_, AppState>) -> Result<String, String> {
     let session = state.session_snapshot();
     let refresh = session
         .refresh_token
@@ -168,9 +170,7 @@ pub async fn refresh_token(
 
 /// Fetch the currently logged-in user's profile.
 #[tauri::command]
-pub async fn get_current_user(
-    state: State<'_, AppState>,
-) -> Result<CurrentUser, String> {
+pub async fn get_current_user(state: State<'_, AppState>) -> Result<CurrentUser, String> {
     let session = state.session_snapshot();
     let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
 

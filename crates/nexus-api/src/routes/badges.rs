@@ -4,14 +4,14 @@
 //! POST /admin/users/{id}/badges       — admin-only, award a badge
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, State},
     middleware,
     routing::{get, post},
-    Json, Router,
 };
 use nexus_common::{
     error::{NexusError, NexusResult},
-    gateway_event::{event_types, GatewayEvent},
+    gateway_event::{GatewayEvent, event_types},
     snowflake,
 };
 use serde::{Deserialize, Serialize};
@@ -19,7 +19,7 @@ use sqlx::Row;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -28,7 +28,9 @@ pub fn router() -> Router<Arc<AppState>> {
             "/admin/users/{user_id}/badges",
             post(award_badge).delete(revoke_badge),
         )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -113,13 +115,11 @@ async fn award_badge(
     Json(body): Json<AwardBadgeRequest>,
 ) -> NexusResult<Json<UserBadge>> {
     // Verify the requesting user exists (admin path requires existence check)
-    let requester_exists = sqlx::query(
-        "SELECT 1 FROM users WHERE id = $1::uuid",
-    )
-    .bind(auth.user_id.to_string())
-    .fetch_optional(&state.db.pool)
-    .await
-    .map_err(NexusError::Database)?;
+    let requester_exists = sqlx::query("SELECT 1 FROM users WHERE id = $1::uuid")
+        .bind(auth.user_id.to_string())
+        .fetch_optional(&state.db.pool)
+        .await
+        .map_err(NexusError::Database)?;
 
     // Only internal system / admins can reach this path.
     // In production this endpoint sits behind network-level admin auth; here we
@@ -180,16 +180,16 @@ async fn revoke_badge(
     let badge_type = body
         .get("badge_type")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| NexusError::Validation { message: "badge_type required".to_string() })?;
+        .ok_or_else(|| NexusError::Validation {
+            message: "badge_type required".to_string(),
+        })?;
 
-    sqlx::query(
-        "DELETE FROM user_badges WHERE user_id = $1::uuid AND badge_type = $2",
-    )
-    .bind(user_id.to_string())
-    .bind(badge_type)
-    .execute(&state.db.pool)
-    .await
-    .map_err(NexusError::Database)?;
+    sqlx::query("DELETE FROM user_badges WHERE user_id = $1::uuid AND badge_type = $2")
+        .bind(user_id.to_string())
+        .bind(badge_type)
+        .execute(&state.db.pool)
+        .await
+        .map_err(NexusError::Database)?;
 
     Ok(Json(serde_json::json!({ "revoked": true })))
 }

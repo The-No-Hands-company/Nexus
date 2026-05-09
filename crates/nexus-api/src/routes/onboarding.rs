@@ -8,10 +8,10 @@
 //! DELETE /server-templates/:id        — Delete a template (admin)
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, Query, State},
     middleware,
     routing::get,
-    Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_common::models::ecosystem::{OnboardingProgress, ServerTemplate};
@@ -20,7 +20,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 // ── Router ────────────────────────────────────────────────────────────────────
 
@@ -38,7 +38,9 @@ pub fn router() -> Router<Arc<AppState>> {
             "/server-templates/{template_id}",
             get(get_template).delete(delete_template),
         )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ── Request Bodies ────────────────────────────────────────────────────────────
@@ -108,21 +110,16 @@ async fn list_templates(
     Query(q): Query<TemplateQuery>,
 ) -> NexusResult<Json<Vec<ServerTemplate>>> {
     let valid_categories = ["gaming", "education", "teams", "open-source", "community"];
-    if let Some(ref cat) = q.category {
-        if !valid_categories.contains(&cat.as_str()) {
+    if let Some(ref cat) = q.category
+        && !valid_categories.contains(&cat.as_str()) {
             return Err(NexusError::Validation {
-                message: format!(
-                    "category must be one of: {}",
-                    valid_categories.join(", ")
-                ),
+                message: format!("category must be one of: {}", valid_categories.join(", ")),
             });
         }
-    }
 
-    let templates =
-        server_templates::list_templates(&state.db.pool, q.category.as_deref(), 100)
-            .await
-            .map_err(|e| NexusError::Internal(e.into()))?;
+    let templates = server_templates::list_templates(&state.db.pool, q.category.as_deref(), 100)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
 
     Ok(Json(templates))
 }
@@ -149,10 +146,7 @@ async fn create_template(
     let valid_categories = ["gaming", "education", "teams", "open-source", "community"];
     if !valid_categories.contains(&body.category.as_str()) {
         return Err(NexusError::Validation {
-            message: format!(
-                "category must be one of: {}",
-                valid_categories.join(", ")
-            ),
+            message: format!("category must be one of: {}", valid_categories.join(", ")),
         });
     }
 

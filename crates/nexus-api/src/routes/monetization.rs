@@ -15,10 +15,10 @@
 use std::sync::Arc;
 
 use axum::{
+    Json, Router,
     extract::{Path, Query, State},
     middleware,
     routing::{get, post},
-    Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_db::repository::servers;
@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::Row as _;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 // ─── Router ───────────────────────────────────────────────────────────────────
 
@@ -44,11 +44,10 @@ pub fn router() -> Router<Arc<AppState>> {
             "/servers/{server_id}/subscription-tiers/{tier_id}",
             axum::routing::patch(update_subscription_tier).delete(delete_subscription_tier),
         )
-        .route(
-            "/servers/{server_id}/analytics",
-            get(get_analytics),
-        )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware));
+        .route("/servers/{server_id}/analytics", get(get_analytics))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ));
 
     let public = Router::new().route(
         "/servers/{server_id}/subscription-tiers",
@@ -138,14 +137,12 @@ pub struct AnalyticsQuery {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /// Verify the requesting user is the server owner.
-async fn require_owner(
-    pool: &sqlx::AnyPool,
-    server_id: Uuid,
-    user_id: Uuid,
-) -> NexusResult<()> {
+async fn require_owner(pool: &sqlx::AnyPool, server_id: Uuid, user_id: Uuid) -> NexusResult<()> {
     let server = servers::find_by_id(pool, server_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Server".into(),
+        })?;
     if server.owner_id != user_id {
         return Err(NexusError::Forbidden);
     }
@@ -172,7 +169,9 @@ async fn get_monetization_config(
 
     let server = servers::find_by_id(&state.db.pool, server_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Server".into(),
+        })?;
 
     match row {
         Some(r) => Ok(Json(MonetizationConfig {
@@ -223,18 +222,21 @@ async fn update_monetization_config(
         servers::update_server(
             &state.db.pool,
             server_id,
-            None, None, None, None, None, None,
-            None, None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
             Some(url.as_str()),
-        ).await?;
+        )
+        .await?;
     }
 
     // Return current config
-    get_monetization_config(
-        axum::Extension(auth),
-        State(state),
-        Path(server_id),
-    ).await
+    get_monetization_config(axum::Extension(auth), State(state), Path(server_id)).await
 }
 
 /// `GET /api/v1/servers/:server_id/subscription-tiers`
@@ -256,7 +258,9 @@ async fn list_subscription_tiers(
     let tiers = rows
         .into_iter()
         .map(|r| SubscriptionTier {
-            id: r.try_get::<String, _>("id").ok()
+            id: r
+                .try_get::<String, _>("id")
+                .ok()
                 .and_then(|s| Uuid::parse_str(&s).ok())
                 .unwrap_or_default(),
             server_id,

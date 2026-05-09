@@ -73,6 +73,7 @@ impl std::fmt::Display for NexusModule {
 }
 
 /// Check if a module is enabled for a user
+#[must_use]
 pub fn is_module_enabled(enabled_modules: &[String], module: NexusModule) -> bool {
     let module_name = module.to_string();
     enabled_modules.iter().any(|m| m == &module_name)
@@ -84,14 +85,16 @@ pub fn filter_by_enabled_modules<T>(
     enabled_modules: &[String],
     module_fn: impl Fn(&T) -> NexusModule,
 ) -> Vec<T> {
-    items.into_iter()
+    items
+        .into_iter()
         .filter(|item| is_module_enabled(enabled_modules, module_fn(item)))
         .collect()
 }
 
 /// Default modules for "full" mode
+#[must_use]
 pub fn default_modules_full() -> Vec<String> {
-    vec![
+    [
         "messages",
         "dms",
         "calls",
@@ -113,13 +116,14 @@ pub fn default_modules_full() -> Vec<String> {
         "invites",
     ]
     .iter()
-    .map(|s| s.to_string())
+    .map(std::string::ToString::to_string)
     .collect()
 }
 
 /// Default modules for "messaging" mode (WhatsApp-like)
+#[must_use]
 pub fn default_modules_messaging() -> Vec<String> {
-    vec![
+    [
         "messages",
         "dms",
         "calls",
@@ -128,7 +132,7 @@ pub fn default_modules_messaging() -> Vec<String> {
         "profiles",
     ]
     .iter()
-    .map(|s| s.to_string())
+    .map(std::string::ToString::to_string)
     .collect()
 }
 
@@ -143,7 +147,10 @@ mod tests {
         assert_eq!(NexusModule::Messages.to_string(), "messages");
         assert_eq!(NexusModule::VoiceChannels.to_string(), "voice_channels");
         assert_eq!(NexusModule::ServerDiscovery.to_string(), "server_discovery");
-        assert_eq!(NexusModule::AdvancedSecurity.to_string(), "advanced_security");
+        assert_eq!(
+            NexusModule::AdvancedSecurity.to_string(),
+            "advanced_security"
+        );
     }
 
     // ── is_module_enabled ────────────────────────────────────────────────────
@@ -186,10 +193,22 @@ mod tests {
 
     fn features() -> Vec<Feature> {
         vec![
-            Feature { name: "chat",     module: NexusModule::Messages },
-            Feature { name: "calls",    module: NexusModule::Calls },
-            Feature { name: "bots",     module: NexusModule::Bots },
-            Feature { name: "plugins",  module: NexusModule::Plugins },
+            Feature {
+                name: "chat",
+                module: NexusModule::Messages,
+            },
+            Feature {
+                name: "calls",
+                module: NexusModule::Calls,
+            },
+            Feature {
+                name: "bots",
+                module: NexusModule::Bots,
+            },
+            Feature {
+                name: "plugins",
+                module: NexusModule::Plugins,
+            },
         ]
     }
 
@@ -254,7 +273,10 @@ mod tests {
         let msg = default_modules_messaging();
         // Every module in messaging mode must also exist in full mode
         for m in &msg {
-            assert!(full.contains(m), "'{m}' in messaging mode but not in full mode");
+            assert!(
+                full.contains(m),
+                "'{m}' in messaging mode but not in full mode"
+            );
         }
     }
 

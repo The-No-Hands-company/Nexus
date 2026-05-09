@@ -2,11 +2,11 @@
 
 use axum::http::HeaderMap;
 use axum::{
+    Json, Router,
     extract::{Extension, Path, State},
     http::StatusCode,
     middleware,
     routing::{get, patch, post},
-    Json, Router,
 };
 use nexus_common::{
     error::{NexusError, NexusResult},
@@ -22,25 +22,43 @@ use nexus_db::repository::{audit_log, channels, members, roles, servers, users};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
+use crate::{
+    AppState,
+    middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip},
+};
 
 /// Server routes.
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/servers", get(list_my_servers).post(create_server))
-        .route("/servers/{server_id}", get(get_server).patch(update_server).delete(delete_server))
+        .route(
+            "/servers/{server_id}",
+            get(get_server).patch(update_server).delete(delete_server),
+        )
         .route("/servers/{server_id}/members", get(list_members))
         .route("/servers/{server_id}/join", post(join_server))
         .route("/servers/{server_id}/leave", post(leave_server))
-        .route("/servers/{server_id}/invites", get(list_invites_route).post(create_invite_route))
+        .route(
+            "/servers/{server_id}/invites",
+            get(list_invites_route).post(create_invite_route),
+        )
         .route("/invites/{code}", get(get_invite_route))
         .route("/invites/{code}/join", post(join_via_invite_route))
-        .route("/servers/{server_id}/roles", get(list_roles_route).post(create_role_route))
-        .route("/servers/{server_id}/roles/{role_id}",
+        .route(
+            "/servers/{server_id}/roles",
+            get(list_roles_route).post(create_role_route),
+        )
+        .route(
+            "/servers/{server_id}/roles/{role_id}",
             patch(update_role_route).delete(delete_role_route),
         )
-        .route("/servers/{server_id}/transfer-ownership", post(transfer_ownership_route))
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route(
+            "/servers/{server_id}/transfer-ownership",
+            post(transfer_ownership_route),
+        )
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 /// Generate a cryptographically secure random invite code.
@@ -94,15 +112,17 @@ async fn create_server(
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:server:create:user:{}", auth.user_id),
-        3,  // 3 creates per user
+        3,    // 3 creates per user
         3600, // per hour
-    ).await?;
+    )
+    .await?;
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:server:create:ip:{ip}"),
-        5,  // 5 per IP
+        5, // 5 per IP
         3600,
-    ).await?;
+    )
+    .await?;
 
     let server_id = snowflake::generate_id();
     let is_public = body.is_public.unwrap_or(false);
@@ -123,12 +143,16 @@ async fn create_server(
     }
 
     // Create the server
-    let server =
-        servers::create_server(
-            &state.db.pool, server_id, &body.name, auth.user_id, is_public,
-            tags, body.category.as_deref(),
-        )
-            .await?;
+    let server = servers::create_server(
+        &state.db.pool,
+        server_id,
+        &body.name,
+        auth.user_id,
+        is_public,
+        tags,
+        body.category.as_deref(),
+    )
+    .await?;
 
     // Create @everyone role with default permissions
     let everyone_role_id = snowflake::generate_id();
@@ -363,13 +387,15 @@ async fn join_server(
         format!("rl:join:user:{}", auth.user_id),
         10,
         3600,
-    ).await?;
+    )
+    .await?;
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:join:ip:{ip}"),
         20,
         3600,
-    ).await?;
+    )
+    .await?;
 
     // Check server exists and is public (or user has invite)
     let server = servers::find_by_id(&state.db.pool, server_id)
@@ -463,9 +489,10 @@ async fn create_invite_route(
     }
 
     let code = generate_invite_code();
-    let expires_at = body.max_age_secs.filter(|&s| s > 0).map(|s| {
-        chrono::Utc::now() + chrono::Duration::seconds(s as i64)
-    });
+    let expires_at = body
+        .max_age_secs
+        .filter(|&s| s > 0)
+        .map(|s| chrono::Utc::now() + chrono::Duration::seconds(s as i64));
     let max_uses = body.max_uses.filter(|&u| u > 0);
 
     let invite = servers::create_invite(
@@ -500,24 +527,31 @@ async fn get_invite_route(
     State(state): State<Arc<AppState>>,
     Path(code): Path<String>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    let invite = servers::find_invite(&state.db.pool, &code)
-        .await?
-        .ok_or(NexusError::NotFound { resource: "Invite".into() })?;
+    let invite =
+        servers::find_invite(&state.db.pool, &code)
+            .await?
+            .ok_or(NexusError::NotFound {
+                resource: "Invite".into(),
+            })?;
 
-    if let Some(exp) = invite.expires_at {
-        if exp < chrono::Utc::now() {
-            return Err(NexusError::NotFound { resource: "Invite".into() });
+    if let Some(exp) = invite.expires_at
+        && exp < chrono::Utc::now() {
+            return Err(NexusError::NotFound {
+                resource: "Invite".into(),
+            });
         }
-    }
-    if let Some(max) = invite.max_uses {
-        if invite.uses >= max {
-            return Err(NexusError::NotFound { resource: "Invite".into() });
+    if let Some(max) = invite.max_uses
+        && invite.uses >= max {
+            return Err(NexusError::NotFound {
+                resource: "Invite".into(),
+            });
         }
-    }
 
     let server = servers::find_by_id(&state.db.pool, invite.server_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Server".into(),
+        })?;
 
     Ok(Json(serde_json::json!({
         "code": invite.code,
@@ -543,27 +577,34 @@ async fn join_via_invite_route(
         format!("rl:invite:user:{}", auth.user_id),
         10,  // 10 join attempts per user
         300, // per 5 minutes
-    ).await?;
+    )
+    .await?;
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:invite:ip:{ip}"),
-        20,  // 20 per IP
+        20, // 20 per IP
         300,
-    ).await?;
-    let invite = servers::find_invite(&state.db.pool, &code)
-        .await?
-        .ok_or(NexusError::NotFound { resource: "Invite".into() })?;
+    )
+    .await?;
+    let invite =
+        servers::find_invite(&state.db.pool, &code)
+            .await?
+            .ok_or(NexusError::NotFound {
+                resource: "Invite".into(),
+            })?;
 
-    if let Some(exp) = invite.expires_at {
-        if exp < chrono::Utc::now() {
-            return Err(NexusError::Validation { message: "Invite has expired.".into() });
+    if let Some(exp) = invite.expires_at
+        && exp < chrono::Utc::now() {
+            return Err(NexusError::Validation {
+                message: "Invite has expired.".into(),
+            });
         }
-    }
-    if let Some(max) = invite.max_uses {
-        if invite.uses >= max {
-            return Err(NexusError::Validation { message: "Invite has reached its maximum uses.".into() });
+    if let Some(max) = invite.max_uses
+        && invite.uses >= max {
+            return Err(NexusError::Validation {
+                message: "Invite has reached its maximum uses.".into(),
+            });
         }
-    }
 
     let server_id = invite.server_id;
 
@@ -571,7 +612,9 @@ async fn join_via_invite_route(
     if members::is_member(&state.db.pool, auth.user_id, server_id).await? {
         let server = servers::find_by_id(&state.db.pool, server_id)
             .await?
-            .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+            .ok_or(NexusError::NotFound {
+                resource: "Server".into(),
+            })?;
         return Ok(Json(serde_json::json!({
             "server": { "id": server.id, "name": server.name }
         })));
@@ -580,7 +623,9 @@ async fn join_via_invite_route(
     // If the server requires 2FA, the joining user must have TOTP enabled.
     let server = servers::find_by_id(&state.db.pool, server_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Server".into(),
+        })?;
     if server.require_2fa {
         let user = users::find_by_id(&state.db.pool, auth.user_id)
             .await?
@@ -598,7 +643,9 @@ async fn join_via_invite_route(
 
     let server = servers::find_by_id(&state.db.pool, server_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Server".into(),
+        })?;
 
     Ok(Json(serde_json::json!({
         "server": { "id": server.id, "name": server.name }
@@ -632,7 +679,9 @@ async fn create_role_route(
 
     let server = servers::find_by_id(&state.db.pool, server_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Server".into(),
+        })?;
 
     // Only the server owner can manage roles
     if server.owner_id != auth.user_id {
@@ -689,7 +738,9 @@ async fn update_role_route(
 
     let server = servers::find_by_id(&state.db.pool, server_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Server".into(),
+        })?;
 
     if server.owner_id != auth.user_id {
         return Err(NexusError::Forbidden);
@@ -697,11 +748,15 @@ async fn update_role_route(
 
     let role = roles::find_by_id(&state.db.pool, role_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Role".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Role".into(),
+        })?;
 
     // Ensure the role belongs to this server
     if role.server_id != server_id {
-        return Err(NexusError::NotFound { resource: "Role".into() });
+        return Err(NexusError::NotFound {
+            resource: "Role".into(),
+        });
     }
 
     let updated = roles::update_role(
@@ -740,7 +795,9 @@ async fn delete_role_route(
 ) -> NexusResult<StatusCode> {
     let server = servers::find_by_id(&state.db.pool, server_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Server".into(),
+        })?;
 
     if server.owner_id != auth.user_id {
         return Err(NexusError::Forbidden);
@@ -748,10 +805,14 @@ async fn delete_role_route(
 
     let role = roles::find_by_id(&state.db.pool, role_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Role".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Role".into(),
+        })?;
 
     if role.server_id != server_id {
-        return Err(NexusError::NotFound { resource: "Role".into() });
+        return Err(NexusError::NotFound {
+            resource: "Role".into(),
+        });
     }
 
     if role.is_default {
@@ -800,7 +861,9 @@ async fn transfer_ownership_route(
 ) -> NexusResult<Json<ServerResponse>> {
     let server = servers::find_by_id(&state.db.pool, server_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Server".into(),
+        })?;
 
     // Only the current owner may transfer.
     if server.owner_id != auth.user_id {
@@ -825,7 +888,9 @@ async fn transfer_ownership_route(
     if server.require_2fa {
         let new_owner = users::find_by_id(&state.db.pool, body.new_owner_id)
             .await?
-            .ok_or(NexusError::NotFound { resource: "User".into() })?;
+            .ok_or(NexusError::NotFound {
+                resource: "User".into(),
+            })?;
         if !new_owner.totp_enabled {
             return Err(NexusError::Validation {
                 message: "The new owner must have two-factor authentication enabled.".into(),
@@ -833,8 +898,7 @@ async fn transfer_ownership_route(
         }
     }
 
-    let updated = servers::transfer_ownership(&state.db.pool, server_id, body.new_owner_id)
-        .await?;
+    let updated = servers::transfer_ownership(&state.db.pool, server_id, body.new_owner_id).await?;
 
     let _ = audit_log::write_entry(
         &state.db.pool,

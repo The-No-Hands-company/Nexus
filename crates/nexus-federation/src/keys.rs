@@ -10,7 +10,7 @@
 //! Example: `ed25519:3f9a2c`.
 //!
 //! # Storage
-//! Keys are stored in the `federation_keys` PostgreSQL table. On startup, the
+//! Keys are stored in the `federation_keys` `PostgreSQL` table. On startup, the
 //! server loads the most recent non-expired key. If none exists, a new key pair
 //! is generated and persisted.
 
@@ -42,53 +42,70 @@ impl ServerKeyPair {
     pub fn generate() -> Self {
         let signing_key = SigningKey::generate(&mut OsRng);
         let key_id = derive_key_id(signing_key.verifying_key().as_bytes());
-        Self { key_id, signing_key }
+        Self {
+            key_id,
+            signing_key,
+        }
     }
 
     /// Reconstruct a `ServerKeyPair` from raw 32-byte seed bytes (as stored in DB).
+    ///
+    /// # Errors
+    /// Returns an error if `seed` is not exactly 32 bytes.
     pub fn from_seed(seed: &[u8]) -> Result<Self, FederationError> {
         let bytes: [u8; 32] = seed
             .try_into()
             .map_err(|_| FederationError::KeyLoad("seed must be exactly 32 bytes".into()))?;
         let signing_key = SigningKey::from_bytes(&bytes);
         let key_id = derive_key_id(signing_key.verifying_key().as_bytes());
-        Ok(Self { key_id, signing_key })
+        Ok(Self {
+            key_id,
+            signing_key,
+        })
     }
 
     /// Return the 32-byte seed (private key scalar) for persistence.
+    #[must_use] 
     pub fn seed_bytes(&self) -> [u8; 32] {
         self.signing_key.to_bytes()
     }
 
     /// Return the public verifying key.
+    #[must_use] 
     pub fn verifying_key(&self) -> VerifyingKey {
         self.signing_key.verifying_key()
     }
 
     /// Return the public key as a base64url-encoded string (for `/_nexus/key/v2/server`).
+    #[must_use] 
     pub fn public_key_base64(&self) -> String {
         base64::engine::general_purpose::URL_SAFE_NO_PAD
             .encode(self.signing_key.verifying_key().as_bytes())
     }
 
     /// Sign arbitrary bytes and return the base64url-encoded signature.
+    #[must_use] 
     pub fn sign_bytes(&self, bytes: &[u8]) -> String {
         let sig = self.signing_key.sign(bytes);
         base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(sig.to_bytes())
     }
 
     /// Sign a canonical JSON string and return the base64url-encoded signature.
+    #[must_use] 
     pub fn sign_json(&self, canonical_json: &str) -> String {
         self.sign_bytes(canonical_json.as_bytes())
     }
 
     /// Build the `ServerKeyDocument` suitable for `/_nexus/key/v2/server`.
+    #[must_use] 
     pub fn to_key_document(&self, server_name: &str) -> ServerKeyDocument {
         use std::collections::HashMap;
         let mut keys = HashMap::new();
         keys.insert(
             self.key_id.clone(),
-            crate::types::VerifyKey { key: self.public_key_base64() },
+            crate::types::VerifyKey {
+                key: self.public_key_base64(),
+            },
         );
         ServerKeyDocument {
             server_name: server_name.to_owned(),
@@ -118,7 +135,7 @@ pub struct ServerKeyDocument {
 /// Uses the first 6 bytes of the pubkey as a short hex fingerprint.
 fn derive_key_id(pubkey_bytes: &[u8]) -> String {
     let fingerprint = hex::encode(&pubkey_bytes[..6]);
-    format!("ed25519:{}", fingerprint)
+    format!("ed25519:{fingerprint}")
 }
 
 /// Verify an Ed25519 signature.
@@ -126,6 +143,10 @@ fn derive_key_id(pubkey_bytes: &[u8]) -> String {
 /// * `pubkey_base64` — base64url-encoded 32-byte verifying key
 /// * `sig_base64`    — base64url-encoded 64-byte signature
 /// * `message`       — original signed bytes
+///
+/// # Errors
+/// Returns an error if key/signature decoding fails or signature verification
+/// does not pass.
 pub fn verify_signature(
     pubkey_base64: &str,
     sig_base64: &str,
@@ -156,7 +177,9 @@ pub fn verify_signature(
             .map_err(|_| FederationError::InvalidSignature)?,
     );
 
-    verifying_key.verify(message, &signature).map_err(|_| FederationError::InvalidSignature)
+    verifying_key
+        .verify(message, &signature)
+        .map_err(|_| FederationError::InvalidSignature)
 }
 
 #[cfg(test)]

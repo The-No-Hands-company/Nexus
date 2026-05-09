@@ -70,7 +70,9 @@ pub async fn list_relationships(
         let text = resp.text().await.unwrap_or_default();
         return Err(text);
     }
-    resp.json::<Vec<RelationshipEntry>>().await.map_err(|e| e.to_string())
+    resp.json::<Vec<RelationshipEntry>>()
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Send a friend request to a user by their username.
@@ -91,7 +93,9 @@ pub async fn send_friend_request(
         let text = resp.text().await.unwrap_or_default();
         return Err(text);
     }
-    resp.json::<RelationshipEntry>().await.map_err(|e| e.to_string())
+    resp.json::<RelationshipEntry>()
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Accept, deny, or block a relationship (action: "accept" | "deny" | "block").
@@ -115,10 +119,7 @@ pub async fn update_relationship(
 
 /// Remove a friend, cancel an outgoing request, or unblock a user.
 #[tauri::command]
-pub async fn delete_relationship(
-    state: State<'_, AppState>,
-    user_id: Uuid,
-) -> Result<(), String> {
+pub async fn delete_relationship(state: State<'_, AppState>, user_id: Uuid) -> Result<(), String> {
     let session = state.session_snapshot();
     let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
     let resp = client
@@ -132,10 +133,7 @@ pub async fn delete_relationship(
 
 /// Search users by username prefix.
 #[tauri::command]
-pub async fn search_users(
-    state: State<'_, AppState>,
-    q: String,
-) -> Result<Vec<UserBrief>, String> {
+pub async fn search_users(state: State<'_, AppState>, q: String) -> Result<Vec<UserBrief>, String> {
     let session = state.session_snapshot();
     let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
     let resp = client
@@ -148,14 +146,14 @@ pub async fn search_users(
         let text = resp.text().await.unwrap_or_default();
         return Err(text);
     }
-    resp.json::<Vec<UserBrief>>().await.map_err(|e| e.to_string())
+    resp.json::<Vec<UserBrief>>()
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// List all DM channels for the current user.
 #[tauri::command]
-pub async fn list_dm_channels(
-    state: State<'_, AppState>,
-) -> Result<Vec<DmChannel>, String> {
+pub async fn list_dm_channels(state: State<'_, AppState>) -> Result<Vec<DmChannel>, String> {
     let session = state.session_snapshot();
     let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
     let resp = client
@@ -167,7 +165,9 @@ pub async fn list_dm_channels(
         let text = resp.text().await.unwrap_or_default();
         return Err(text);
     }
-    resp.json::<Vec<DmChannel>>().await.map_err(|e| e.to_string())
+    resp.json::<Vec<DmChannel>>()
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Open or create a DM channel with a user.
@@ -208,7 +208,9 @@ pub async fn list_members(
         let text = resp.text().await.unwrap_or_default();
         return Err(text);
     }
-    resp.json::<Vec<serde_json::Value>>().await.map_err(|e| e.to_string())
+    resp.json::<Vec<serde_json::Value>>()
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Fetch the enriched profile of a user (mutual servers, mutual friends, etc.)
@@ -228,5 +230,7 @@ pub async fn get_user_profile(
         let text = resp.text().await.unwrap_or_default();
         return Err(text);
     }
-    resp.json::<serde_json::Value>().await.map_err(|e| e.to_string())
+    resp.json::<serde_json::Value>()
+        .await
+        .map_err(|e| e.to_string())
 }

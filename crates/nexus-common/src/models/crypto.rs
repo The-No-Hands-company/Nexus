@@ -50,20 +50,15 @@ pub struct Device {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type, Default)]
 #[sqlx(type_name = "text", rename_all = "snake_case")]
 #[serde(rename_all = "snake_case")]
 pub enum DeviceType {
     Desktop,
     Mobile,
     Browser,
+    #[default]
     Unknown,
-}
-
-impl Default for DeviceType {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
 // ============================================================
@@ -127,14 +122,14 @@ pub struct E2eeSession {
 /// An encrypted message stored on the server.
 ///
 /// `ciphertext_map` is a JSON object: `{ "<device_uuid>": { "type": 1, "body": "<base64>" } }`
-/// where `type` 1 = PreKeySignalMessage (first message), 2 = SignalMessage (subsequent).
+/// where `type` 1 = `PreKeySignalMessage` (first message), 2 = `SignalMessage` (subsequent).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EncryptedMessage {
     pub id: Uuid,
     pub channel_id: Uuid,
     pub sender_id: Uuid,
     pub sender_device_id: Uuid,
-    /// `{ device_uuid: { type: u8, body: base64 } }` 
+    /// `{ device_uuid: { type: u8, body: base64 } }`
     pub ciphertext_map: serde_json::Value,
     pub attachment_meta: Option<serde_json::Value>,
     pub sequence: i64,
@@ -223,15 +218,15 @@ pub struct RotateSignedPreKeyRequest {
 /// Send an encrypted message.
 #[derive(Debug, Deserialize)]
 pub struct SendEncryptedMessageRequest {
-    /// Map of device_uuid (string) → CiphertextEnvelope
+    /// Map of `device_uuid` (string) -> `CiphertextEnvelope`.
     pub ciphertext_map: serde_json::Value,
     pub attachment_meta: Option<serde_json::Value>,
     /// Client-set timestamp (informational only)
     pub client_ts: Option<DateTime<Utc>>,
     /// The sender's Double Ratchet step counter at send time.
     /// Clients SHOULD include this so recipients can detect missed ratchet steps.
-    /// For type=1 (PreKeySignalMessage) this should be 0 or 1.
-    /// For type=2 (SignalMessage) this should be the sender's current step count.
+    /// For type=1 (`PreKeySignalMessage`) this should be 0 or 1.
+    /// For type=2 (`SignalMessage`) this should be the sender's current step count.
     #[serde(default)]
     pub sender_ratchet_step: Option<i32>,
 }

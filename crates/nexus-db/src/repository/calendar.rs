@@ -150,10 +150,7 @@ pub async fn upsert_rsvp(
     .await
 }
 
-pub async fn list_rsvps(
-    pool: &AnyPool,
-    event_id: Uuid,
-) -> Result<Vec<CalendarRsvp>, sqlx::Error> {
+pub async fn list_rsvps(pool: &AnyPool, event_id: Uuid) -> Result<Vec<CalendarRsvp>, sqlx::Error> {
     sqlx::query_as::<_, CalendarRsvp>(
         "SELECT event_id::text AS event_id, user_id::text AS user_id, status, \
                 created_at::text AS created_at \
@@ -169,13 +166,11 @@ pub async fn delete_rsvp(
     event_id: Uuid,
     user_id: Uuid,
 ) -> Result<bool, sqlx::Error> {
-    let r = sqlx::query(
-        "DELETE FROM calendar_rsvps WHERE event_id = $1 AND user_id = $2",
-    )
-    .bind(event_id.to_string())
-    .bind(user_id.to_string())
-    .execute(pool)
-    .await?;
+    let r = sqlx::query("DELETE FROM calendar_rsvps WHERE event_id = $1 AND user_id = $2")
+        .bind(event_id.to_string())
+        .bind(user_id.to_string())
+        .execute(pool)
+        .await?;
     Ok(r.rows_affected() > 0)
 }
 
@@ -190,7 +185,8 @@ pub async fn export_ics(
 ) -> Result<String, sqlx::Error> {
     let events = list_events_by_server(pool, server_id, after, before, 500).await?;
 
-    let mut ics = String::from("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Nexus//Calendar//EN\r\n");
+    let mut ics =
+        String::from("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Nexus//Calendar//EN\r\n");
     for ev in &events {
         ics.push_str("BEGIN:VEVENT\r\n");
         ics.push_str(&format!("UID:{}\r\n", ev.id));

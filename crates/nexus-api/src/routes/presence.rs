@@ -4,28 +4,30 @@
 //! GET  /users/:id/presence — Get a user's public presence
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, State},
     middleware,
     routing::{get, post},
-    Json, Router,
 };
 
+use nexus_common::gateway_event::GatewayEvent;
 use nexus_common::{
     error::{NexusError, NexusResult},
     models::rich::UpdatePresenceRequest,
     validation::validate_request,
 };
 use nexus_db::repository::users;
-use nexus_common::gateway_event::GatewayEvent;
 use serde::Serialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 // Module-level helper structs for sqlx queries (cannot be defined inside async fns)
 #[derive(sqlx::FromRow)]
-struct UserCustomEmojiRow { custom_status_emoji: Option<String> }
+struct UserCustomEmojiRow {
+    custom_status_emoji: Option<String>,
+}
 
 #[derive(sqlx::FromRow)]
 struct UserActivityRow {
@@ -42,7 +44,9 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/users/@me/presence", post(update_presence))
         .route("/users/{user_id}/presence", get(get_user_presence))
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ============================================================
@@ -81,7 +85,11 @@ async fn update_presence(
     validate_request(&body)?;
 
     // Update presence + status in the users table
-    if body.presence.is_some() || body.status.is_some() || body.custom_status_emoji.is_some() || body.custom_status_expires_at.is_some() {
+    if body.presence.is_some()
+        || body.status.is_some()
+        || body.custom_status_emoji.is_some()
+        || body.custom_status_expires_at.is_some()
+    {
         // Use string-based presence cast to avoid compile-time type checking
         let presence_str = body.presence.map(|p| format!("{:?}", p).to_lowercase());
         let presence_str = presence_str.as_deref();

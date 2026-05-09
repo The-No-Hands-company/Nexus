@@ -1,8 +1,8 @@
 //! Presence commands.
 
-use tauri::State;
-use crate::state::AppState;
 use super::api_client;
+use crate::state::AppState;
+use tauri::State;
 
 #[tauri::command]
 pub async fn update_presence(

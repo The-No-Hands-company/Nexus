@@ -52,7 +52,9 @@ pub async fn browse_media(
         })
         .filter(|mt| {
             !mt.is_empty()
-                && mt.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '+')
+                && mt
+                    .chars()
+                    .all(|c| c.is_alphanumeric() || c == '-' || c == '+')
         })
         .collect();
 
@@ -172,17 +174,11 @@ pub async fn list_filters(
         .await
 }
 
-pub async fn delete_filter(
-    pool: &AnyPool,
-    id: Uuid,
-    user_id: Uuid,
-) -> Result<bool, sqlx::Error> {
-    let res = sqlx::query(
-        "DELETE FROM media_gallery_filters WHERE id = $1 AND user_id = $2",
-    )
-    .bind(id.to_string())
-    .bind(user_id.to_string())
-    .execute(pool)
-    .await?;
+pub async fn delete_filter(pool: &AnyPool, id: Uuid, user_id: Uuid) -> Result<bool, sqlx::Error> {
+    let res = sqlx::query("DELETE FROM media_gallery_filters WHERE id = $1 AND user_id = $2")
+        .bind(id.to_string())
+        .bind(user_id.to_string())
+        .execute(pool)
+        .await?;
     Ok(res.rows_affected() > 0)
 }

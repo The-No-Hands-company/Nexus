@@ -11,17 +11,19 @@
 //! - Events are typed and documented
 //! - No hidden rate limits
 
+#![allow(clippy::pedantic)]
+
 pub mod events;
 pub mod session;
 
 use axum::{
+    Router,
     extract::{
-        ws::{Message, WebSocket},
         State, WebSocketUpgrade,
+        ws::{Message, WebSocket},
     },
     response::Response,
     routing::get,
-    Router,
 };
 use futures_util::{SinkExt, StreamExt};
 use nexus_common::gateway_event::GatewayEvent;
@@ -30,7 +32,7 @@ use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use session::SessionManager;
 use std::{collections::HashMap, sync::Arc, time::Duration};
-use tokio::sync::{broadcast, Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock, broadcast};
 
 /// Gateway state.
 #[derive(Clone)]
@@ -202,7 +204,11 @@ fn setup_redis_fanout_bridge(state: &GatewayState) {
                         while let Some(msg) = stream.next().await {
                             let payload: Result<String, _> = msg.get_payload();
                             let Ok(payload) = payload else { continue };
-                            let Ok(envelope) = serde_json::from_str::<RedisGatewayEnvelope>(&payload) else { continue };
+                            let Ok(envelope) =
+                                serde_json::from_str::<RedisGatewayEnvelope>(&payload)
+                            else {
+                                continue;
+                            };
                             if envelope.origin == origin {
                                 continue;
                             }
@@ -211,12 +217,14 @@ fn setup_redis_fanout_bridge(state: &GatewayState) {
                                 let mut guard = seen.lock().await;
                                 guard.insert(envelope.hash.clone(), std::time::Instant::now());
                                 let now = std::time::Instant::now();
-                                guard.retain(|_, ts| now.duration_since(*ts) < Duration::from_secs(120));
+                                guard.retain(|_, ts| {
+                                    now.duration_since(*ts) < Duration::from_secs(120)
+                                });
                             }
 
                             let _ = broadcast.send(envelope.event);
                             recv_count += 1;
-                            if recv_count % 500 == 0 {
+                            if recv_count.is_multiple_of(500) {
                                 tracing::debug!(count = recv_count, channel = %channel, "gateway redis fanout subscriber processed events");
                             }
                         }
@@ -287,7 +295,8 @@ fn setup_redis_fanout_bridge(state: &GatewayState) {
 
                 match client.get_multiplexed_async_connection().await {
                     Ok(mut conn) => {
-                        let publish_res: redis::RedisResult<i64> = conn.publish(&channel, payload).await;
+                        let publish_res: redis::RedisResult<i64> =
+                            conn.publish(&channel, payload).await;
                         if let Err(e) = publish_res {
                             tracing::warn!(error = %e, "gateway redis fanout: publish failed");
                         }
@@ -303,10 +312,7 @@ fn setup_redis_fanout_bridge(state: &GatewayState) {
 }
 
 /// WebSocket upgrade handler.
-async fn ws_handler(
-    ws: WebSocketUpgrade,
-    State(state): State<Arc<GatewayState>>,
-) -> Response {
+async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<GatewayState>>) -> Response {
     ws.on_upgrade(move |socket| handle_connection(socket, state))
 }
 
@@ -355,7 +361,7 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
                         Some(sid) => subs.contains(&sid),
                         None => {
                             // DM / targeted events — forward if addressed to this user
-                            event.user_id.map_or(false, |eid| eid == uid)
+                            event.user_id == Some(uid)
                         }
                     };
                     drop(subs);
@@ -401,8 +407,8 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
     const IDENTIFY_TIMEOUT_SECS: u64 = 10;
     const MAX_FRAME_BYTES: usize = 64 * 1024; // 64 KiB — enough for any valid op
 
-    let identify_deadline = tokio::time::Instant::now()
-        + tokio::time::Duration::from_secs(IDENTIFY_TIMEOUT_SECS);
+    let identify_deadline =
+        tokio::time::Instant::now() + tokio::time::Duration::from_secs(IDENTIFY_TIMEOUT_SECS);
 
     while let Some(Ok(msg)) = receiver.next().await {
         // Enforce Identify timeout: drop unauthenticated connections that
@@ -477,9 +483,9 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
                                 *authed_user_id.write().await = Some(uid);
 
                                 // Build READY payload (servers + channels + read states)
-                                let ready_data = build_ready_payload(
-                                    &state, uid, &session_id, &claims.username,
-                                ).await;
+                                let ready_data =
+                                    build_ready_payload(&state, uid, &session_id, &claims.username)
+                                        .await;
 
                                 // Populate subscribed server list BEFORE sender task
                                 // processes any further broadcast events
@@ -492,16 +498,18 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
 
                                 *subscribed.write().await = server_ids.clone();
 
-                                state.sessions.register(
-                                    session_id.clone(),
-                                    uid,
-                                    server_ids,
-                                ).await;
+                                state
+                                    .sessions
+                                    .register(session_id.clone(), uid, server_ids)
+                                    .await;
 
                                 // Mark user online now that the session is registered
                                 let _ = nexus_db::repository::users::update_presence(
-                                    &state.db.pool, uid, "online",
-                                ).await;
+                                    &state.db.pool,
+                                    uid,
+                                    "online",
+                                )
+                                .await;
                                 let _ = state.broadcast.send(GatewayEvent {
                                     event_type: "PRESENCE_UPDATE".into(),
                                     data: serde_json::json!({
@@ -514,10 +522,12 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
                                 });
 
                                 // Send READY directly (not via broadcast)
-                                let _ = direct_tx.send(serde_json::json!({
-                                    "op": "Ready",
-                                    "d": ready_data,
-                                })).await;
+                                let _ = direct_tx
+                                    .send(serde_json::json!({
+                                        "op": "Ready",
+                                        "d": ready_data,
+                                    }))
+                                    .await;
 
                                 tracing::info!(
                                     session = %session_id,
@@ -526,10 +536,12 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
                                 );
                             }
                             Err(_) => {
-                                let _ = direct_tx.send(serde_json::json!({
-                                    "op": "InvalidSession",
-                                    "d": null,
-                                })).await;
+                                let _ = direct_tx
+                                    .send(serde_json::json!({
+                                        "op": "InvalidSession",
+                                        "d": null,
+                                    }))
+                                    .await;
                             }
                         }
                     }
@@ -557,10 +569,8 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
                                     .await
                                     .unwrap_or_default();
 
-                                let server_ids: Vec<uuid::Uuid> = bot_installs
-                                    .iter()
-                                    .map(|i| i.server_id)
-                                    .collect();
+                                let server_ids: Vec<uuid::Uuid> =
+                                    bot_installs.iter().map(|i| i.server_id).collect();
 
                                 // Resolve server metadata for the READY payload
                                 let mut server_payloads: Vec<serde_json::Value> = Vec::new();
@@ -568,11 +578,10 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
                                     if let Ok(Some(srv)) =
                                         servers::find_by_id(&state.db.pool, *sid).await
                                     {
-                                        let chans = channels::list_server_channels(
-                                            &state.db.pool, *sid,
-                                        )
-                                        .await
-                                        .unwrap_or_default();
+                                        let chans =
+                                            channels::list_server_channels(&state.db.pool, *sid)
+                                                .await
+                                                .unwrap_or_default();
 
                                         server_payloads.push(serde_json::json!({
                                             "id": srv.id,
@@ -596,11 +605,10 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
 
                                 *subscribed.write().await = server_ids.clone();
 
-                                state.sessions.register(
-                                    session_id.clone(),
-                                    bot_id,
-                                    server_ids,
-                                ).await;
+                                state
+                                    .sessions
+                                    .register(session_id.clone(), bot_id, server_ids)
+                                    .await;
 
                                 let ready = serde_json::json!({
                                     "op": "Ready",
@@ -629,19 +637,23 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
                                 );
                             }
                             _ => {
-                                let _ = direct_tx.send(serde_json::json!({
-                                    "op": "InvalidSession",
-                                    "d": null,
-                                })).await;
+                                let _ = direct_tx
+                                    .send(serde_json::json!({
+                                        "op": "InvalidSession",
+                                        "d": null,
+                                    }))
+                                    .await;
                             }
                         }
                     }
 
                     GatewayMessage::Heartbeat { .. } => {
-                        let _ = direct_tx.send(serde_json::json!({
-                            "op": "HeartbeatAck",
-                            "d": { "timestamp": chrono::Utc::now().timestamp_millis() },
-                        })).await;
+                        let _ = direct_tx
+                            .send(serde_json::json!({
+                                "op": "HeartbeatAck",
+                                "d": { "timestamp": chrono::Utc::now().timestamp_millis() },
+                            }))
+                            .await;
                     }
 
                     GatewayMessage::TypingStart { channel_id } => {
@@ -660,11 +672,17 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
                         }
                     }
 
-                    GatewayMessage::PresenceUpdate { status, custom_status } => {
+                    GatewayMessage::PresenceUpdate {
+                        status,
+                        custom_status,
+                    } => {
                         if let Some(uid) = user_id {
                             let _ = nexus_db::repository::users::update_presence(
-                                &state.db.pool, uid, &status,
-                            ).await;
+                                &state.db.pool,
+                                uid,
+                                &status,
+                            )
+                            .await;
                             let _ = state.broadcast.send(GatewayEvent {
                                 event_type: "PRESENCE_UPDATE".into(),
                                 data: serde_json::json!({
@@ -718,19 +736,18 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
 
     // ── Cleanup ───────────────────────────────────────────────────────────────
     state.sessions.remove(&session_id).await;
-    if let Some(uid) = user_id {
-        if !state.sessions.is_online(uid).await {
-            let _ = nexus_db::repository::users::update_presence(
-                &state.db.pool, uid, "offline",
-            ).await;
-            let _ = state.broadcast.send(GatewayEvent {
-                event_type: "PRESENCE_UPDATE".into(),
-                data: serde_json::json!({"user_id": uid, "status": "offline"}),
-                server_id: None,
-                channel_id: None,
-                user_id: Some(uid),
-            });
-        }
+    if let Some(uid) = user_id
+        && !state.sessions.is_online(uid).await
+    {
+        let _ =
+            nexus_db::repository::users::update_presence(&state.db.pool, uid, "offline").await;
+        let _ = state.broadcast.send(GatewayEvent {
+            event_type: "PRESENCE_UPDATE".into(),
+            data: serde_json::json!({"user_id": uid, "status": "offline"}),
+            server_id: None,
+            channel_id: None,
+            user_id: Some(uid),
+        });
     }
 
     send_task.abort();

@@ -26,14 +26,14 @@ pub async fn create_server(
          RETURNING {SERVER_COLS}"
     );
     sqlx::query_as::<_, Server>(&q)
-    .bind(id.to_string())
-    .bind(name)
-    .bind(owner_id.to_string())
-    .bind(is_public)
-    .bind(&tags_json)
-    .bind(category)
-    .fetch_one(pool)
-    .await
+        .bind(id.to_string())
+        .bind(name)
+        .bind(owner_id.to_string())
+        .bind(is_public)
+        .bind(&tags_json)
+        .bind(category)
+        .fetch_one(pool)
+        .await
 }
 
 /// Find a server by ID.
@@ -46,7 +46,10 @@ pub async fn find_by_id(pool: &sqlx::AnyPool, id: Uuid) -> Result<Option<Server>
 }
 
 /// List servers a user is a member of.
-pub async fn list_user_servers(pool: &sqlx::AnyPool, user_id: Uuid) -> Result<Vec<Server>, sqlx::Error> {
+pub async fn list_user_servers(
+    pool: &sqlx::AnyPool,
+    user_id: Uuid,
+) -> Result<Vec<Server>, sqlx::Error> {
     let q = format!(
         "SELECT {SERVER_COLS_S} FROM servers s \
          INNER JOIN members m ON m.server_id = s.id \
@@ -54,9 +57,9 @@ pub async fn list_user_servers(pool: &sqlx::AnyPool, user_id: Uuid) -> Result<Ve
          ORDER BY s.name"
     );
     sqlx::query_as::<_, Server>(&q)
-    .bind(user_id.to_string())
-    .fetch_all(pool)
-    .await
+        .bind(user_id.to_string())
+        .fetch_all(pool)
+        .await
 }
 
 /// Update server details.
@@ -91,18 +94,18 @@ pub async fn update_server(
          RETURNING {SERVER_COLS}"
     );
     sqlx::query_as::<_, Server>(&q)
-    .bind(name)
-    .bind(description)
-    .bind(is_public)
-    .bind(require_2fa)
-    .bind(spam_window_secs)
-    .bind(spam_max_messages)
-    .bind(id.to_string())
-    .bind(tags_json.as_deref())
-    .bind(category)
-    .bind(tip_jar_url)
-    .fetch_one(pool)
-    .await
+        .bind(name)
+        .bind(description)
+        .bind(is_public)
+        .bind(require_2fa)
+        .bind(spam_window_secs)
+        .bind(spam_max_messages)
+        .bind(id.to_string())
+        .bind(tags_json.as_deref())
+        .bind(category)
+        .bind(tip_jar_url)
+        .fetch_one(pool)
+        .await
 }
 
 /// Transfer server ownership to another member.
@@ -122,10 +125,10 @@ pub async fn transfer_ownership(
          RETURNING {SERVER_COLS}"
     );
     sqlx::query_as::<_, Server>(&q)
-    .bind(new_owner_id.to_string())
-    .bind(server_id.to_string())
-    .fetch_one(pool)
-    .await
+        .bind(new_owner_id.to_string())
+        .bind(server_id.to_string())
+        .fetch_one(pool)
+        .await
 }
 
 /// Delete a server and all associated data.
@@ -139,7 +142,10 @@ pub async fn delete_server(pool: &sqlx::AnyPool, id: Uuid) -> Result<(), sqlx::E
 }
 
 /// Increment server member count.
-pub async fn increment_member_count(pool: &sqlx::AnyPool, server_id: Uuid) -> Result<(), sqlx::Error> {
+pub async fn increment_member_count(
+    pool: &sqlx::AnyPool,
+    server_id: Uuid,
+) -> Result<(), sqlx::Error> {
     sqlx::query("UPDATE servers SET member_count = member_count + 1 WHERE id = $1::uuid")
         .bind(server_id.to_string())
         .execute(pool)
@@ -148,7 +154,10 @@ pub async fn increment_member_count(pool: &sqlx::AnyPool, server_id: Uuid) -> Re
 }
 
 /// Decrement server member count.
-pub async fn decrement_member_count(pool: &sqlx::AnyPool, server_id: Uuid) -> Result<(), sqlx::Error> {
+pub async fn decrement_member_count(
+    pool: &sqlx::AnyPool,
+    server_id: Uuid,
+) -> Result<(), sqlx::Error> {
     sqlx::query("UPDATE servers SET member_count = max(member_count - 1, 0) WHERE id = $1::uuid")
         .bind(server_id.to_string())
         .execute(pool)
@@ -172,14 +181,14 @@ pub async fn create_invite(
          RETURNING {INVITE_COLS}"
     );
     sqlx::query_as::<_, Invite>(&q)
-    .bind(code)
-    .bind(server_id.to_string())
-    .bind(channel_id.map(|u| u.to_string()))
-    .bind(inviter_id.to_string())
-    .bind(max_uses)
-    .bind(expires_at.map(|x| x.to_rfc3339()))
-    .fetch_one(pool)
-    .await
+        .bind(code)
+        .bind(server_id.to_string())
+        .bind(channel_id.map(|u| u.to_string()))
+        .bind(inviter_id.to_string())
+        .bind(max_uses)
+        .bind(expires_at.map(|x| x.to_rfc3339()))
+        .fetch_one(pool)
+        .await
 }
 
 /// Find an invite by code.
@@ -232,10 +241,10 @@ pub async fn list_public_servers(
          LIMIT $1 OFFSET $2"
     );
     sqlx::query_as::<_, Server>(&q)
-    .bind(limit)
-    .bind(offset)
-    .fetch_all(pool)
-    .await
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(pool)
+        .await
 }
 
 // ── Discovery queries (v0.16) ─────────────────────────────────────────────────
@@ -364,9 +373,7 @@ pub async fn update_activity_score(
     server_id: Uuid,
     score: i32,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "UPDATE servers SET activity_score = $1 WHERE id = $2::uuid"
-    )
+    sqlx::query("UPDATE servers SET activity_score = $1 WHERE id = $2::uuid")
         .bind(score)
         .bind(server_id.to_string())
         .execute(pool)

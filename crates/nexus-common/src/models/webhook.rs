@@ -1,8 +1,8 @@
 //! Webhook models.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
 
 /// Webhook type.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -55,7 +55,7 @@ pub struct CreateIncomingWebhookRequest {
 pub struct CreateOutgoingWebhookRequest {
     pub name: String,
     pub url: String,
-    /// Gateway event names to subscribe to, e.g. ["MESSAGE_CREATE"]
+    /// Gateway event names to subscribe to, e.g. `MESSAGE_CREATE`.
     pub events: Vec<String>,
     pub avatar: Option<String>,
 }

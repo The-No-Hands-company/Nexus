@@ -1,19 +1,14 @@
 //! Middleware — authentication extraction, rate limiting, security headers, metrics, etc.
 
-use axum::{
-    extract::Request,
-    http::header,
-    middleware::Next,
-    response::Response,
-};
+use axum::{extract::Request, http::header, middleware::Next, response::Response};
 use nexus_common::error::NexusError;
 use std::collections::HashMap;
-use std::sync::OnceLock;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
-use crate::{auth, AppState};
+use crate::{AppState, auth};
 
 // ── HTTP metrics middleware ──────────────────────────────────────────────────
 
@@ -24,10 +19,7 @@ use crate::{auth, AppState};
 fn normalize_path(path: &str) -> String {
     // Try to use the matched route pattern from Axum (`:id` placeholders)
     // before falling back to raw prefix truncation.
-    path.split('/')
-        .take(4)
-        .collect::<Vec<_>>()
-        .join("/")
+    path.split('/').take(4).collect::<Vec<_>>().join("/")
 }
 
 /// Record per-request Prometheus counters and latency histograms.
@@ -55,12 +47,14 @@ pub async fn record_request_metrics(request: Request, next: Next) -> Response {
         "method" => method.clone(),
         "path" => path.clone(),
         "status" => status,
-    ).increment(1);
+    )
+    .increment(1);
     metrics::histogram!(
         "nexus_http_request_duration_seconds",
         "method" => method,
         "path" => path,
-    ).record(elapsed);
+    )
+    .record(elapsed);
 
     response
 }
@@ -128,13 +122,11 @@ impl AuthContext {
             return Ok(self.flags.lock().await.unwrap());
         }
 
-        let flags = sqlx::query_scalar::<_, i64>(
-            "SELECT flags FROM users WHERE id = $1"
-        )
-        .bind(self.user_id.to_string())
-        .fetch_optional(pool)
-        .await?
-        .unwrap_or(0);
+        let flags = sqlx::query_scalar::<_, i64>("SELECT flags FROM users WHERE id = $1")
+            .bind(self.user_id.to_string())
+            .fetch_optional(pool)
+            .await?
+            .unwrap_or(0);
 
         *self.flags.lock().await = Some(flags);
         Ok(flags)
@@ -157,10 +149,7 @@ fn sha256_hex(input: &str) -> String {
 /// Use this middleware on routes that must only be called by human users (e.g.
 /// login, registration, token refresh).  For routes that both users AND bots may
 /// call, use `combined_auth_middleware` instead.
-pub async fn auth_middleware(
-    mut request: Request,
-    next: Next,
-) -> Result<Response, NexusError> {
+pub async fn auth_middleware(mut request: Request, next: Next) -> Result<Response, NexusError> {
     let auth_header = request
         .headers()
         .get(header::AUTHORIZATION)
@@ -236,9 +225,8 @@ pub async fn auth_middleware(
                     if let Some(ref redis) = state.db.redis {
                         let mut conn = redis.clone();
                         let val = if exists { "1" } else { "0" };
-                        let _: Result<(), _> = redis::AsyncCommands::set_ex(
-                            &mut conn, &cache_key, val, 60u64,
-                        ).await;
+                        let _: Result<(), _> =
+                            redis::AsyncCommands::set_ex(&mut conn, &cache_key, val, 60u64).await;
                     }
 
                     exists
@@ -368,14 +356,10 @@ pub async fn combined_auth_middleware(
     // Exempt /auth/* routes so that resend-verification, session management
     // and 2FA completion still work while the account is unverified.
     let config = nexus_common::config::get();
-    if config.features.require_email_verification
-        && !auth_ctx.is_bot
-        && !auth_ctx.email_verified
-    {
+    if config.features.require_email_verification && !auth_ctx.is_bot && !auth_ctx.email_verified {
         let path = request.uri().path();
-        let is_auth_path = path.contains("/auth/")
-            || path.starts_with("/healthz")
-            || path.starts_with("/health");
+        let is_auth_path =
+            path.contains("/auth/") || path.starts_with("/healthz") || path.starts_with("/health");
         if !is_auth_path {
             return Err(NexusError::Forbidden);
         }
@@ -393,7 +377,9 @@ pub async fn combined_auth_middleware(
 /// async fn my_handler(auth: Extension<AuthContext>) -> impl IntoResponse { ... }
 /// ```
 impl AuthContext {
-    pub fn from_request_extensions(extensions: &axum::http::Extensions) -> Result<&Self, NexusError> {
+    pub fn from_request_extensions(
+        extensions: &axum::http::Extensions,
+    ) -> Result<&Self, NexusError> {
         extensions
             .get::<AuthContext>()
             .ok_or(NexusError::Unauthorized)
@@ -511,11 +497,7 @@ pub async fn check_rate_limit_with_fallback(
     res
 }
 
-async fn check_rate_limit_local(
-    key: &str,
-    limit: u64,
-    window_secs: u64,
-) -> Result<(), NexusError> {
+async fn check_rate_limit_local(key: &str, limit: u64, window_secs: u64) -> Result<(), NexusError> {
     let state = LOCAL_RATE_LIMITS.get_or_init(|| Mutex::new(HashMap::new()));
     let now = Instant::now();
     let window = Duration::from_secs(window_secs.max(1));
@@ -556,22 +538,17 @@ async fn check_rate_limit_local(
 /// internet-facing.  For production, run behind a trusted reverse proxy
 /// that strips and re-sets `X-Forwarded-For`.
 pub fn extract_client_ip(headers: &axum::http::HeaderMap) -> String {
-    if let Some(xff) = headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-    {
+    if let Some(xff) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
         // XFF may be "client, proxy1, proxy2" — take the leftmost value.
-        if let Some(ip) = xff.split(',').next().map(str::trim) {
-            if !ip.is_empty() {
+        if let Some(ip) = xff.split(',').next().map(str::trim)
+            && !ip.is_empty() {
                 return ip.to_owned();
             }
-        }
     }
-    if let Some(xri) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
-        if !xri.is_empty() {
+    if let Some(xri) = headers.get("x-real-ip").and_then(|v| v.to_str().ok())
+        && !xri.is_empty() {
             return xri.to_owned();
         }
-    }
     "unknown".to_owned()
 }
 
@@ -638,7 +615,6 @@ pub async fn security_headers(request: Request, next: Next) -> Response {
 
     response
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -747,7 +723,10 @@ mod tests {
     fn extract_client_ip_trims_whitespace_from_xff() {
         let mut headers = HeaderMap::new();
         // Some proxies add extra spaces
-        headers.insert("x-forwarded-for", "  203.0.113.5  , 10.0.0.1".parse().unwrap());
+        headers.insert(
+            "x-forwarded-for",
+            "  203.0.113.5  , 10.0.0.1".parse().unwrap(),
+        );
         assert_eq!(extract_client_ip(&headers), "203.0.113.5");
     }
 

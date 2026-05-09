@@ -21,6 +21,7 @@
 //! }
 //! ```
 
+use std::fmt::Write as _;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -52,8 +53,16 @@ pub struct FederationClient {
     discovery: DiscoveryCache,
 }
 
+#[derive(serde::Deserialize)]
+struct StateResponse {
+    pdus: Vec<FederationEvent>,
+}
+
 impl FederationClient {
     /// Create a new federation client for the given `server_name`.
+    ///
+    /// # Panics
+    /// Panics if the internal `reqwest` client cannot be constructed.
     pub fn new(server_name: impl Into<String>, key_pair: Arc<ServerKeyPair>) -> Self {
         let http = Client::builder()
             .timeout(Duration::from_secs(30))
@@ -74,17 +83,22 @@ impl FederationClient {
     /// Send a federation transaction to a remote server.
     ///
     /// `PUT /_nexus/federation/v1/send/{txnId}`
+    ///
+    /// # Errors
+    /// Returns an error if serialisation fails, discovery fails, signing fails,
+    /// or the remote endpoint rejects the request.
     pub async fn send_transaction(
         &self,
         destination: &str,
         txn: FederationTransaction,
     ) -> Result<(), FederationError> {
         let txn_id = uuid::Uuid::new_v4().simple().to_string();
-        let uri = format!("/_nexus/federation/v1/send/{}", txn_id);
+        let uri = format!("/_nexus/federation/v1/send/{txn_id}");
         let body = serde_json::to_value(&txn)?;
         let base_url = self.discovery.resolve(destination).await?;
 
-        self.signed_put::<()>(destination, &base_url, &uri, &body).await?;
+        self.signed_put::<()>(destination, &base_url, &uri, &body)
+            .await?;
         Ok(())
     }
 
@@ -93,6 +107,10 @@ impl FederationClient {
     /// Fetch a single event by ID from a remote server.
     ///
     /// `GET /_nexus/federation/v1/event/{eventId}`
+    ///
+    /// # Errors
+    /// Returns an error if discovery fails, signing fails, deserialisation
+    /// fails, or the remote endpoint rejects the request.
     pub async fn get_event(
         &self,
         destination: &str,
@@ -108,6 +126,10 @@ impl FederationClient {
     /// Pull the full state of a room at a given event.
     ///
     /// `GET /_nexus/federation/v1/state/{roomId}?at={eventId}`
+    ///
+    /// # Errors
+    /// Returns an error if discovery fails, signing fails, deserialisation
+    /// fails, or the remote endpoint rejects the request.
     pub async fn get_state(
         &self,
         destination: &str,
@@ -116,11 +138,9 @@ impl FederationClient {
     ) -> Result<Vec<FederationEvent>, FederationError> {
         let mut uri = format!("/_nexus/federation/v1/state/{}", urlencoded(room_id));
         if let Some(at) = at_event_id {
-            uri.push_str(&format!("?at={}", urlencoded(at)));
+            let _ = write!(&mut uri, "?at={}", urlencoded(at));
         }
         let base_url = self.discovery.resolve(destination).await?;
-        #[derive(serde::Deserialize)]
-        struct StateResponse { pdus: Vec<FederationEvent> }
         let resp: StateResponse = self.signed_get(destination, &base_url, &uri).await?;
         Ok(resp.pdus)
     }
@@ -130,6 +150,10 @@ impl FederationClient {
     /// Request a join event template from a remote server.
     ///
     /// `GET /_nexus/federation/v1/make_join/{roomId}/{userId}`
+    ///
+    /// # Errors
+    /// Returns an error if discovery fails, signing fails, deserialisation
+    /// fails, or the remote endpoint rejects the request.
     pub async fn make_join(
         &self,
         destination: &str,
@@ -148,6 +172,10 @@ impl FederationClient {
     /// Submit a signed join event to a remote server.
     ///
     /// `PUT /_nexus/federation/v1/send_join/{roomId}/{eventId}`
+    ///
+    /// # Errors
+    /// Returns an error if discovery fails, signing fails, serialisation fails,
+    /// deserialisation fails, or the remote endpoint rejects the request.
     pub async fn send_join(
         &self,
         destination: &str,
@@ -161,7 +189,8 @@ impl FederationClient {
             urlencoded(event_id)
         );
         let base_url = self.discovery.resolve(destination).await?;
-        self.signed_put(destination, &base_url, &uri, join_event).await
+        self.signed_put(destination, &base_url, &uri, join_event)
+            .await
     }
 
     // ── Directory ────────────────────────────────────────────────────────────
@@ -169,6 +198,10 @@ impl FederationClient {
     /// Query the public room directory on a remote server.
     ///
     /// `GET /_nexus/federation/v1/directory?limit=&since=`
+    ///
+    /// # Errors
+    /// Returns an error if discovery fails, signing fails, deserialisation
+    /// fails, or the remote endpoint rejects the request.
     pub async fn query_directory(
         &self,
         destination: &str,
@@ -178,7 +211,7 @@ impl FederationClient {
         let mut uri = "/_nexus/federation/v1/directory".to_owned();
         let mut params: Vec<String> = Vec::new();
         if let Some(l) = limit {
-            params.push(format!("limit={}", l));
+            params.push(format!("limit={l}"));
         }
         if let Some(s) = since {
             params.push(format!("since={}", urlencoded(s)));
@@ -196,7 +229,14 @@ impl FederationClient {
     /// Fetch the key document from a remote server.
     ///
     /// `GET /_nexus/key/v2/server`
-    pub async fn fetch_server_keys(&self, destination: &str) -> Result<ServerInfo, FederationError> {
+    ///
+    /// # Errors
+    /// Returns an error if discovery fails, the remote server is unreachable,
+    /// or the response cannot be deserialised.
+    pub async fn fetch_server_keys(
+        &self,
+        destination: &str,
+    ) -> Result<ServerInfo, FederationError> {
         let base_url = self.discovery.resolve(destination).await?;
         // Key fetch is unauthenticated (like Matrix).
         let url = format!("{}{}", base_url, "/_nexus/key/v2/server");
@@ -221,12 +261,16 @@ impl FederationClient {
     ///
     /// Returns `(latency_ms, rich_info)` on success, or a [`FederationError`] on
     /// connection failure / HTTP error.
+    ///
+    /// # Errors
+    /// Returns an error if discovery fails, the remote server is unreachable,
+    /// or the response cannot be deserialised.
     pub async fn ping(
         &self,
         destination: &str,
     ) -> Result<(u64, crate::types::RichWellKnownServer), FederationError> {
         let base_url = self.discovery.resolve(destination).await?;
-        let url = format!("{}/.well-known/nexus/server", base_url);
+        let url = format!("{base_url}/.well-known/nexus/server");
         debug!("Pinging {} via {}", destination, url);
 
         let start = std::time::Instant::now();
@@ -237,7 +281,7 @@ impl FederationClient {
             .await?
             .error_for_status()
             .map_err(|e| FederationError::RemoteHttp(destination.to_owned(), e.to_string()))?;
-        let latency_ms = start.elapsed().as_millis() as u64;
+        let latency_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
 
         let info: crate::types::RichWellKnownServer = resp.json().await?;
         Ok((latency_ms, info))
@@ -246,6 +290,10 @@ impl FederationClient {
     // ── v0.8.5 User profile fetch ────────────────────────────────────────────
 
     /// Fetch a remote user's profile via `GET /_nexus/federation/v1/user/{userId}`.
+    ///
+    /// # Errors
+    /// Returns an error if discovery fails, signing fails, deserialisation
+    /// fails, or the remote endpoint rejects the request.
     pub async fn get_user_profile(
         &self,
         destination: &str,
@@ -261,6 +309,10 @@ impl FederationClient {
     /// Send a cross-server friend request to a user on a remote Nexus instance.
     ///
     /// `PUT /_nexus/federation/v1/friend_request`
+    ///
+    /// # Errors
+    /// Returns an error if serialisation fails, discovery fails, signing fails,
+    /// or the remote endpoint rejects the request.
     pub async fn send_friend_request_to_remote(
         &self,
         destination: &str,
@@ -269,13 +321,18 @@ impl FederationClient {
         let uri = "/_nexus/federation/v1/friend_request";
         let body = serde_json::to_value(req)?;
         let base_url = self.discovery.resolve(destination).await?;
-        self.signed_put::<serde_json::Value>(destination, &base_url, uri, &body).await?;
+        self.signed_put::<serde_json::Value>(destination, &base_url, uri, &body)
+            .await?;
         Ok(())
     }
 
     /// Forward an accept / deny response for a federated friend request.
     ///
     /// `PUT /_nexus/federation/v1/friend_request/respond`
+    ///
+    /// # Errors
+    /// Returns an error if serialisation fails, discovery fails, signing fails,
+    /// or the remote endpoint rejects the request.
     pub async fn respond_to_remote_friend_request(
         &self,
         destination: &str,
@@ -284,13 +341,15 @@ impl FederationClient {
         let uri = "/_nexus/federation/v1/friend_request/respond";
         let body = serde_json::to_value(resp)?;
         let base_url = self.discovery.resolve(destination).await?;
-        self.signed_put::<serde_json::Value>(destination, &base_url, uri, &body).await?;
+        self.signed_put::<serde_json::Value>(destination, &base_url, uri, &body)
+            .await?;
         Ok(())
     }
 
     // ── v0.8.5 Discovery access ──────────────────────────────────────────────
 
     /// Expose the underlying discovery cache so callers can resolve base URLs.
+    #[must_use] 
     pub fn discovery(&self) -> &DiscoveryCache {
         &self.discovery
     }
@@ -303,8 +362,15 @@ impl FederationClient {
         base_url: &str,
         uri: &str,
     ) -> Result<T, FederationError> {
-        let auth = sign_request(&self.key_pair, &self.server_name, destination, "GET", uri, None);
-        let url = format!("{}{}", base_url, uri);
+        let auth = sign_request(
+            &self.key_pair,
+            &self.server_name,
+            destination,
+            "GET",
+            uri,
+            None,
+        );
+        let url = format!("{base_url}{uri}");
         debug!("Federation GET {}", url);
         let resp = self
             .http
@@ -324,9 +390,15 @@ impl FederationClient {
         uri: &str,
         body: &Value,
     ) -> Result<T, FederationError> {
-        let auth =
-            sign_request(&self.key_pair, &self.server_name, destination, "PUT", uri, Some(body));
-        let url = format!("{}{}", base_url, uri);
+        let auth = sign_request(
+            &self.key_pair,
+            &self.server_name,
+            destination,
+            "PUT",
+            uri,
+            Some(body),
+        );
+        let url = format!("{base_url}{uri}");
         debug!("Federation PUT {}", url);
         let resp = self
             .http

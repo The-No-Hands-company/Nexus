@@ -87,6 +87,7 @@ impl BridgeConfig {
     /// Load configuration from environment variables.
     ///
     /// Returns `None` if `NEXUS_MATRIX_HS_URL` is not set (bridge disabled).
+    #[must_use] 
     pub fn from_env() -> Option<Self> {
         let homeserver_url = std::env::var("NEXUS_MATRIX_HS_URL").ok()?;
         if homeserver_url.is_empty() {
@@ -111,6 +112,10 @@ pub struct MatrixBridge {
 
 impl MatrixBridge {
     /// Create a new bridge with the given configuration.
+    ///
+    /// # Panics
+    /// Panics if the internal HTTP client cannot be constructed.
+    #[must_use] 
     pub fn new(config: BridgeConfig) -> Self {
         let http = reqwest::Client::builder()
             .user_agent(concat!("Nexus-Federation/", env!("CARGO_PKG_VERSION")))
@@ -139,16 +144,17 @@ impl MatrixBridge {
 
         for ev in txn.events {
             match ev.event_type.as_str() {
-                "m.room.message" => {
-                    match self.handle_matrix_message(pool, &ev).await {
-                        Ok(Some(bridged)) => out.push(bridged),
-                        Ok(None) => {}
-                        Err(e) => {
-                            warn!("Bridge: failed to handle m.room.message {}: {}",
-                                ev.event_id.as_deref().unwrap_or("?"), e);
-                        }
+                "m.room.message" => match self.handle_matrix_message(pool, &ev).await {
+                    Ok(Some(bridged)) => out.push(bridged),
+                    Ok(None) => {}
+                    Err(e) => {
+                        warn!(
+                            "Bridge: failed to handle m.room.message {}: {}",
+                            ev.event_id.as_deref().unwrap_or("?"),
+                            e
+                        );
                     }
-                }
+                },
                 "m.room.member" => {
                     if let Err(e) = self.handle_matrix_member(pool, &ev).await {
                         warn!("Bridge: failed to handle m.room.member: {}", e);
@@ -188,17 +194,13 @@ impl MatrixBridge {
         }
 
         // Resolve room → Nexus channel.
-        let mapping =
-            nexus_db::repository::matrix_bridge::get_channel_for_room(pool, &ev.room_id)
-                .await
-                .map_err(|e| BridgeError::Database(e.to_string()))?;
+        let mapping = nexus_db::repository::matrix_bridge::get_channel_for_room(pool, &ev.room_id)
+            .await
+            .map_err(|e| BridgeError::Database(e.to_string()))?;
 
-        let mapping = match mapping {
-            Some(m) => m,
-            None => {
-                debug!("Bridge: no channel mapped for room {}", ev.room_id);
-                return Ok(None);
-            }
+        let Some(mapping) = mapping else {
+            debug!("Bridge: no channel mapped for room {}", ev.room_id);
+            return Ok(None);
         };
 
         let channel_id = mapping.channel_id;
@@ -224,8 +226,9 @@ impl MatrixBridge {
             channel_id,
             ghost.id,
             &body,
-            0,  // message_type: normal
-            None, None,
+            0, // message_type: normal
+            None,
+            None,
             &[],
             &[],
             false,
@@ -264,18 +267,27 @@ impl MatrixBridge {
 
         if membership == "join" {
             let display_name = ev.content.get("displayname").and_then(|v| v.as_str());
-            let avatar_url = ev.content.get("avatar_url").and_then(|v| v.as_str())
+            let avatar_url = ev
+                .content
+                .get("avatar_url")
+                .and_then(|v| v.as_str())
                 .filter(|u| u.starts_with("mxc://"));
 
             nexus_db::repository::matrix_bridge::find_or_create_ghost(
-                pool, &ev.sender, display_name, avatar_url,
+                pool,
+                &ev.sender,
+                display_name,
+                avatar_url,
             )
             .await
             .map_err(|e| BridgeError::Database(e.to_string()))?;
 
             info!("Bridge: ghost user updated/created for {}", ev.sender);
         } else {
-            debug!("Bridge: m.room.member membership={} from {} (no action)", membership, ev.sender);
+            debug!(
+                "Bridge: m.room.member membership={} from {} (no action)",
+                membership, ev.sender
+            );
         }
 
         Ok(())
@@ -288,6 +300,10 @@ impl MatrixBridge {
     /// Looks up the room mapping in the DB; if no mapping exists, returns
     /// `Err(BridgeError::RoomNotFound)` which the caller should silently
     /// ignore for non-bridged channels.
+    ///
+    /// # Errors
+    /// Returns an error if database lookups fail, no room mapping exists, or
+    /// the outbound Matrix request fails.
     pub async fn relay_to_matrix(
         &self,
         pool: &sqlx::AnyPool,
@@ -296,11 +312,10 @@ impl MatrixBridge {
         display_name: &str,
         body: &str,
     ) -> Result<(), BridgeError> {
-        let mapping =
-            nexus_db::repository::matrix_bridge::get_room_for_channel(pool, channel_id)
-                .await
-                .map_err(|e| BridgeError::Database(e.to_string()))?
-                .ok_or_else(|| BridgeError::RoomNotFound(channel_id.to_string()))?;
+        let mapping = nexus_db::repository::matrix_bridge::get_room_for_channel(pool, channel_id)
+            .await
+            .map_err(|e| BridgeError::Database(e.to_string()))?
+            .ok_or_else(|| BridgeError::RoomNotFound(channel_id.to_string()))?;
 
         // Use per-room token if configured, fall back to global token.
         let token = if mapping.as_token.is_empty() {
@@ -321,6 +336,10 @@ impl MatrixBridge {
     }
 
     /// Low-level: PUT a message to a Matrix room via the CS API.
+    ///
+    /// # Errors
+    /// Returns an error if the HTTP request fails or the homeserver returns a
+    /// non-success response.
     pub async fn send_to_matrix(
         &self,
         room_id: &str,
@@ -338,7 +357,7 @@ impl MatrixBridge {
 
         let content = MatrixMessageContent {
             msgtype: "m.text".to_owned(),
-            body: format!("{}: {}", display_name, body),
+            body: format!("{display_name}: {body}"),
             formatted_body: Some(format!(
                 "<b>{}</b>: {}",
                 html_escape(display_name),
@@ -350,7 +369,7 @@ impl MatrixBridge {
         let resp = self
             .http
             .put(&url)
-            .header("Authorization", format!("Bearer {}", token))
+            .header("Authorization", format!("Bearer {token}"))
             .json(&content)
             .send()
             .await
@@ -362,13 +381,20 @@ impl MatrixBridge {
             return Err(BridgeError::HomeserverError(status.as_u16(), body));
         }
 
-        info!("Bridge: relayed message {} to Matrix room {}", txn_id, room_id);
+        info!(
+            "Bridge: relayed message {} to Matrix room {}",
+            txn_id, room_id
+        );
         Ok(())
     }
 
     // ── Room alias management ───────────────────────────────────────────────
 
     /// Create a room alias on the Matrix homeserver for a Nexus channel.
+    ///
+    /// # Errors
+    /// Returns an error if the HTTP request fails or the homeserver returns a
+    /// non-success response.
     pub async fn create_room_alias(&self, room_id: &str, alias: &str) -> Result<(), BridgeError> {
         let url = format!(
             "{}/_matrix/client/v3/directory/room/{}",
@@ -396,6 +422,10 @@ impl MatrixBridge {
     }
 
     /// Resolve a room alias on the homeserver → room ID.
+    ///
+    /// # Errors
+    /// Returns an error if the HTTP request fails, the homeserver returns a
+    /// non-success response, or the JSON payload is invalid.
     pub async fn resolve_room_alias(&self, alias: &str) -> Result<String, BridgeError> {
         let url = format!(
             "{}/_matrix/client/v3/directory/room/{}",
@@ -493,12 +523,13 @@ fn html_escape(s: &str) -> String {
 /// Convert a Matrix MXID to a stable Nexus username for ghost users.
 ///
 /// e.g. `@alice:matrix.org` → `matrix_alice_matrix.org`
+#[must_use] 
 pub fn mxid_to_username(mxid: &str) -> String {
     // Strip leading '@'
     let without_at = mxid.trim_start_matches('@');
     // Replace ':' (only the first occurrence — server separator) with '_'
-    let username = without_at.replacen(':', "_", 1).replace('.', ".");
-    format!("matrix_{}", username)
+    let username = without_at.replacen(':', "_", 1);
+    format!("matrix_{username}")
 }
 
 #[cfg(test)]
@@ -590,7 +621,10 @@ mod tests {
     fn spaces_become_plus_or_percent20() {
         // form_urlencoded encodes spaces as '+'
         let r = urlencoded("hello world");
-        assert!(r.contains('+') || r.contains("%20"), "space must be encoded");
+        assert!(
+            r.contains('+') || r.contains("%20"),
+            "space must be encoded"
+        );
     }
 
     #[test]
@@ -601,7 +635,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_string_stays_empty() {
+    fn empty_string_stays_empty_urlencoded() {
         assert_eq!(urlencoded(""), "");
     }
 }

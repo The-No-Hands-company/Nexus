@@ -10,9 +10,8 @@ pub async fn get_progress(
     pool: &AnyPool,
     user_id: Uuid,
 ) -> Result<Option<OnboardingProgress>, sqlx::Error> {
-    let q = format!(
-        "SELECT {ONBOARDING_PROGRESS_COLS} FROM onboarding_progress WHERE user_id = $1"
-    );
+    let q =
+        format!("SELECT {ONBOARDING_PROGRESS_COLS} FROM onboarding_progress WHERE user_id = $1");
     sqlx::query_as::<_, OnboardingProgress>(&q)
         .bind(user_id.to_string())
         .fetch_optional(pool)

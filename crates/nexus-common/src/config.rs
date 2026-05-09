@@ -13,25 +13,30 @@ static CONFIG: OnceLock<AppConfig> = OnceLock::new();
 /// # Panics
 /// Panics if config has not been initialized via [`init`].
 pub fn get() -> &'static AppConfig {
-    CONFIG.get().expect("Config not initialized. Call nexus_common::config::init() first.")
+    CONFIG
+        .get()
+        .expect("Config not initialized. Call nexus_common::config::init() first.")
 }
 
 /// Initialize the global configuration from environment, merging in explicit
 /// overrides at the highest priority level.
 ///
-/// Used by lite-mode startup to inject generated defaults (SQLite path, JWT
+/// Used by lite-mode startup to inject generated defaults (`SQLite` path, JWT
 /// secret, public URL) without touching the process environment via the
 /// `unsafe` `std::env::set_var`.
 ///
 /// `overrides` keys use the same dot-path format as the config builder
 /// (e.g. `"database.url"`, `"auth.jwt_secret"`).
+///
+/// # Errors
+/// Returns `ConfigError` when any source fails to load or deserialize.
 pub fn init_with_overrides(
     overrides: &[(&str, String)],
 ) -> Result<&'static AppConfig, config::ConfigError> {
     // Load .env file if present (development)
     let _ = dotenvy::dotenv();
 
-    let db_url_platform    = std::env::var("DATABASE_URL").ok().filter(|s| !s.is_empty());
+    let db_url_platform = std::env::var("DATABASE_URL").ok().filter(|s| !s.is_empty());
     let redis_url_platform = std::env::var("REDIS_URL").ok().filter(|s| !s.is_empty());
 
     let mut builder = build_base_config()?;
@@ -64,13 +69,17 @@ pub fn init_with_overrides(
 /// Initialize the global configuration from environment.
 ///
 /// Should be called once at application startup, before any other code accesses config.
+///
+/// # Errors
+/// Returns `ConfigError` when any source fails to load or deserialize.
 pub fn init() -> Result<&'static AppConfig, config::ConfigError> {
     init_with_overrides(&[])
 }
 
 /// Build the config builder pre-loaded with all defaults (shared between
 /// `init` and `init_with_overrides`).
-fn build_base_config() -> Result<config::ConfigBuilder<config::builder::DefaultState>, config::ConfigError> {
+fn build_base_config()
+-> Result<config::ConfigBuilder<config::builder::DefaultState>, config::ConfigError> {
     // 12-factor / platform fallbacks — read bare DATABASE_URL and REDIS_URL
     // as set by Fly.io postgres attach, Heroku, Railway, Render, etc.
     // NEXUS__DATABASE__URL / NEXUS__REDIS__URL always win (higher priority).
@@ -150,7 +159,7 @@ pub struct ServerConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct DatabaseConfig {
-    /// PostgreSQL connection URL
+    /// `PostgreSQL` connection URL.
     pub url: String,
     pub max_connections: u32,
     pub min_connections: u32,
@@ -164,12 +173,12 @@ pub struct RedisConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct ScyllaConfig {
-    /// Enables ScyllaDB message-store integration.
+    /// Enables `ScyllaDB` message-store integration.
     ///
     /// Current default is `false` until the Scylla write/read path is fully
     /// migrated from SQL repositories.
     pub enabled: bool,
-    /// ScyllaDB contact points — comma-separated, e.g. `127.0.0.1:9042,127.0.0.2:9042`
+    /// `ScyllaDB` contact points — comma-separated, e.g. `127.0.0.1:9042,127.0.0.2:9042`.
     pub nodes: String,
     /// Cassandra keyspace name
     pub keyspace: String,
@@ -194,7 +203,7 @@ pub struct AuthConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct StorageConfig {
-    /// S3 endpoint URL (e.g., http://localhost:9000 for MinIO).
+    /// S3 endpoint URL (e.g., <http://localhost:9000> for `MinIO`).
     /// Leave empty / unset in lite mode — files go to `data_dir` instead.
     pub endpoint: String,
     pub bucket: String,
@@ -207,9 +216,9 @@ pub struct StorageConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct SearchConfig {
-    /// MeiliSearch URL
+    /// `MeiliSearch` URL.
     pub url: String,
-    /// MeiliSearch API key
+    /// `MeiliSearch` API key.
     pub api_key: String,
 }
 
@@ -246,6 +255,7 @@ pub struct EmailConfig {
 
 impl EmailConfig {
     /// Returns `true` when a valid Resend API key is configured.
+    #[must_use]
     pub fn is_enabled(&self) -> bool {
         !self.api_key.is_empty()
     }

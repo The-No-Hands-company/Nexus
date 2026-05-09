@@ -141,9 +141,7 @@ pub async fn get_thread_summary(
     pool: &AnyPool,
     thread_id: Uuid,
 ) -> Result<Option<ThreadSummary>, sqlx::Error> {
-    let q = format!(
-        "SELECT {THREAD_SUMMARY_COLS} FROM thread_summaries WHERE thread_id = $1"
-    );
+    let q = format!("SELECT {THREAD_SUMMARY_COLS} FROM thread_summaries WHERE thread_id = $1");
     sqlx::query_as::<_, ThreadSummary>(&q)
         .bind(thread_id.to_string())
         .fetch_optional(pool)
@@ -318,9 +316,8 @@ pub async fn list_ai_consent(
     user_id: Uuid,
     server_id: Uuid,
 ) -> Result<Vec<AiConsent>, sqlx::Error> {
-    let q = format!(
-        "SELECT {AI_CONSENT_COLS} FROM ai_consent WHERE user_id = $1 AND server_id = $2"
-    );
+    let q =
+        format!("SELECT {AI_CONSENT_COLS} FROM ai_consent WHERE user_id = $1 AND server_id = $2");
     sqlx::query_as::<_, AiConsent>(&q)
         .bind(user_id.to_string())
         .bind(server_id.to_string())

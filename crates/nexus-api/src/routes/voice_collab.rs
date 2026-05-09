@@ -4,20 +4,20 @@
 //! collab sessions, spatial audio, voice presets.
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, Query, State},
     middleware,
     routing::get,
-    Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
-use nexus_common::models::voice_collab::*;
-use nexus_db::repository::{voice_collab, members};
 use nexus_common::models::Member;
+use nexus_common::models::voice_collab::*;
+use nexus_db::repository::{members, voice_collab};
 use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 // ── Router ─────────────────────────────────────────────────────────────────
 
@@ -56,14 +56,18 @@ pub fn router() -> Router<Arc<AppState>> {
         // Voice presets (global, read-only)
         .route("/voice-presets", get(list_voice_presets))
         .route("/voice-presets/{preset_id}", get(get_voice_preset))
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ── Request / Query ────────────────────────────────────────────────────────
 
 #[allow(dead_code)]
 #[derive(Debug, Deserialize)]
-struct LimitQuery { limit: Option<i64> }
+struct LimitQuery {
+    limit: Option<i64>,
+}
 
 #[derive(Debug, Deserialize)]
 struct UpsertVideoLayoutReq {
@@ -120,7 +124,8 @@ async fn get_video_layout(
     Path(channel_id): Path<Uuid>,
 ) -> NexusResult<Json<Option<VideoLayout>>> {
     let row = voice_collab::get_video_layout(&state.db.pool, channel_id, ctx.user_id)
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(row))
 }
 
@@ -131,11 +136,17 @@ async fn upsert_video_layout(
     Json(body): Json<UpsertVideoLayoutReq>,
 ) -> NexusResult<Json<VideoLayout>> {
     let row = voice_collab::upsert_video_layout(
-        &state.db.pool, Uuid::new_v4(), channel_id, ctx.user_id, &body.layout_type,
+        &state.db.pool,
+        Uuid::new_v4(),
+        channel_id,
+        ctx.user_id,
+        &body.layout_type,
         &body.pinned_users.unwrap_or(serde_json::json!([])),
         &body.custom_positions.unwrap_or(serde_json::json!({})),
         body.pip_enabled.unwrap_or(false),
-    ).await.map_err(|e| NexusError::Internal(e.into()))?;
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(row))
 }
 
@@ -144,7 +155,8 @@ async fn list_virtual_backgrounds(
     Extension(ctx): Extension<AuthContext>,
 ) -> NexusResult<Json<Vec<VirtualBackground>>> {
     let rows = voice_collab::list_virtual_backgrounds(&state.db.pool, ctx.user_id)
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(rows))
 }
 
@@ -154,14 +166,22 @@ async fn create_virtual_background(
     Json(body): Json<CreateVirtualBgReq>,
 ) -> NexusResult<Json<VirtualBackground>> {
     let row = voice_collab::create_virtual_background(
-        &state.db.pool, Uuid::new_v4(), ctx.user_id,
-        &body.name, &body.bg_type, body.url.as_deref(),
-    ).await.map_err(|e| NexusError::Internal(e.into()))?;
+        &state.db.pool,
+        Uuid::new_v4(),
+        ctx.user_id,
+        &body.name,
+        &body.bg_type,
+        body.url.as_deref(),
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(row))
 }
 
 #[derive(Debug, Deserialize)]
-struct LiveStreamQuery { channel_id: Uuid }
+struct LiveStreamQuery {
+    channel_id: Uuid,
+}
 
 async fn list_live_streams(
     State(state): State<Arc<AppState>>,
@@ -170,11 +190,15 @@ async fn list_live_streams(
     Query(q): Query<LiveStreamQuery>,
 ) -> NexusResult<Json<Vec<LiveStream>>> {
     let _m: Option<Member> = members::find_member(&state.db.pool, ctx.user_id, server_id)
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
-    if _m.is_none() { return Err(NexusError::Forbidden); }
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    if _m.is_none() {
+        return Err(NexusError::Forbidden);
+    }
 
     let rows = voice_collab::list_live_streams(&state.db.pool, q.channel_id)
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(rows))
 }
 
@@ -185,14 +209,22 @@ async fn create_live_stream(
     Json(body): Json<CreateLiveStreamReq>,
 ) -> NexusResult<Json<LiveStream>> {
     let _m: Option<Member> = members::find_member(&state.db.pool, ctx.user_id, server_id)
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
-    if _m.is_none() { return Err(NexusError::Forbidden); }
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    if _m.is_none() {
+        return Err(NexusError::Forbidden);
+    }
 
     let row = voice_collab::create_live_stream(
-        &state.db.pool, Uuid::new_v4(), body.channel_id,
-        ctx.user_id, &body.title.unwrap_or_default(),
+        &state.db.pool,
+        Uuid::new_v4(),
+        body.channel_id,
+        ctx.user_id,
+        &body.title.unwrap_or_default(),
         body.is_e2ee.unwrap_or(false),
-    ).await.map_err(|e| NexusError::Internal(e.into()))?;
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(row))
 }
 
@@ -202,7 +234,8 @@ async fn list_breakout_rooms(
     Path(channel_id): Path<Uuid>,
 ) -> NexusResult<Json<Vec<BreakoutRoom>>> {
     let rows = voice_collab::list_breakout_rooms(&state.db.pool, channel_id)
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(rows))
 }
 
@@ -213,9 +246,15 @@ async fn create_breakout_room(
     Json(body): Json<CreateBreakoutRoomReq>,
 ) -> NexusResult<Json<BreakoutRoom>> {
     let row = voice_collab::create_breakout_room(
-        &state.db.pool, Uuid::new_v4(), channel_id, &body.name,
-        body.capacity.unwrap_or(10), ctx.user_id,
-    ).await.map_err(|e| NexusError::Internal(e.into()))?;
+        &state.db.pool,
+        Uuid::new_v4(),
+        channel_id,
+        &body.name,
+        body.capacity.unwrap_or(10),
+        ctx.user_id,
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(row))
 }
 
@@ -225,7 +264,8 @@ async fn list_collab_sessions(
     Path(channel_id): Path<Uuid>,
 ) -> NexusResult<Json<Vec<CollabSession>>> {
     let rows = voice_collab::list_collab_sessions(&state.db.pool, channel_id)
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(rows))
 }
 
@@ -236,9 +276,14 @@ async fn create_collab_session(
     Json(body): Json<CreateCollabSessionReq>,
 ) -> NexusResult<Json<CollabSession>> {
     let row = voice_collab::create_collab_session(
-        &state.db.pool, Uuid::new_v4(), channel_id, &body.session_type,
+        &state.db.pool,
+        Uuid::new_v4(),
+        channel_id,
+        &body.session_type,
         body.document_id,
-    ).await.map_err(|e| NexusError::Internal(e.into()))?;
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(row))
 }
 
@@ -248,7 +293,8 @@ async fn get_spatial_audio(
     Path(channel_id): Path<Uuid>,
 ) -> NexusResult<Json<Option<SpatialAudioConfig>>> {
     let row = voice_collab::get_spatial_audio_config(&state.db.pool, channel_id)
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(row))
 }
 
@@ -259,7 +305,9 @@ async fn upsert_spatial_audio(
     Json(body): Json<UpsertSpatialAudioReq>,
 ) -> NexusResult<Json<SpatialAudioConfig>> {
     let row = voice_collab::upsert_spatial_audio_config(
-        &state.db.pool, Uuid::new_v4(), channel_id,
+        &state.db.pool,
+        Uuid::new_v4(),
+        channel_id,
         &body.preset.unwrap_or_else(|| "default".into()),
         body.room_width.unwrap_or(10.0),
         body.room_depth.unwrap_or(10.0),
@@ -267,7 +315,9 @@ async fn upsert_spatial_audio(
         &body.positions.unwrap_or(serde_json::json!({})),
         body.hrtf_enabled.unwrap_or(true),
         body.ambisonics_order.unwrap_or(1),
-    ).await.map_err(|e| NexusError::Internal(e.into()))?;
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(row))
 }
 
@@ -276,7 +326,8 @@ async fn list_voice_presets(
     Extension(_ctx): Extension<AuthContext>,
 ) -> NexusResult<Json<Vec<VoicePreset>>> {
     let rows = voice_collab::list_voice_presets(&state.db.pool)
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(rows))
 }
 
@@ -286,7 +337,10 @@ async fn get_voice_preset(
     Path(preset_name): Path<String>,
 ) -> NexusResult<Json<VoicePreset>> {
     let row = voice_collab::get_voice_preset(&state.db.pool, &preset_name)
-        .await.map_err(|e| NexusError::Internal(e.into()))?
-        .ok_or(NexusError::NotFound { resource: "voice_preset".into() })?;
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?
+        .ok_or(NexusError::NotFound {
+            resource: "voice_preset".into(),
+        })?;
     Ok(Json(row))
 }

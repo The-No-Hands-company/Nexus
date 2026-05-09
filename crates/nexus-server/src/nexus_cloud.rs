@@ -56,7 +56,10 @@ pub async fn register_with_cloud(public_url: &str, cloud_url: &str, api_key: &st
 /// Send a liveness heartbeat so the Cloud routing table knows this node is up.
 pub async fn send_heartbeat(cloud_url: &str, api_key: &str, public_url: &str) {
     let client = reqwest::Client::new();
-    let url = format!("{}/api/v1/tools/nexus/heartbeat", cloud_url.trim_end_matches('/'));
+    let url = format!(
+        "{}/api/v1/tools/nexus/heartbeat",
+        cloud_url.trim_end_matches('/')
+    );
     if let Err(e) = client
         .post(&url)
         .header("Content-Type", "application/json")

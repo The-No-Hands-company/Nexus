@@ -8,10 +8,10 @@
 //! PUT    /servers/:id/storage                         — Set max quota (owner)
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, State},
     middleware,
     routing::get,
-    Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_common::snowflake;
@@ -20,7 +20,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -40,7 +40,9 @@ pub fn router() -> Router<Arc<AppState>> {
             "/servers/{server_id}/storage",
             get(get_quota).put(set_quota),
         )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ── Request types ─────────────────────────────────────────────────────────────

@@ -74,22 +74,12 @@ pub async fn create_upgrade_record(
         .await
 }
 
-pub async fn list_upgrade_records(
-    pool: &AnyPool,
-) -> Result<Vec<UpgradeRecord>, sqlx::Error> {
-    let q = format!(
-        "SELECT {UPGRADE_RECORD_COLS} FROM upgrade_records ORDER BY started_at DESC"
-    );
-    sqlx::query_as::<_, UpgradeRecord>(&q)
-        .fetch_all(pool)
-        .await
+pub async fn list_upgrade_records(pool: &AnyPool) -> Result<Vec<UpgradeRecord>, sqlx::Error> {
+    let q = format!("SELECT {UPGRADE_RECORD_COLS} FROM upgrade_records ORDER BY started_at DESC");
+    sqlx::query_as::<_, UpgradeRecord>(&q).fetch_all(pool).await
 }
 
-pub async fn complete_upgrade(
-    pool: &AnyPool,
-    id: Uuid,
-    status: &str,
-) -> Result<(), sqlx::Error> {
+pub async fn complete_upgrade(pool: &AnyPool, id: Uuid, status: &str) -> Result<(), sqlx::Error> {
     sqlx::query("UPDATE upgrade_records SET status = $2, completed_at = now() WHERE id = $1")
         .bind(id.to_string())
         .bind(status)

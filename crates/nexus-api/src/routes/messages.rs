@@ -4,26 +4,34 @@
 //! so connected WebSocket clients see changes in real-time.
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, Query, State},
     middleware,
     routing::{delete, get, post, put},
-    Json, Router,
 };
+use chrono::Utc;
+use nexus_common::gateway_event::GatewayEvent;
 use nexus_common::{
     error::{NexusError, NexusResult},
     models::message::{CreateMessageRequest, UpdateMessageRequest},
     snowflake,
     validation::validate_request,
 };
-use chrono::Utc;
-use nexus_db::repository::{channels, members, messages, moderation, reactions, read_states, scylla_outbox, servers};
-use nexus_common::gateway_event::GatewayEvent;
+use nexus_db::repository::{
+    channels, members, messages, moderation, reactions, read_states, scylla_outbox, servers,
+};
 use scylla::SessionBuilder;
 use serde::Deserialize;
-use std::{collections::HashMap, sync::{Arc, OnceLock}};
+use std::{
+    collections::HashMap,
+    sync::{Arc, OnceLock},
+};
 use uuid::Uuid;
 
-use crate::{middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
+use crate::{
+    AppState,
+    middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip},
+};
 
 /// Message routes.
 pub fn router() -> Router<Arc<AppState>> {
@@ -35,9 +43,7 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         .route(
             "/channels/{channel_id}/messages/{message_id}",
-            get(get_message)
-                .patch(edit_message)
-                .delete(delete_message),
+            get(get_message).patch(edit_message).delete(delete_message),
         )
         // Bulk delete
         .route(
@@ -45,10 +51,7 @@ pub fn router() -> Router<Arc<AppState>> {
             post(bulk_delete_messages),
         )
         // Pins
-        .route(
-            "/channels/{channel_id}/pins",
-            get(get_pinned_messages),
-        )
+        .route("/channels/{channel_id}/pins", get(get_pinned_messages))
         .route(
             "/channels/{channel_id}/pins/{message_id}",
             put(pin_message).delete(unpin_message),
@@ -67,10 +70,7 @@ pub fn router() -> Router<Arc<AppState>> {
             delete(remove_all_reactions),
         )
         // Read state
-        .route(
-            "/channels/{channel_id}/ack/{message_id}",
-            post(ack_message),
-        )
+        .route("/channels/{channel_id}/ack/{message_id}", post(ack_message))
         // Search
         .route("/channels/{channel_id}/search", get(search_messages))
         // Announcement channel — publish (crosspost) a message
@@ -84,7 +84,9 @@ pub fn router() -> Router<Arc<AppState>> {
             put(add_channel_follower),
         )
         // All routes require authentication
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ============================================================================
@@ -150,13 +152,8 @@ async fn send_message(
         10,
     )
     .await?;
-    check_rate_limit_with_fallback(
-        state.db.redis.as_ref(),
-        format!("rl:msg:ip:{ip}"),
-        60,
-        10,
-    )
-    .await?;
+    check_rate_limit_with_fallback(state.db.redis.as_ref(), format!("rl:msg:ip:{ip}"), 60, 10)
+        .await?;
 
     // Verify channel exists
     let channel = channels::find_by_id(&state.db.pool, channel_id)
@@ -175,13 +172,12 @@ async fn send_message(
             .ok_or(NexusError::Forbidden)?;
 
         // Timeout enforcement: member cannot send messages while timed out
-        if let Some(disabled_until) = member.communication_disabled_until {
-            if disabled_until > Utc::now() {
+        if let Some(disabled_until) = member.communication_disabled_until
+            && disabled_until > Utc::now() {
                 return Err(NexusError::Validation {
                     message: "You are currently timed out in this server".into(),
                 });
             }
-        }
 
         // Word filter check
         if let Ok(Some((_pattern, action))) =
@@ -206,15 +202,28 @@ async fn send_message(
         }
 
         // Load per-server spam detection settings.
-        if let Ok(Some(server)) = nexus_db::repository::servers::find_by_id(&state.db.pool, server_id).await {
+        if let Ok(Some(server)) =
+            nexus_db::repository::servers::find_by_id(&state.db.pool, server_id).await
+        {
             spam_window_secs = server.spam_window_secs.max(1) as u64;
             spam_max_messages = server.spam_max_messages.max(1) as u64;
         }
     }
 
     // Spam check: reject if the same content exceeds the per-server limit within the window
-    if check_spam(&state.db.redis, auth.user_id, channel_id, &body.content, spam_window_secs, spam_max_messages).await {
-        return Err(NexusError::RateLimited { retry_after_ms: spam_window_secs * 1_000 });
+    if check_spam(
+        &state.db.redis,
+        auth.user_id,
+        channel_id,
+        &body.content,
+        spam_window_secs,
+        spam_max_messages,
+    )
+    .await
+    {
+        return Err(NexusError::RateLimited {
+            retry_after_ms: spam_window_secs * 1_000,
+        });
     }
 
     // Determine message type: 0 = Default, 1 = Reply (if reference provided)
@@ -246,7 +255,7 @@ async fn send_message(
     .await?;
 
     // v0.14: persist topic and sticker_ids if provided
-    if body.topic.is_some() || body.sticker_ids.as_ref().map_or(false, |v| !v.is_empty()) {
+    if body.topic.is_some() || body.sticker_ids.as_ref().is_some_and(|v| !v.is_empty()) {
         let topic_val = body.topic.as_deref().unwrap_or("");
         let sticker_ids_str = body
             .sticker_ids
@@ -274,16 +283,15 @@ async fn send_message(
     // Disappearing messages — if the channel has a TTL set, write expires_at
     // We query the column added in migration 00015 directly to avoid changing
     // the Channel model and all its consumers.
-    let disappear_secs: Option<(i64,)> = sqlx::query_as(
-        "SELECT disappear_after_seconds FROM channels WHERE id = $1::uuid",
-    )
-    .bind(channel_id.to_string())
-    .fetch_optional(&state.db.pool)
-    .await
-    .ok()
-    .flatten();
-    if let Some((secs,)) = disappear_secs {
-        if secs > 0 {
+    let disappear_secs: Option<(i64,)> =
+        sqlx::query_as("SELECT disappear_after_seconds FROM channels WHERE id = $1::uuid")
+            .bind(channel_id.to_string())
+            .fetch_optional(&state.db.pool)
+            .await
+            .ok()
+            .flatten();
+    if let Some((secs,)) = disappear_secs
+        && secs > 0 {
             let _ = sqlx::query(
                 "UPDATE messages SET expires_at = NOW() + ($1 * INTERVAL '1 second') WHERE id = $2::uuid",
             )
@@ -292,16 +300,12 @@ async fn send_message(
             .execute(&state.db.pool)
             .await;
         }
-    }
 
     // Increment mention counts for mentioned users
     for mentioned_user_id in &mentions {
-        let _ = read_states::increment_mention_count(
-            &state.db.pool,
-            *mentioned_user_id,
-            channel_id,
-        )
-        .await;
+        let _ =
+            read_states::increment_mention_count(&state.db.pool, *mentioned_user_id, channel_id)
+                .await;
     }
 
     let mut response = message_row_to_json(&msg, &[]);
@@ -327,14 +331,13 @@ async fn send_message(
             .unwrap_or(false),
         created_at: msg.created_at.timestamp(),
     };
-    let _ = state.search.sync_message_index(&state.db.pool, msg.id, doc.clone()).await;
+    let _ = state
+        .search
+        .sync_message_index(&state.db.pool, msg.id, doc.clone())
+        .await;
 
     if state.db.scylla_enabled {
-        let _ = scylla_outbox::enqueue_upsert_message(
-            &state.db.pool,
-            &doc,
-        )
-        .await;
+        let _ = scylla_outbox::enqueue_upsert_message(&state.db.pool, &doc).await;
     }
 
     // Emit MESSAGE_CREATE event to gateway
@@ -359,7 +362,7 @@ async fn send_message(
         let content_preview: String = body.content.chars().take(120).collect();
         let channel_id_copy = channel_id;
         let mentions_copy = mentions.clone();
-        let channel_type = channel.channel_type.clone();
+        let channel_type = channel.channel_type;
 
         tokio::spawn(async move {
             // ── Case 1: @mention in a server channel ─────────────────────
@@ -403,9 +406,13 @@ async fn send_message(
                 .unwrap_or_default();
 
                 for (uid_str,) in others {
-                    let Ok(recipient_uid) = uid_str.parse::<Uuid>() else { continue };
+                    let Ok(recipient_uid) = uid_str.parse::<Uuid>() else {
+                        continue;
+                    };
                     // Skip if already notified via @mention above
-                    if mentions_copy.contains(&recipient_uid) { continue; }
+                    if mentions_copy.contains(&recipient_uid) {
+                        continue;
+                    }
                     let payload = crate::push_sender::PushPayload {
                         title: format!("Message from {}", author_name),
                         body: content_preview.clone(),
@@ -430,8 +437,8 @@ async fn send_message(
     // push every other participant so they see it even when the app is closed.
     // Mentioned-user pushes above cover @mentions in server channels;
     // this block covers the direct-message case where there are no @mentions.
-    if channel.server_id.is_none() {
-        if let Some(ref sender) = state.push {
+    if channel.server_id.is_none()
+        && let Some(ref sender) = state.push {
             let sender = sender.clone();
             let pool = state.db.pool.clone();
             let author_name = auth.username.clone();
@@ -479,7 +486,6 @@ async fn send_message(
                 }
             });
         }
-    }
 
     tracing::debug!(
         message_id = %message_id,
@@ -506,13 +512,12 @@ async fn get_messages(
         })?;
 
     // If server channel, verify membership
-    if let Some(server_id) = channel.server_id {
-        if !members::is_member(&state.db.pool, auth.user_id, server_id).await? {
+    if let Some(server_id) = channel.server_id
+        && !members::is_member(&state.db.pool, auth.user_id, server_id).await? {
             return Err(NexusError::Forbidden);
         }
-    }
 
-    let limit = params.limit.unwrap_or(50).min(100).max(1);
+    let limit = params.limit.unwrap_or(50).clamp(1, 100);
     let strategy = scylla_read_strategy(&state);
     if strategy != ScyllaReadStrategy::Off && params.before.is_none() && params.after.is_none() {
         match list_messages_from_scylla(&state, channel_id, auth.user_id, limit).await {
@@ -576,9 +581,10 @@ async fn get_messages(
     .await?;
 
     let message_ids: Vec<Uuid> = rows.iter().map(|row| row.id).collect();
-    let reaction_counts_map = reactions::get_reaction_counts_for_messages(&state.db.pool, &message_ids)
-        .await
-        .unwrap_or_default();
+    let reaction_counts_map =
+        reactions::get_reaction_counts_for_messages(&state.db.pool, &message_ids)
+            .await
+            .unwrap_or_default();
     let my_reactions_map = reactions::get_user_reaction_emojis_for_messages(
         &state.db.pool,
         auth.user_id,
@@ -597,7 +603,11 @@ async fn get_messages(
             .get(&row.id)
             .map(|set| set.iter().cloned().collect::<Vec<_>>())
             .unwrap_or_default();
-        result.push(message_with_author_to_json(row, reaction_counts, &my_reactions));
+        result.push(message_with_author_to_json(
+            row,
+            reaction_counts,
+            &my_reactions,
+        ));
     }
 
     Ok(Json(result))
@@ -615,11 +625,10 @@ async fn get_message(
         .ok_or(NexusError::NotFound {
             resource: "Channel".into(),
         })?;
-    if let Some(server_id) = channel.server_id {
-        if !members::is_member(&state.db.pool, auth.user_id, server_id).await? {
+    if let Some(server_id) = channel.server_id
+        && !members::is_member(&state.db.pool, auth.user_id, server_id).await? {
             return Err(NexusError::Forbidden);
         }
-    }
 
     let strategy = scylla_read_strategy(&state);
     if strategy != ScyllaReadStrategy::Off {
@@ -727,13 +736,15 @@ async fn edit_message(
     })?;
 
     // Fetch the channel before applying the edit so we can run the word filter.
-    let channel = channels::find_by_id(&state.db.pool, channel_id).await?.ok_or(
-        NexusError::NotFound { resource: "Channel".into() },
-    )?;
+    let channel = channels::find_by_id(&state.db.pool, channel_id)
+        .await?
+        .ok_or(NexusError::NotFound {
+            resource: "Channel".into(),
+        })?;
 
     // Word filter — reject / warn before persisting the edit.
-    if let Some(server_id) = channel.server_id {
-        if let Ok(Some((_pattern, action))) =
+    if let Some(server_id) = channel.server_id
+        && let Ok(Some((_pattern, action))) =
             moderation::check_content(&state.db.pool, server_id, content).await
         {
             match action.as_str() {
@@ -744,11 +755,10 @@ async fn edit_message(
                 _ => {
                     return Err(NexusError::Validation {
                         message: "Message contains prohibited content".into(),
-                    })
+                    });
                 }
             }
         }
-    }
 
     let updated = messages::update_message(&state.db.pool, message_id, content).await?;
 
@@ -772,14 +782,13 @@ async fn edit_message(
             .unwrap_or(false),
         created_at: updated.created_at.timestamp(),
     };
-    let _ = state.search.sync_message_index(&state.db.pool, updated.id, doc.clone()).await;
+    let _ = state
+        .search
+        .sync_message_index(&state.db.pool, updated.id, doc.clone())
+        .await;
 
     if state.db.scylla_enabled {
-        let _ = scylla_outbox::enqueue_upsert_message(
-            &state.db.pool,
-            &doc,
-        )
-        .await;
+        let _ = scylla_outbox::enqueue_upsert_message(&state.db.pool, &doc).await;
     }
 
     let response = message_row_to_json(&updated, &[]);
@@ -815,16 +824,20 @@ async fn delete_message(
     }
 
     // Author can delete their own, or MANAGE_MESSAGES permission in server channels
-    let channel = channels::find_by_id(&state.db.pool, channel_id).await?.ok_or(NexusError::NotFound {
-        resource: "Channel".into(),
-    })?;
+    let channel = channels::find_by_id(&state.db.pool, channel_id)
+        .await?
+        .ok_or(NexusError::NotFound {
+            resource: "Channel".into(),
+        })?;
 
     if msg.author_id != auth.user_id {
         // Check if user has MANAGE_MESSAGES permission
         if let Some(server_id) = channel.server_id {
             let server = nexus_db::repository::servers::find_by_id(&state.db.pool, server_id)
                 .await?
-                .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+                .ok_or(NexusError::NotFound {
+                    resource: "Server".into(),
+                })?;
             if server.owner_id != auth.user_id {
                 return Err(NexusError::MissingPermission {
                     permission: "MANAGE_MESSAGES".into(),
@@ -838,14 +851,17 @@ async fn delete_message(
     messages::delete_message(&state.db.pool, message_id).await?;
 
     // Keep full-text index in sync after delete.
-    let _ = state.search.sync_message_delete(&state.db.pool, message_id).await;
+    let _ = state
+        .search
+        .sync_message_delete(&state.db.pool, message_id)
+        .await;
     if state.db.scylla_enabled {
         let _ = scylla_outbox::enqueue_delete_message(&state.db.pool, message_id).await;
     }
 
     // Write an audit log entry when a moderator deletes someone else's message
-    if msg.author_id != auth.user_id {
-        if let Some(server_id) = channel.server_id {
+    if msg.author_id != auth.user_id
+        && let Some(server_id) = channel.server_id {
             let _ = nexus_db::repository::audit_log::write_entry(
                 &state.db.pool,
                 snowflake::generate_id(),
@@ -859,7 +875,6 @@ async fn delete_message(
             )
             .await;
         }
-    }
 
     // Emit MESSAGE_DELETE event
     let _ = state.gateway_tx.send(GatewayEvent {
@@ -900,7 +915,9 @@ async fn bulk_delete_messages(
     if let Some(server_id) = channel.server_id {
         let server = nexus_db::repository::servers::find_by_id(&state.db.pool, server_id)
             .await?
-            .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+            .ok_or(NexusError::NotFound {
+                resource: "Server".into(),
+            })?;
         if server.owner_id != auth.user_id {
             return Err(NexusError::MissingPermission {
                 permission: "MANAGE_MESSAGES".into(),
@@ -947,10 +964,7 @@ async fn get_pinned_messages(
     Path(channel_id): Path<Uuid>,
 ) -> NexusResult<Json<Vec<serde_json::Value>>> {
     let rows = messages::get_pinned_messages(&state.db.pool, channel_id).await?;
-    let result: Vec<serde_json::Value> = rows
-        .iter()
-        .map(|r| message_row_to_json(r, &[]))
-        .collect();
+    let result: Vec<serde_json::Value> = rows.iter().map(|r| message_row_to_json(r, &[])).collect();
     Ok(Json(result))
 }
 
@@ -962,21 +976,29 @@ async fn pin_message(
 ) -> NexusResult<Json<serde_json::Value>> {
     let msg = messages::find_by_id(&state.db.pool, message_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Message".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Message".into(),
+        })?;
 
     if msg.channel_id != channel_id {
-        return Err(NexusError::NotFound { resource: "Message".into() });
+        return Err(NexusError::NotFound {
+            resource: "Message".into(),
+        });
     }
 
     let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Channel".into(),
+        })?;
 
     // Check permission — for now, any member can pin in DMs, owner in servers
     if let Some(server_id) = channel.server_id {
         let server = nexus_db::repository::servers::find_by_id(&state.db.pool, server_id)
             .await?
-            .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+            .ok_or(NexusError::NotFound {
+                resource: "Server".into(),
+            })?;
         if server.owner_id != auth.user_id {
             return Err(NexusError::MissingPermission {
                 permission: "MANAGE_MESSAGES".into(),
@@ -1009,17 +1031,23 @@ async fn unpin_message(
 ) -> NexusResult<Json<serde_json::Value>> {
     let msg = messages::find_by_id(&state.db.pool, message_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Message".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Message".into(),
+        })?;
 
     if msg.channel_id != channel_id {
-        return Err(NexusError::NotFound { resource: "Message".into() });
+        return Err(NexusError::NotFound {
+            resource: "Message".into(),
+        });
     }
 
     messages::unpin_message(&state.db.pool, message_id).await?;
 
     let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Channel".into(),
+        })?;
 
     let _ = state.gateway_tx.send(GatewayEvent {
         event_type: "CHANNEL_PINS_UPDATE".into(),
@@ -1048,10 +1076,14 @@ async fn add_reaction(
     // Verify message exists in channel
     let msg = messages::find_by_id(&state.db.pool, message_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Message".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Message".into(),
+        })?;
 
     if msg.channel_id != channel_id {
-        return Err(NexusError::NotFound { resource: "Message".into() });
+        return Err(NexusError::NotFound {
+            resource: "Message".into(),
+        });
     }
 
     let added = reactions::add_reaction(&state.db.pool, message_id, auth.user_id, &emoji).await?;
@@ -1059,7 +1091,9 @@ async fn add_reaction(
     if added {
         let channel = channels::find_by_id(&state.db.pool, channel_id)
             .await?
-            .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
+            .ok_or(NexusError::NotFound {
+                resource: "Channel".into(),
+            })?;
 
         let _ = state.gateway_tx.send(GatewayEvent {
             event_type: "MESSAGE_REACTION_ADD".into(),
@@ -1084,12 +1118,15 @@ async fn remove_reaction(
     State(state): State<Arc<AppState>>,
     Path((channel_id, message_id, emoji)): Path<(Uuid, Uuid, String)>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    let removed = reactions::remove_reaction(&state.db.pool, message_id, auth.user_id, &emoji).await?;
+    let removed =
+        reactions::remove_reaction(&state.db.pool, message_id, auth.user_id, &emoji).await?;
 
     if removed {
         let channel = channels::find_by_id(&state.db.pool, channel_id)
             .await?
-            .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
+            .ok_or(NexusError::NotFound {
+                resource: "Channel".into(),
+            })?;
 
         let _ = state.gateway_tx.send(GatewayEvent {
             event_type: "MESSAGE_REACTION_REMOVE".into(),
@@ -1127,12 +1164,16 @@ async fn remove_all_emoji_reactions(
     // Only server owner / MANAGE_MESSAGES can bulk-remove reactions
     let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Channel".into(),
+        })?;
 
     if let Some(server_id) = channel.server_id {
         let server = nexus_db::repository::servers::find_by_id(&state.db.pool, server_id)
             .await?
-            .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+            .ok_or(NexusError::NotFound {
+                resource: "Server".into(),
+            })?;
         if server.owner_id != auth.user_id {
             return Err(NexusError::MissingPermission {
                 permission: "MANAGE_MESSAGES".into(),
@@ -1140,7 +1181,8 @@ async fn remove_all_emoji_reactions(
         }
     }
 
-    let count = reactions::remove_all_reactions_for_emoji(&state.db.pool, message_id, &emoji).await?;
+    let count =
+        reactions::remove_all_reactions_for_emoji(&state.db.pool, message_id, &emoji).await?;
     Ok(Json(serde_json::json!({ "removed": count })))
 }
 
@@ -1152,12 +1194,16 @@ async fn remove_all_reactions(
 ) -> NexusResult<Json<serde_json::Value>> {
     let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Channel".into(),
+        })?;
 
     if let Some(server_id) = channel.server_id {
         let server = nexus_db::repository::servers::find_by_id(&state.db.pool, server_id)
             .await?
-            .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+            .ok_or(NexusError::NotFound {
+                resource: "Server".into(),
+            })?;
         if server.owner_id != auth.user_id {
             return Err(NexusError::MissingPermission {
                 permission: "MANAGE_MESSAGES".into(),
@@ -1202,13 +1248,14 @@ async fn search_messages(
     // Verify access
     let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Channel".into(),
+        })?;
 
-    if let Some(server_id) = channel.server_id {
-        if !members::is_member(&state.db.pool, auth.user_id, server_id).await? {
+    if let Some(server_id) = channel.server_id
+        && !members::is_member(&state.db.pool, auth.user_id, server_id).await? {
             return Err(NexusError::Forbidden);
         }
-    }
 
     let limit = params.limit.unwrap_or(25);
     let offset = params.offset.unwrap_or(0);
@@ -1334,13 +1381,11 @@ fn message_row_to_json_with_reactions(
 fn parse_mentions(content: &str) -> Vec<Uuid> {
     let mut mentions = Vec::new();
     for part in content.split_whitespace() {
-        if let Some(id_str) = part.strip_prefix("<@").and_then(|s| s.strip_suffix('>')) {
-            if let Ok(id) = id_str.parse::<Uuid>() {
-                if !mentions.contains(&id) {
+        if let Some(id_str) = part.strip_prefix("<@").and_then(|s| s.strip_suffix('>'))
+            && let Ok(id) = id_str.parse::<Uuid>()
+                && !mentions.contains(&id) {
                     mentions.push(id);
                 }
-            }
-        }
     }
     mentions
 }
@@ -1446,7 +1491,12 @@ async fn list_messages_from_scylla(
         }
     };
 
-    let reaction_counts_map = match reactions::get_reaction_counts_for_messages(&state.db.pool, &message_ids).await {
+    let reaction_counts_map = match reactions::get_reaction_counts_for_messages(
+        &state.db.pool,
+        &message_ids,
+    )
+    .await
+    {
         Ok(rows) => {
             metrics::counter!(
                 "nexus_scylla_read_total",
@@ -1473,7 +1523,8 @@ async fn list_messages_from_scylla(
         user_id,
         &message_ids,
     )
-    .await {
+    .await
+    {
         Ok(rows) => {
             metrics::counter!(
                 "nexus_scylla_read_total",
@@ -1497,7 +1548,9 @@ async fn list_messages_from_scylla(
 
     let mut result = Vec::with_capacity(scylla_rows.len());
     let mut hydrated_count: usize = 0;
-    for (parsed_message_id, parsed_author_id, author_username, content, created_at_epoch) in scylla_rows {
+    for (parsed_message_id, parsed_author_id, author_username, content, created_at_epoch) in
+        scylla_rows
+    {
         let reaction_counts = reaction_counts_map
             .get(&parsed_message_id)
             .map(Vec::as_slice)
@@ -1512,42 +1565,55 @@ async fn list_messages_from_scylla(
             hydrated_count += 1;
         }
 
-        let (message_type, edited, edited_at, pinned, embeds, attachments, mentions, mention_roles, mention_everyone, reference, thread_id) =
-            if let Some(m) = sql_meta {
-                (
-                    m.message_type,
-                    m.edited,
-                    m.edited_at,
-                    m.pinned,
-                    serde_json::to_value(m.embeds.clone()).unwrap_or_else(|_| serde_json::json!([])),
-                    serde_json::to_value(m.attachments.clone()).unwrap_or_else(|_| serde_json::json!([])),
-                    serde_json::to_value(m.mentions.clone()).unwrap_or_else(|_| serde_json::json!([])),
-                    serde_json::to_value(m.mention_roles.clone()).unwrap_or_else(|_| serde_json::json!([])),
-                    m.mention_everyone,
-                    match (m.reference_message_id, m.reference_channel_id) {
-                        (Some(mid), Some(cid)) => Some(serde_json::json!({
-                            "message_id": mid,
-                            "channel_id": cid,
-                        })),
-                        _ => None,
-                    },
-                    m.thread_id,
-                )
-            } else {
-                (
-                    0,
-                    false,
-                    None,
-                    false,
-                    serde_json::json!([]),
-                    serde_json::json!([]),
-                    serde_json::json!([]),
-                    serde_json::json!([]),
-                    false,
-                    None,
-                    None,
-                )
-            };
+        let (
+            message_type,
+            edited,
+            edited_at,
+            pinned,
+            embeds,
+            attachments,
+            mentions,
+            mention_roles,
+            mention_everyone,
+            reference,
+            thread_id,
+        ) = if let Some(m) = sql_meta {
+            (
+                m.message_type,
+                m.edited,
+                m.edited_at,
+                m.pinned,
+                serde_json::to_value(m.embeds.clone()).unwrap_or_else(|_| serde_json::json!([])),
+                serde_json::to_value(m.attachments.clone())
+                    .unwrap_or_else(|_| serde_json::json!([])),
+                serde_json::to_value(m.mentions.clone()).unwrap_or_else(|_| serde_json::json!([])),
+                serde_json::to_value(m.mention_roles.clone())
+                    .unwrap_or_else(|_| serde_json::json!([])),
+                m.mention_everyone,
+                match (m.reference_message_id, m.reference_channel_id) {
+                    (Some(mid), Some(cid)) => Some(serde_json::json!({
+                        "message_id": mid,
+                        "channel_id": cid,
+                    })),
+                    _ => None,
+                },
+                m.thread_id,
+            )
+        } else {
+            (
+                0,
+                false,
+                None,
+                false,
+                serde_json::json!([]),
+                serde_json::json!([]),
+                serde_json::json!([]),
+                serde_json::json!([]),
+                false,
+                None,
+                None,
+            )
+        };
 
         let message_json = serde_json::json!({
             "id": parsed_message_id,
@@ -1579,12 +1645,11 @@ async fn list_messages_from_scylla(
         result.push(message_json);
     }
 
-    metrics::gauge!("nexus_scylla_metadata_hydration_ratio")
-        .set(if result.is_empty() {
-            0.0
-        } else {
-            hydrated_count as f64 / result.len() as f64
-        });
+    metrics::gauge!("nexus_scylla_metadata_hydration_ratio").set(if result.is_empty() {
+        0.0
+    } else {
+        hydrated_count as f64 / result.len() as f64
+    });
 
     Ok(result)
 }
@@ -1608,9 +1673,7 @@ async fn get_message_from_scylla(
         .into_rows_result()
         .map_err(|e| e.to_string())?;
 
-    let mut row_iter = id_rows
-        .rows::<(String, i64)>()
-        .map_err(|e| e.to_string())?;
+    let mut row_iter = id_rows.rows::<(String, i64)>().map_err(|e| e.to_string())?;
     let Some(next_row) = row_iter.next() else {
         return Ok(None);
     };
@@ -1627,7 +1690,11 @@ async fn get_message_from_scylla(
     let channel_rows = session
         .query_unpaged(
             by_channel_query,
-            (channel_id.to_string(), created_at_epoch, message_id.to_string()),
+            (
+                channel_id.to_string(),
+                created_at_epoch,
+                message_id.to_string(),
+            ),
         )
         .await
         .map_err(|e| e.to_string())?
@@ -1669,7 +1736,8 @@ async fn get_message_from_scylla(
         user_id,
         &[message_id],
     )
-    .await {
+    .await
+    {
         Ok(map) => {
             metrics::counter!(
                 "nexus_scylla_read_total",
@@ -1713,42 +1781,53 @@ async fn get_message_from_scylla(
         }
     };
 
-    let (message_type, edited, edited_at, pinned, embeds, attachments, mentions, mention_roles, mention_everyone, reference, thread_id) =
-        if let Some(m) = sql_meta {
-            (
-                m.message_type,
-                m.edited,
-                m.edited_at,
-                m.pinned,
-                serde_json::to_value(m.embeds).unwrap_or_else(|_| serde_json::json!([])),
-                serde_json::to_value(m.attachments).unwrap_or_else(|_| serde_json::json!([])),
-                serde_json::to_value(m.mentions).unwrap_or_else(|_| serde_json::json!([])),
-                serde_json::to_value(m.mention_roles).unwrap_or_else(|_| serde_json::json!([])),
-                m.mention_everyone,
-                match (m.reference_message_id, m.reference_channel_id) {
-                    (Some(mid), Some(cid)) => Some(serde_json::json!({
-                        "message_id": mid,
-                        "channel_id": cid,
-                    })),
-                    _ => None,
-                },
-                m.thread_id,
-            )
-        } else {
-            (
-                0,
-                false,
-                None,
-                false,
-                serde_json::json!([]),
-                serde_json::json!([]),
-                serde_json::json!([]),
-                serde_json::json!([]),
-                false,
-                None,
-                None,
-            )
-        };
+    let (
+        message_type,
+        edited,
+        edited_at,
+        pinned,
+        embeds,
+        attachments,
+        mentions,
+        mention_roles,
+        mention_everyone,
+        reference,
+        thread_id,
+    ) = if let Some(m) = sql_meta {
+        (
+            m.message_type,
+            m.edited,
+            m.edited_at,
+            m.pinned,
+            serde_json::to_value(m.embeds).unwrap_or_else(|_| serde_json::json!([])),
+            serde_json::to_value(m.attachments).unwrap_or_else(|_| serde_json::json!([])),
+            serde_json::to_value(m.mentions).unwrap_or_else(|_| serde_json::json!([])),
+            serde_json::to_value(m.mention_roles).unwrap_or_else(|_| serde_json::json!([])),
+            m.mention_everyone,
+            match (m.reference_message_id, m.reference_channel_id) {
+                (Some(mid), Some(cid)) => Some(serde_json::json!({
+                    "message_id": mid,
+                    "channel_id": cid,
+                })),
+                _ => None,
+            },
+            m.thread_id,
+        )
+    } else {
+        (
+            0,
+            false,
+            None,
+            false,
+            serde_json::json!([]),
+            serde_json::json!([]),
+            serde_json::json!([]),
+            serde_json::json!([]),
+            false,
+            None,
+            None,
+        )
+    };
 
     Ok(Some(serde_json::json!({
         "id": message_id,
@@ -1779,8 +1858,9 @@ async fn get_message_from_scylla(
 }
 
 async fn connect_scylla(state: &AppState) -> Result<Arc<scylla::Session>, String> {
-    static SCYLLA_SESSION_CACHE: OnceLock<tokio::sync::Mutex<HashMap<String, Arc<scylla::Session>>>> =
-        OnceLock::new();
+    static SCYLLA_SESSION_CACHE: OnceLock<
+        tokio::sync::Mutex<HashMap<String, Arc<scylla::Session>>>,
+    > = OnceLock::new();
 
     let nodes: Vec<String> = state
         .db
@@ -1813,7 +1893,9 @@ async fn connect_scylla(state: &AppState) -> Result<Arc<scylla::Session>, String
     let session = Arc::new(builder.build().await.map_err(|e| e.to_string())?);
     {
         let mut guard = cache.lock().await;
-        guard.entry(cache_key).or_insert_with(|| Arc::clone(&session));
+        guard
+            .entry(cache_key)
+            .or_insert_with(|| Arc::clone(&session));
     }
 
     Ok(session)
@@ -1848,7 +1930,9 @@ async fn crosspost_message(
     // Verify the channel is an announcement channel
     let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Channel".into(),
+        })?;
 
     if !matches!(
         channel.channel_type,
@@ -1866,7 +1950,9 @@ async fn crosspost_message(
     })?;
     let server = servers::find_by_id(&state.db.pool, server_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Server".into(),
+        })?;
 
     // Check that the caller is server owner or has SEND_MESSAGES
     if auth.user_id != server.owner_id {
@@ -1904,10 +1990,14 @@ async fn crosspost_message(
     // Load the message and verify it belongs to this channel
     let msg = messages::find_by_id(&state.db.pool, message_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Message".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Message".into(),
+        })?;
 
     if msg.channel_id != channel_id {
-        return Err(NexusError::NotFound { resource: "Message".into() });
+        return Err(NexusError::NotFound {
+            resource: "Message".into(),
+        });
     }
 
     // Mark the message as crossposted (flags bit 1)
@@ -2007,7 +2097,9 @@ async fn add_channel_follower(
     // Source must be an announcement channel
     let src_channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Channel".into(),
+        })?;
 
     if !matches!(
         src_channel.channel_type,
@@ -2029,13 +2121,17 @@ async fn add_channel_follower(
     // Verify target channel exists
     let target_channel = channels::find_by_id(&state.db.pool, target_channel_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Target channel".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Target channel".into(),
+        })?;
 
     // Caller must have MANAGE_WEBHOOKS in the target channel's server
     if let Some(target_server_id) = target_channel.server_id {
         let target_server = servers::find_by_id(&state.db.pool, target_server_id)
             .await?
-            .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+            .ok_or(NexusError::NotFound {
+                resource: "Server".into(),
+            })?;
 
         if auth.user_id != target_server.owner_id {
             use nexus_db::repository::{members, roles};
@@ -2078,7 +2174,12 @@ async fn add_channel_follower(
     .bind(follower_id.to_string())
     .bind(channel_id.to_string())
     .bind(target_channel_id.to_string())
-    .bind(target_channel.server_id.map(|u| u.to_string()).unwrap_or_default())
+    .bind(
+        target_channel
+            .server_id
+            .map(|u| u.to_string())
+            .unwrap_or_default(),
+    )
     .execute(&state.db.pool)
     .await?;
 
@@ -2179,17 +2280,21 @@ mod tests {
         let uid = Uuid::new_v4();
         let content = format!("<@{uid}>extra_text_no_space");
         // This should NOT extract the UUID because the token doesn't end with '>'
-        assert!(parse_mentions(&content).is_empty(),
-            "glued mention without trailing space must not parse");
+        assert!(
+            parse_mentions(&content).is_empty(),
+            "glued mention without trailing space must not parse"
+        );
     }
 
     #[test]
     fn mixed_valid_and_invalid_mentions() {
         let uid = Uuid::new_v4();
-        let content = format!(
-            "valid <@{uid}> invalid <@not-uuid> also <@12> end"
-        );
+        let content = format!("valid <@{uid}> invalid <@not-uuid> also <@12> end");
         let mentions = parse_mentions(&content);
-        assert_eq!(mentions, vec![uid], "only valid UUID mentions should be extracted");
+        assert_eq!(
+            mentions,
+            vec![uid],
+            "only valid UUID mentions should be extracted"
+        );
     }
 }

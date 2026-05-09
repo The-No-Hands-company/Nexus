@@ -1,7 +1,7 @@
 //! Security scanning for marketplace plugins
 //!
 //! Provides interfaces for malware detection, vulnerability analysis, and policy enforcement.
-//! This module supports both local scanning (ClamAV) and external scanning services.
+//! This module supports both local scanning (`ClamAV`) and external scanning services.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -25,7 +25,7 @@ pub struct ScanResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecurityIssue {
-    /// Issue type: malware, vulnerability, suspicious_api, policy_violation, etc.
+    /// Issue type: malware, vulnerability, `suspicious_api`, `policy_violation`, etc.
     pub issue_type: String,
     /// Severity: low, medium, high, critical
     pub severity: String,
@@ -82,6 +82,7 @@ pub struct SuspiciousApiPatterns {
 }
 
 impl SuspiciousApiPatterns {
+    #[must_use]
     pub fn default_list() -> Self {
         Self {
             dangerous_apis: vec![
@@ -109,6 +110,7 @@ impl SuspiciousApiPatterns {
     }
 
     /// Check if code contains suspicious patterns
+    #[must_use]
     pub fn check_code_patterns(&self, code: &str) -> Vec<SecurityIssue> {
         let mut issues = vec![];
 
@@ -117,7 +119,7 @@ impl SuspiciousApiPatterns {
                 issues.push(SecurityIssue {
                     issue_type: "suspicious_api".to_string(),
                     severity: "high".to_string(),
-                    description: format!("Use of potentially dangerous API: {}", api),
+                    description: format!("Use of potentially dangerous API: {api}"),
                     location: None,
                     reference: None,
                 });
@@ -129,7 +131,7 @@ impl SuspiciousApiPatterns {
                 issues.push(SecurityIssue {
                     issue_type: "privacy_violation".to_string(),
                     severity: "high".to_string(),
-                    description: format!("Potential data leakage via: {}", api),
+                    description: format!("Potential data leakage via: {api}"),
                     location: None,
                     reference: None,
                 });
@@ -141,7 +143,7 @@ impl SuspiciousApiPatterns {
                 issues.push(SecurityIssue {
                     issue_type: "sandbox_bypass".to_string(),
                     severity: "critical".to_string(),
-                    description: format!("Potential security bypass: {}", api),
+                    description: format!("Potential security bypass: {api}"),
                     location: None,
                     reference: None,
                 });
@@ -159,6 +161,7 @@ pub struct MockMalwareScanner {
 }
 
 impl MockMalwareScanner {
+    #[must_use]
     pub fn new() -> Self {
         let mut trigger_keywords = HashMap::new();
         trigger_keywords.insert("malware", "Potentially malicious code detected".to_string());
@@ -170,6 +173,12 @@ impl MockMalwareScanner {
     }
 }
 
+impl Default for MockMalwareScanner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait::async_trait]
 impl SecurityScanner for MockMalwareScanner {
     async fn scan_manifest(
@@ -178,11 +187,7 @@ impl SecurityScanner for MockMalwareScanner {
         manifest_url: &str,
         source_url: Option<&str>,
     ) -> Result<ScanResult, String> {
-        let combined = format!(
-            "{} {}",
-            manifest_url,
-            source_url.unwrap_or("")
-        ).to_lowercase();
+        let combined = format!("{} {}", manifest_url, source_url.unwrap_or("")).to_lowercase();
 
         let mut issues = vec![];
         let mut threat_level = "none".to_string();
@@ -237,7 +242,7 @@ impl SecurityScanner for MockMalwareScanner {
         Ok(issues)
     }
 
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "mock_clamav"
     }
 }

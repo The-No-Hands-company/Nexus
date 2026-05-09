@@ -72,17 +72,20 @@ struct ErrorResponse {
 
 impl NexusError {
     /// Map error to HTTP status code.
+    #[must_use]
     pub fn status_code(&self) -> StatusCode {
         match self {
-            Self::InvalidCredentials | Self::InvalidToken => StatusCode::UNAUTHORIZED,
-            Self::TokenExpired => StatusCode::UNAUTHORIZED,
-            Self::Unauthorized => StatusCode::UNAUTHORIZED,
+            Self::InvalidCredentials
+            | Self::InvalidToken
+            | Self::TokenExpired
+            | Self::Unauthorized => StatusCode::UNAUTHORIZED,
             Self::NotFound { .. } => StatusCode::NOT_FOUND,
             Self::AlreadyExists { .. } => StatusCode::CONFLICT,
             Self::Validation { .. } => StatusCode::BAD_REQUEST,
-            Self::MissingPermission { .. } | Self::Forbidden => StatusCode::FORBIDDEN,
+            Self::MissingPermission { .. } | Self::Forbidden | Self::LimitReached { .. } => {
+                StatusCode::FORBIDDEN
+            }
             Self::RateLimited { .. } => StatusCode::TOO_MANY_REQUESTS,
-            Self::LimitReached { .. } => StatusCode::FORBIDDEN,
             Self::Database(_) | Self::Redis(_) | Self::Internal(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
@@ -90,6 +93,7 @@ impl NexusError {
     }
 
     /// Error code string for programmatic handling by clients.
+    #[must_use]
     pub fn error_code(&self) -> &str {
         match self {
             Self::InvalidCredentials => "INVALID_CREDENTIALS",
@@ -148,7 +152,7 @@ impl IntoResponse for NexusError {
     }
 }
 
-/// Convenience type alias for Results using NexusError.
+/// Convenience type alias for `Result`s using `NexusError`.
 pub type NexusResult<T> = Result<T, NexusError>;
 
 #[cfg(test)]
@@ -159,35 +163,49 @@ mod tests {
 
     #[test]
     fn invalid_credentials_is_401() {
-        assert_eq!(NexusError::InvalidCredentials.status_code(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            NexusError::InvalidCredentials.status_code(),
+            StatusCode::UNAUTHORIZED
+        );
     }
 
     #[test]
     fn token_expired_is_401() {
-        assert_eq!(NexusError::TokenExpired.status_code(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            NexusError::TokenExpired.status_code(),
+            StatusCode::UNAUTHORIZED
+        );
     }
 
     #[test]
     fn not_found_is_404() {
-        let e = NexusError::NotFound { resource: "User".into() };
+        let e = NexusError::NotFound {
+            resource: "User".into(),
+        };
         assert_eq!(e.status_code(), StatusCode::NOT_FOUND);
     }
 
     #[test]
     fn already_exists_is_409() {
-        let e = NexusError::AlreadyExists { resource: "Username".into() };
+        let e = NexusError::AlreadyExists {
+            resource: "Username".into(),
+        };
         assert_eq!(e.status_code(), StatusCode::CONFLICT);
     }
 
     #[test]
     fn validation_error_is_400() {
-        let e = NexusError::Validation { message: "bad input".into() };
+        let e = NexusError::Validation {
+            message: "bad input".into(),
+        };
         assert_eq!(e.status_code(), StatusCode::BAD_REQUEST);
     }
 
     #[test]
     fn missing_permission_is_403() {
-        let e = NexusError::MissingPermission { permission: "BAN_MEMBERS".into() };
+        let e = NexusError::MissingPermission {
+            permission: "BAN_MEMBERS".into(),
+        };
         assert_eq!(e.status_code(), StatusCode::FORBIDDEN);
     }
 
@@ -198,13 +216,17 @@ mod tests {
 
     #[test]
     fn rate_limited_is_429() {
-        let e = NexusError::RateLimited { retry_after_ms: 1000 };
+        let e = NexusError::RateLimited {
+            retry_after_ms: 1000,
+        };
         assert_eq!(e.status_code(), StatusCode::TOO_MANY_REQUESTS);
     }
 
     #[test]
     fn limit_reached_is_403() {
-        let e = NexusError::LimitReached { message: "max servers".into() };
+        let e = NexusError::LimitReached {
+            message: "max servers".into(),
+        };
         assert_eq!(e.status_code(), StatusCode::FORBIDDEN);
     }
 
@@ -217,13 +239,41 @@ mod tests {
             (NexusError::TokenExpired, "TOKEN_EXPIRED"),
             (NexusError::InvalidToken, "INVALID_TOKEN"),
             (NexusError::Unauthorized, "UNAUTHORIZED"),
-            (NexusError::NotFound { resource: "x".into() }, "NOT_FOUND"),
-            (NexusError::AlreadyExists { resource: "x".into() }, "ALREADY_EXISTS"),
-            (NexusError::Validation { message: "x".into() }, "VALIDATION_ERROR"),
-            (NexusError::MissingPermission { permission: "x".into() }, "MISSING_PERMISSION"),
+            (
+                NexusError::NotFound {
+                    resource: "x".into(),
+                },
+                "NOT_FOUND",
+            ),
+            (
+                NexusError::AlreadyExists {
+                    resource: "x".into(),
+                },
+                "ALREADY_EXISTS",
+            ),
+            (
+                NexusError::Validation {
+                    message: "x".into(),
+                },
+                "VALIDATION_ERROR",
+            ),
+            (
+                NexusError::MissingPermission {
+                    permission: "x".into(),
+                },
+                "MISSING_PERMISSION",
+            ),
             (NexusError::Forbidden, "FORBIDDEN"),
-            (NexusError::RateLimited { retry_after_ms: 0 }, "RATE_LIMITED"),
-            (NexusError::LimitReached { message: "x".into() }, "LIMIT_REACHED"),
+            (
+                NexusError::RateLimited { retry_after_ms: 0 },
+                "RATE_LIMITED",
+            ),
+            (
+                NexusError::LimitReached {
+                    message: "x".into(),
+                },
+                "LIMIT_REACHED",
+            ),
         ];
         for (err, expected) in cases {
             assert_eq!(err.error_code(), expected, "wrong code for {err:?}");
@@ -234,25 +284,33 @@ mod tests {
 
     #[test]
     fn not_found_message_includes_resource() {
-        let e = NexusError::NotFound { resource: "Channel".into() };
+        let e = NexusError::NotFound {
+            resource: "Channel".into(),
+        };
         assert!(e.to_string().contains("Channel"));
     }
 
     #[test]
     fn missing_permission_message_includes_permission_name() {
-        let e = NexusError::MissingPermission { permission: "SEND_MESSAGES".into() };
+        let e = NexusError::MissingPermission {
+            permission: "SEND_MESSAGES".into(),
+        };
         assert!(e.to_string().contains("SEND_MESSAGES"));
     }
 
     #[test]
     fn rate_limited_message_includes_retry_after() {
-        let e = NexusError::RateLimited { retry_after_ms: 5000 };
+        let e = NexusError::RateLimited {
+            retry_after_ms: 5000,
+        };
         assert!(e.to_string().contains("5000"));
     }
 
     #[test]
     fn validation_message_is_propagated() {
-        let e = NexusError::Validation { message: "username too short".into() };
+        let e = NexusError::Validation {
+            message: "username too short".into(),
+        };
         assert!(e.to_string().contains("username too short"));
     }
 }

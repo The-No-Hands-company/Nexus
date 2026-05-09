@@ -8,10 +8,10 @@
 //! GET    /users/@me/tts-queue            — List pending TTS requests
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, Query, State},
     middleware,
     routing::{get, post},
-    Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_common::snowflake;
@@ -20,7 +20,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -32,9 +32,14 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/messages/{id}/translations", get(list_translations))
         // TTS
         .route("/messages/{id}/tts", post(request_tts))
-        .route("/tts-requests/{id}", get(get_tts_status).patch(update_tts_status))
+        .route(
+            "/tts-requests/{id}",
+            get(get_tts_status).patch(update_tts_status),
+        )
         .route("/users/@me/tts-queue", get(list_tts_queue))
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ── Request/Query types ───────────────────────────────────────────────────────

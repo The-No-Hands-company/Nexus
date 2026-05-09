@@ -62,7 +62,8 @@ pub async fn upsert(
     compact_navigation: Option<bool>,
     minimal_notifications: Option<bool>,
 ) -> Result<UserExperienceProfile, sqlx::Error> {
-    let enabled_modules_json = enabled_modules.map(|v| serde_json::to_string(v).unwrap_or_else(|_| "[]".to_string()));
+    let enabled_modules_json =
+        enabled_modules.map(|v| serde_json::to_string(v).unwrap_or_else(|_| "[]".to_string()));
 
     let row = sqlx::query(
         "INSERT INTO user_experience_profiles \

@@ -5,10 +5,10 @@
 //! DELETE /api/v1/attachments/:id            — Delete own attachment
 
 use axum::{
+    Json, Router,
     extract::{Multipart, Path, State},
     middleware,
     routing::{get, post},
-    Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_db::repository::attachments;
@@ -17,8 +17,8 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{
-    middleware::{check_rate_limit_with_fallback, extract_client_ip, AuthContext},
     AppState,
+    middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip},
 };
 use axum::extract::Extension;
 
@@ -32,7 +32,7 @@ fn is_allowed_content_type(ct: &str) -> bool {
     matches!(
         ct,
         // Images
-        | "image/jpeg" | "image/png" | "image/gif" | "image/webp"
+        |"image/jpeg"| "image/png" | "image/gif" | "image/webp"
         | "image/svg+xml" | "image/avif" | "image/bmp" | "image/tiff"
         // Video
         | "video/mp4" | "video/webm" | "video/ogg" | "video/quicktime"
@@ -52,7 +52,9 @@ pub fn router() -> Router<Arc<AppState>> {
             "/attachments/{id}",
             get(get_attachment).delete(delete_attachment),
         )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ============================================================
@@ -136,12 +138,9 @@ async fn upload_file(
                     });
                 }
 
-                let bytes = field
-                    .bytes()
-                    .await
-                    .map_err(|e| NexusError::Validation {
-                        message: format!("Failed to read file: {e}"),
-                    })?;
+                let bytes = field.bytes().await.map_err(|e| NexusError::Validation {
+                    message: format!("Failed to read file: {e}"),
+                })?;
 
                 if bytes.len() > MAX_UPLOAD_BYTES {
                     return Err(NexusError::Validation {
@@ -160,8 +159,8 @@ async fn upload_file(
                 // Attackers can label any file as "image/jpeg"; we must not
                 // trust the header — check the real signature bytes instead.
                 let detected = sniff_mime_from_bytes(&bytes);
-                if let Some(sniffed_ct) = detected {
-                    if !mime_families_match(&content_type, sniffed_ct) {
+                if let Some(sniffed_ct) = detected
+                    && !mime_families_match(&content_type, sniffed_ct) {
                         return Err(NexusError::Validation {
                             message: format!(
                                 "File content does not match declared type '{content_type}'. \
@@ -169,7 +168,6 @@ async fn upload_file(
                             ),
                         });
                     }
-                }
                 // For types we can't sniff (zip, tar, pdf), the Content-Type
                 // allowlist is the gate — already checked above.
             }
@@ -216,7 +214,7 @@ async fn upload_file(
         .storage
         .put_object(&storage_key, data, &content_type)
         .await
-        .map_err(|e| NexusError::Internal(e))?;
+        .map_err(NexusError::Internal)?;
 
     // Persist attachment metadata — URL is intentionally left empty here.
     // GET /attachments/:id always generates a fresh presigned URL from
@@ -243,7 +241,7 @@ async fn upload_file(
     let row = attachments::mark_ready(
         &state.db.pool,
         row.id,
-        "", // no stored URL; presigned URL generated on demand
+        "",   // no stored URL; presigned URL generated on demand
         None, // blurhash — would need async image processing
     )
     .await?;
@@ -322,13 +320,15 @@ async fn delete_attachment(
         format!("rl:attachment_delete:user:{}", auth.user_id),
         30,
         300,
-    ).await?;
+    )
+    .await?;
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:attachment_delete:ip:{ip}"),
         50,
         300,
-    ).await?;
+    )
+    .await?;
 
     // Find the attachment first to get the storage key
     let row = attachments::find_by_id(&state.db.pool, id)
@@ -373,33 +373,45 @@ fn sanitize_filename(name: &str) -> String {
 fn sniff_mime_from_bytes(data: &[u8]) -> Option<&'static str> {
     match data {
         // JPEG: FF D8 FF
-        d if d.starts_with(&[0xFF, 0xD8, 0xFF]) => Some("image/jpeg"),
+        [0xFF, 0xD8, 0xFF, ..] => Some("image/jpeg"),
         // PNG: 89 50 4E 47 0D 0A 1A 0A
-        d if d.starts_with(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) => Some("image/png"),
+        [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, ..] => Some("image/png"),
         // GIF: GIF87a or GIF89a
         d if d.starts_with(b"GIF87a") || d.starts_with(b"GIF89a") => Some("image/gif"),
         // WebP: RIFF....WEBP
         d if d.len() >= 12 && d.starts_with(b"RIFF") && &d[8..12] == b"WEBP" => Some("image/webp"),
         // BMP: BM
-        d if d.starts_with(&[0x42, 0x4D]) => Some("image/bmp"),
+        [0x42, 0x4D, ..] => Some("image/bmp"),
         // TIFF: little-endian II or big-endian MM
-        d if d.starts_with(&[0x49, 0x49, 0x2A, 0x00]) || d.starts_with(&[0x4D, 0x4D, 0x00, 0x2A]) => Some("image/tiff"),
+        d if d.starts_with(&[0x49, 0x49, 0x2A, 0x00])
+            || d.starts_with(&[0x4D, 0x4D, 0x00, 0x2A]) =>
+        {
+            Some("image/tiff")
+        }
         // AVIF / HEIF: starts with ftyp box containing "avif" or "heic"
-        d if d.len() >= 12 && &d[4..8] == b"ftyp" && (
-            &d[8..12] == b"avif" || &d[8..12] == b"avis" ||
-            &d[8..12] == b"heic" || &d[8..12] == b"heix"
-        ) => Some("image/avif"),
+        d if d.len() >= 12
+            && &d[4..8] == b"ftyp"
+            && (&d[8..12] == b"avif"
+                || &d[8..12] == b"avis"
+                || &d[8..12] == b"heic"
+                || &d[8..12] == b"heix") =>
+        {
+            Some("image/avif")
+        }
         // MP4: ftyp box variants (mp4, M4V, isom…)
         d if d.len() >= 12 && &d[4..8] == b"ftyp" => Some("video/mp4"),
         // WebM / MKV: 1A 45 DF A3
-        d if d.starts_with(&[0x1A, 0x45, 0xDF, 0xA3]) => Some("video/webm"),
+        [0x1A, 0x45, 0xDF, 0xA3, ..] => Some("video/webm"),
         // OGG (video and audio): OggS
         d if d.starts_with(b"OggS") => Some("video/ogg"),
         // MP3: ID3 tag or sync bytes FF FB / FF F3 / FF F2
         d if d.starts_with(b"ID3")
             || d.starts_with(&[0xFF, 0xFB])
             || d.starts_with(&[0xFF, 0xF3])
-            || d.starts_with(&[0xFF, 0xF2]) => Some("audio/mpeg"),
+            || d.starts_with(&[0xFF, 0xF2]) =>
+        {
+            Some("audio/mpeg")
+        }
         // WAV: RIFF....WAVE
         d if d.len() >= 12 && d.starts_with(b"RIFF") && &d[8..12] == b"WAVE" => Some("audio/wav"),
         // FLAC: fLaC
@@ -410,7 +422,7 @@ fn sniff_mime_from_bytes(data: &[u8]) -> Option<&'static str> {
         // PDF: %PDF
         d if d.starts_with(b"%PDF") => Some("application/pdf"),
         // ZIP (also DOCX, XLSX, JAR): PK\x03\x04
-        d if d.starts_with(&[0x50, 0x4B, 0x03, 0x04]) => Some("application/zip"),
+        [0x50, 0x4B, 0x03, 0x04, ..] => Some("application/zip"),
         // TAR (ustar): offset 257 = "ustar" — too complex to check in first bytes
         // Plain text: no reliable magic bytes
         _ => None,
@@ -435,9 +447,7 @@ fn mime_families_match(claimed: &str, sniffed: &'static str) -> bool {
     }
     // ZIP is the container for many formats (docx, xlsx, jar…) — if sniffed
     // as ZIP and claimed is also ZIP-based, allow it.
-    if sniffed == "application/zip"
-        && matches!(claimed, "application/zip" | "application/x-tar")
-    {
+    if sniffed == "application/zip" && matches!(claimed, "application/zip" | "application/x-tar") {
         return true;
     }
     false
@@ -452,8 +462,14 @@ mod tests {
     #[test]
     fn images_are_allowed() {
         for ct in &[
-            "image/jpeg", "image/png", "image/gif", "image/webp",
-            "image/svg+xml", "image/avif", "image/bmp", "image/tiff",
+            "image/jpeg",
+            "image/png",
+            "image/gif",
+            "image/webp",
+            "image/svg+xml",
+            "image/avif",
+            "image/bmp",
+            "image/tiff",
         ] {
             assert!(is_allowed_content_type(ct), "{ct} should be allowed");
         }
@@ -469,8 +485,13 @@ mod tests {
     #[test]
     fn audio_types_are_allowed() {
         for ct in &[
-            "audio/mpeg", "audio/ogg", "audio/wav", "audio/flac",
-            "audio/aac", "audio/opus", "audio/webm",
+            "audio/mpeg",
+            "audio/ogg",
+            "audio/wav",
+            "audio/flac",
+            "audio/aac",
+            "audio/opus",
+            "audio/webm",
         ] {
             assert!(is_allowed_content_type(ct), "{ct} should be allowed");
         }
@@ -479,8 +500,11 @@ mod tests {
     #[test]
     fn document_types_are_allowed() {
         for ct in &[
-            "application/pdf", "text/plain", "text/markdown",
-            "application/zip", "application/x-tar",
+            "application/pdf",
+            "text/plain",
+            "text/markdown",
+            "application/zip",
+            "application/x-tar",
         ] {
             assert!(is_allowed_content_type(ct), "{ct} should be allowed");
         }
@@ -522,7 +546,10 @@ mod tests {
 
     #[test]
     fn backslash_removed() {
-        assert_eq!(sanitize_filename("C:\\Windows\\system32"), "CWindowssystem32");
+        assert_eq!(
+            sanitize_filename("C:\\Windows\\system32"),
+            "CWindowssystem32"
+        );
     }
 
     #[test]

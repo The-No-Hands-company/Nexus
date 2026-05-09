@@ -4,21 +4,15 @@
 //!   POST /auth/forgot-password  — request a password reset email
 //!   POST /auth/reset-password   — consume one-time token and set new password
 
-use axum::{
-    extract::State,
-    http::HeaderMap,
-    routing::post,
-    Json, Router,
-};
+use axum::{Json, Router, extract::State, http::HeaderMap, routing::post};
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_db::repository::{password_reset, users};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use crate::{
-    auth,
+    AppState, auth,
     middleware::{check_rate_limit_with_fallback, extract_client_ip},
-    AppState,
 };
 
 pub fn router() -> Router<Arc<AppState>> {
@@ -89,20 +83,21 @@ async fn forgot_password(
     }
 
     let (raw_token, token_hash, expires_at) = password_reset::generate_token();
-    if let Err(e) = password_reset::upsert_token(&state.db.pool, user.id, &token_hash, expires_at).await {
+    if let Err(e) =
+        password_reset::upsert_token(&state.db.pool, user.id, &token_hash, expires_at).await
+    {
         tracing::warn!(error = %e, user_id = %user.id, "failed to upsert password reset token");
         return Ok(generic_response);
     }
 
-    if let Some(ref email_addr) = user.email {
-        if let Err(e) = state
+    if let Some(ref email_addr) = user.email
+        && let Err(e) = state
             .email
             .send_password_reset_email(email_addr, &user.username, &raw_token)
             .await
         {
             tracing::warn!(error = %e, user_id = %user.id, "failed to send password reset email");
         }
-    }
 
     tracing::info!(user_id = %user.id, "password reset requested");
     Ok(generic_response)

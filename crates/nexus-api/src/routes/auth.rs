@@ -3,12 +3,7 @@
 //! Privacy-first: No phone number. No ID. No age verification.
 //! Just a username and password. Email is optional (only for password reset).
 
-use axum::{
-    extract::State,
-    http::HeaderMap,
-    routing::post,
-    Json, Router,
-};
+use axum::{Json, Router, extract::State, http::HeaderMap, routing::post};
 use chrono::{Duration, Utc};
 use nexus_common::{
     error::{NexusError, NexusResult},
@@ -21,9 +16,9 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 use crate::{
+    AppState,
     auth::{self, TokenPair},
     middleware::{check_rate_limit_with_fallback, extract_client_ip},
-    AppState,
 };
 
 /// Auth router.
@@ -57,7 +52,7 @@ struct MfaChallengeResponse {
 #[derive(Serialize)]
 #[serde(untagged)]
 enum LoginResponse {
-    Full(AuthResponse),
+    Full(Box<AuthResponse>),
     MfaChallenge(MfaChallengeResponse),
 }
 
@@ -137,19 +132,22 @@ async fn register(
         .await?
         .is_some()
     {
-        return Err(NexusError::AlreadyExists { resource: "Username".into() });
+        return Err(NexusError::AlreadyExists {
+            resource: "Username".into(),
+        });
     }
 
     // Check email availability (if provided)
-    if let Some(ref email) = body.email {
-        if users::find_by_email(&state.db.pool, email).await?.is_some() {
-            return Err(NexusError::AlreadyExists { resource: "Email".into() });
+    if let Some(ref email) = body.email
+        && users::find_by_email(&state.db.pool, email).await?.is_some() {
+            return Err(NexusError::AlreadyExists {
+                resource: "Email".into(),
+            });
         }
-    }
 
     // Hash password with Argon2id
-    let password_hash =
-        auth::hash_password(&body.password).map_err(|e| NexusError::Internal(anyhow::anyhow!("{e}")))?;
+    let password_hash = auth::hash_password(&body.password)
+        .map_err(|e| NexusError::Internal(anyhow::anyhow!("{e}")))?;
 
     // Create user
     let user_id = snowflake::generate_id();
@@ -171,7 +169,11 @@ async fn register(
             tracing::warn!(user_id = %user.id, error = %e, "Failed to store email verification token");
         } else {
             // Send verification email via Resend (no-op if API key not configured)
-            if let Err(e) = state.email.send_verification_email(email_addr, &user.username, &raw_token).await {
+            if let Err(e) = state
+                .email
+                .send_verification_email(email_addr, &user.username, &raw_token)
+                .await
+            {
                 tracing::warn!(user_id = %user.id, error = %e, "Failed to send verification email");
             }
             tracing::debug!(
@@ -187,7 +189,15 @@ async fn register(
     // so they can use the app immediately; verification is only enforced if email was given).
     let email_verified = user.email.is_none()
         || user.flags & nexus_common::models::user::user_flags::EMAIL_VERIFIED != 0;
-    let tokens = issue_tokens(&state, user.id, &user.username, false, email_verified, user_agent).await?;
+    let tokens = issue_tokens(
+        &state,
+        user.id,
+        &user.username,
+        false,
+        email_verified,
+        user_agent,
+    )
+    .await?;
 
     tracing::info!(user_id = %user.id, username = %user.username, "New user registered");
 
@@ -217,7 +227,10 @@ async fn register(
         .await;
     }
 
-    Ok(Json(AuthResponse { user: user.into(), tokens }))
+    Ok(Json(AuthResponse {
+        user: user.into(),
+        tokens,
+    }))
 }
 
 /// POST /api/v1/auth/login
@@ -233,13 +246,8 @@ async fn login(
     // Rate limit: 10 attempts per IP per minute, 5 per username per 5 minutes
     // (the username limit prevents targeted brute-force even with rotating IPs)
     let ip = extract_client_ip(&headers);
-    check_rate_limit_with_fallback(
-        state.db.redis.as_ref(),
-        format!("rl:login:ip:{ip}"),
-        10,
-        60,
-    )
-    .await?;
+    check_rate_limit_with_fallback(state.db.redis.as_ref(), format!("rl:login:ip:{ip}"), 10, 60)
+        .await?;
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:login:user:{}", body.username.to_lowercase()),
@@ -287,9 +295,20 @@ async fn login(
     // No 2FA — issue tokens directly
     let email_verified = user.email.is_none()
         || user.flags & nexus_common::models::user::user_flags::EMAIL_VERIFIED != 0;
-    let tokens = issue_tokens(&state, user.id, &user.username, false, email_verified, user_agent).await?;
+    let tokens = issue_tokens(
+        &state,
+        user.id,
+        &user.username,
+        false,
+        email_verified,
+        user_agent,
+    )
+    .await?;
     tracing::info!(user_id = %user.id, "User logged in");
-    Ok(Json(LoginResponse::Full(AuthResponse { user: user.into(), tokens })))
+    Ok(Json(LoginResponse::Full(Box::new(AuthResponse {
+        user: user.into(),
+        tokens,
+    }))))
 }
 
 /// POST /api/v1/auth/refresh
@@ -338,7 +357,8 @@ async fn refresh_token(
         config.auth.access_token_ttl_secs,
         config.auth.refresh_token_ttl_secs,
         user.totp_enabled,
-        user.email.is_none() || user.flags & nexus_common::models::user::user_flags::EMAIL_VERIFIED != 0,
+        user.email.is_none()
+            || user.flags & nexus_common::models::user::user_flags::EMAIL_VERIFIED != 0,
     )
     .map_err(|e| NexusError::Internal(e.into()))?;
 
@@ -361,7 +381,6 @@ async fn refresh_token(
 struct RefreshRequest {
     refresh_token: String,
 }
-
 
 #[cfg(test)]
 mod tests {

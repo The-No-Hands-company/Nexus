@@ -8,10 +8,14 @@ use crate::select_cols::EMOJI_COLS;
 
 // Module-level helper rows (sqlx::FromRow cannot be derived on local types)
 #[derive(sqlx::FromRow)]
-struct StorageKeyRow { storage_key: String }
+struct StorageKeyRow {
+    storage_key: String,
+}
 
 #[derive(sqlx::FromRow)]
-struct CountRow { count: i64 }
+struct CountRow {
+    count: i64,
+}
 
 // ============================================================
 // Create
@@ -28,8 +32,8 @@ pub async fn create_emoji(
     url: Option<&str>,
     animated: bool,
 ) -> Result<ServerEmojiRow, sqlx::Error> {
-    sqlx::query_as::<_, ServerEmojiRow>(
-        &format!(r#"
+    sqlx::query_as::<_, ServerEmojiRow>(&format!(
+        r#"
         INSERT INTO server_emoji (
             id, server_id, creator_id, name,
             storage_key, url, animated,
@@ -37,8 +41,9 @@ pub async fn create_emoji(
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, false, true, CURRENT_TIMESTAMP)
         RETURNING {}
-        "#, EMOJI_COLS),
-    )
+        "#,
+        EMOJI_COLS
+    ))
     .bind(id.to_string())
     .bind(server_id.to_string())
     .bind(creator_id.to_string())
@@ -59,9 +64,10 @@ pub async fn list_for_server(
     pool: &sqlx::AnyPool,
     server_id: Uuid,
 ) -> Result<Vec<ServerEmojiRow>, sqlx::Error> {
-    sqlx::query_as::<_, ServerEmojiRow>(
-        &format!("SELECT {} FROM server_emoji WHERE server_id = $1 ORDER BY name", EMOJI_COLS),
-    )
+    sqlx::query_as::<_, ServerEmojiRow>(&format!(
+        "SELECT {} FROM server_emoji WHERE server_id = $1 ORDER BY name",
+        EMOJI_COLS
+    ))
     .bind(server_id.to_string())
     .fetch_all(pool)
     .await
@@ -72,10 +78,13 @@ pub async fn find_by_id(
     pool: &sqlx::AnyPool,
     id: Uuid,
 ) -> Result<Option<ServerEmojiRow>, sqlx::Error> {
-    sqlx::query_as::<_, ServerEmojiRow>(&format!("SELECT {} FROM server_emoji WHERE id = $1", EMOJI_COLS))
-        .bind(id.to_string())
-        .fetch_optional(pool)
-        .await
+    sqlx::query_as::<_, ServerEmojiRow>(&format!(
+        "SELECT {} FROM server_emoji WHERE id = $1",
+        EMOJI_COLS
+    ))
+    .bind(id.to_string())
+    .fetch_optional(pool)
+    .await
 }
 
 /// Get a single emoji by server + name.
@@ -84,9 +93,10 @@ pub async fn find_by_name(
     server_id: Uuid,
     name: &str,
 ) -> Result<Option<ServerEmojiRow>, sqlx::Error> {
-    sqlx::query_as::<_, ServerEmojiRow>(
-        &format!("SELECT {} FROM server_emoji WHERE server_id = $1 AND name = $2", EMOJI_COLS),
-    )
+    sqlx::query_as::<_, ServerEmojiRow>(&format!(
+        "SELECT {} FROM server_emoji WHERE server_id = $1 AND name = $2",
+        EMOJI_COLS
+    ))
     .bind(server_id.to_string())
     .bind(name)
     .fetch_optional(pool)
@@ -104,14 +114,15 @@ pub async fn update_emoji(
     server_id: Uuid,
     name: &str,
 ) -> Result<ServerEmojiRow, sqlx::Error> {
-    sqlx::query_as::<_, ServerEmojiRow>(
-        &format!(r#"
+    sqlx::query_as::<_, ServerEmojiRow>(&format!(
+        r#"
         UPDATE server_emoji
         SET name = $1
         WHERE id = $2 AND server_id = $3
         RETURNING {}
-        "#, EMOJI_COLS),
-    )
+        "#,
+        EMOJI_COLS
+    ))
     .bind(id.to_string())
     .bind(server_id.to_string())
     .bind(name)

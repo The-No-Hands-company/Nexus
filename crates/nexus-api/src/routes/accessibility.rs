@@ -4,17 +4,17 @@
 //! PATCH /users/@me/accessibility  — Update user accessibility settings
 
 use axum::{
+    Json, Router,
     extract::{Extension, State},
     middleware,
     routing::get,
-    Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_db::repository::accessibility_settings;
 use serde::Deserialize;
 use std::sync::Arc;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -22,7 +22,9 @@ pub fn router() -> Router<Arc<AppState>> {
             "/users/@me/accessibility",
             get(get_settings).patch(update_settings),
         )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ── Request bodies ────────────────────────────────────────────────────────────
@@ -74,11 +76,25 @@ async fn get_settings(
             let s = accessibility_settings::upsert_settings(
                 &state.db.pool,
                 ctx.user_id,
-                None, None, None, None, None,
-                None, None, None, None, None,
-                None, None, None,
-                None, None, None,
-                None, None, None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
             )
             .await
             .map_err(|e| NexusError::Internal(e.into()))?;
@@ -123,31 +139,28 @@ async fn update_settings(
     }
 
     // Validate caption_position
-    if let Some(ref cp) = body.caption_position {
-        if cp != "top" && cp != "bottom" {
+    if let Some(ref cp) = body.caption_position
+        && cp != "top" && cp != "bottom" {
             return Err(NexusError::Validation {
                 message: "caption_position must be top or bottom".into(),
             });
         }
-    }
 
     // Validate tts_rate
-    if let Some(rate) = body.tts_rate {
-        if !(0.5..=2.0).contains(&rate) {
+    if let Some(rate) = body.tts_rate
+        && !(0.5..=2.0).contains(&rate) {
             return Err(NexusError::Validation {
                 message: "tts_rate must be between 0.5 and 2.0".into(),
             });
         }
-    }
 
     // Validate preferred_language is 2–5 chars
-    if let Some(ref lang) = body.preferred_language {
-        if lang.len() < 2 || lang.len() > 5 {
+    if let Some(ref lang) = body.preferred_language
+        && (lang.len() < 2 || lang.len() > 5) {
             return Err(NexusError::Validation {
                 message: "preferred_language must be a valid ISO 639-1 code (2-5 chars)".into(),
             });
         }
-    }
 
     let s = accessibility_settings::upsert_settings(
         &state.db.pool,

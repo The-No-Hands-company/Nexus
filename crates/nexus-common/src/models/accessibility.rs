@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Per-user accessibility preferences (server-synced).
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserAccessibilitySettings {
     pub user_id: Uuid,

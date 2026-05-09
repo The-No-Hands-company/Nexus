@@ -166,7 +166,7 @@ impl<'r> sqlx::FromRow<'r, sqlx::any::AnyRow> for InstanceAuditLogEntry {
         let changes = changes_str
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_else(|| serde_json::Value::Object(Default::default()));
-        
+
         let ip: Option<String> = row.try_get("ip_address").ok().flatten();
 
         Ok(InstanceAuditLogEntry {
@@ -240,7 +240,7 @@ pub async fn list_instance_entries(
     if target_id_filter.is_some() {
         conditions.push("target_id = $6");
     }
-    
+
     let where_clause = conditions.join(" AND ");
     let query = format!(
         "SELECT id::text, actor_id::text, action, target_type, target_id::text, 
@@ -251,11 +251,11 @@ pub async fn list_instance_entries(
          LIMIT $1 OFFSET $2",
         where_clause
     );
-    
+
     let mut q = sqlx::query_as::<_, InstanceAuditLogEntry>(&query)
         .bind(limit)
         .bind(offset);
-    
+
     if action_filter.is_some() {
         q = q.bind(action_filter);
     }
@@ -268,6 +268,6 @@ pub async fn list_instance_entries(
     if target_id_filter.is_some() {
         q = q.bind(target_id_filter.map(|u| u.to_string()));
     }
-    
+
     q.fetch_all(pool).await
 }

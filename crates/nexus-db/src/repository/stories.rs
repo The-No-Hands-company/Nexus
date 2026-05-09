@@ -81,10 +81,7 @@ pub async fn list_active_feed(
     query.fetch_all(pool).await
 }
 
-pub async fn find_story(
-    pool: &AnyPool,
-    id: Uuid,
-) -> Result<Option<Story>, sqlx::Error> {
+pub async fn find_story(pool: &AnyPool, id: Uuid) -> Result<Option<Story>, sqlx::Error> {
     let q = format!("SELECT {STORY_COLS} FROM stories WHERE id = $1");
     sqlx::query_as::<_, Story>(&q)
         .bind(id.to_string())
@@ -92,18 +89,12 @@ pub async fn find_story(
         .await
 }
 
-pub async fn delete_story(
-    pool: &AnyPool,
-    id: Uuid,
-    author_id: Uuid,
-) -> Result<bool, sqlx::Error> {
-    let res = sqlx::query(
-        "DELETE FROM stories WHERE id = $1 AND author_id = $2",
-    )
-    .bind(id.to_string())
-    .bind(author_id.to_string())
-    .execute(pool)
-    .await?;
+pub async fn delete_story(pool: &AnyPool, id: Uuid, author_id: Uuid) -> Result<bool, sqlx::Error> {
+    let res = sqlx::query("DELETE FROM stories WHERE id = $1 AND author_id = $2")
+        .bind(id.to_string())
+        .bind(author_id.to_string())
+        .execute(pool)
+        .await?;
     Ok(res.rows_affected() > 0)
 }
 
@@ -133,10 +124,7 @@ pub async fn record_view(
     Ok(())
 }
 
-pub async fn list_viewers(
-    pool: &AnyPool,
-    story_id: Uuid,
-) -> Result<Vec<StoryView>, sqlx::Error> {
+pub async fn list_viewers(pool: &AnyPool, story_id: Uuid) -> Result<Vec<StoryView>, sqlx::Error> {
     sqlx::query_as::<_, StoryView>(
         "SELECT story_id::text AS story_id, viewer_id::text AS viewer_id, \
          viewed_at::text AS viewed_at \
@@ -147,12 +135,11 @@ pub async fn list_viewers(
     .await
 }
 
-pub async fn view_count(
-    pool: &AnyPool,
-    story_id: Uuid,
-) -> Result<i64, sqlx::Error> {
+pub async fn view_count(pool: &AnyPool, story_id: Uuid) -> Result<i64, sqlx::Error> {
     #[derive(sqlx::FromRow)]
-    struct CountRow { count: i64 }
+    struct CountRow {
+        count: i64,
+    }
     let row = sqlx::query_as::<_, CountRow>(
         "SELECT COUNT(*) AS count FROM story_views WHERE story_id = $1",
     )

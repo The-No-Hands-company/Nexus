@@ -23,15 +23,15 @@ pub async fn create_role(
          RETURNING {ROLE_COLS}"
     );
     sqlx::query_as::<_, Role>(&q)
-    .bind(id.to_string())
-    .bind(server_id.to_string())
-    .bind(name)
-    .bind(color)
-    .bind(position)
-    .bind(permissions)
-    .bind(is_default)
-    .fetch_one(pool)
-    .await
+        .bind(id.to_string())
+        .bind(server_id.to_string())
+        .bind(name)
+        .bind(color)
+        .bind(position)
+        .bind(permissions)
+        .bind(is_default)
+        .fetch_one(pool)
+        .await
 }
 
 /// List all roles in a server.
@@ -39,11 +39,12 @@ pub async fn list_server_roles(
     pool: &sqlx::AnyPool,
     server_id: Uuid,
 ) -> Result<Vec<Role>, sqlx::Error> {
-    let q = format!("SELECT {ROLE_COLS} FROM roles WHERE server_id = $1::uuid ORDER BY position DESC");
+    let q =
+        format!("SELECT {ROLE_COLS} FROM roles WHERE server_id = $1::uuid ORDER BY position DESC");
     sqlx::query_as::<_, Role>(&q)
-    .bind(server_id.to_string())
-    .fetch_all(pool)
-    .await
+        .bind(server_id.to_string())
+        .fetch_all(pool)
+        .await
 }
 
 /// Find a role by ID.
@@ -79,15 +80,15 @@ pub async fn update_role(
          RETURNING {ROLE_COLS}"
     );
     sqlx::query_as::<_, Role>(&q)
-    .bind(id.to_string())
-    .bind(name)
-    .bind(color)
-    .bind(permissions)
-    .bind(position)
-    .bind(hoist)
-    .bind(mentionable)
-    .fetch_one(pool)
-    .await
+        .bind(id.to_string())
+        .bind(name)
+        .bind(color)
+        .bind(permissions)
+        .bind(position)
+        .bind(hoist)
+        .bind(mentionable)
+        .fetch_one(pool)
+        .await
 }
 
 /// Delete a role.
@@ -104,9 +105,10 @@ pub async fn get_everyone_role(
     pool: &sqlx::AnyPool,
     server_id: Uuid,
 ) -> Result<Option<Role>, sqlx::Error> {
-    let q = format!("SELECT {ROLE_COLS} FROM roles WHERE server_id = $1::uuid AND is_default = true");
+    let q =
+        format!("SELECT {ROLE_COLS} FROM roles WHERE server_id = $1::uuid AND is_default = true");
     sqlx::query_as::<_, Role>(&q)
-    .bind(server_id.to_string())
-    .fetch_optional(pool)
-    .await
+        .bind(server_id.to_string())
+        .fetch_optional(pool)
+        .await
 }

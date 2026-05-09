@@ -22,13 +22,14 @@ const KEY_TTL_DAYS: i64 = 90;
 // ─── Key manager ─────────────────────────────────────────────────────────────
 
 /// Handles loading or provisioning this server's Ed25519 signing key from
-/// the `federation_keys` PostgreSQL table.
+/// the `federation_keys` `PostgreSQL` table.
 pub struct KeyManager {
     pool: AnyPool,
 }
 
 impl KeyManager {
     /// Create a new `KeyManager` backed by the given connection pool.
+    #[must_use] 
     pub fn new(pool: AnyPool) -> Self {
         Self { pool }
     }
@@ -39,6 +40,10 @@ impl KeyManager {
     /// 1. Query `federation_keys` for the newest active non-expired key.
     /// 2. If found, reconstruct from stored seed and return it.
     /// 3. If not found, generate a new pair, persist it, and return it.
+    ///
+    /// # Errors
+    /// Returns an error if database access fails or key material cannot be
+    /// loaded or persisted.
     pub async fn load_or_generate(&self) -> Result<Arc<ServerKeyPair>, FederationError> {
         // ── 1. Try loading from DB ────────────────────────────────────────────
         let row = sqlx::query(
@@ -86,7 +91,10 @@ impl KeyManager {
         .await
         .map_err(|e| FederationError::Other(anyhow!(e)))?;
 
-        info!("Federation: generated and persisted new signing key {}", kp.key_id);
+        info!(
+            "Federation: generated and persisted new signing key {}",
+            kp.key_id
+        );
         Ok(Arc::new(kp))
     }
 }

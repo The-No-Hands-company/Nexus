@@ -69,13 +69,8 @@ pub async fn list_import_jobs(
         .await
 }
 
-pub async fn get_import_job(
-    pool: &AnyPool,
-    id: Uuid,
-) -> Result<Option<ImportJob>, sqlx::Error> {
-    let q = format!(
-        "SELECT {IMPORT_JOB_COLS} FROM import_jobs WHERE id = $1"
-    );
+pub async fn get_import_job(pool: &AnyPool, id: Uuid) -> Result<Option<ImportJob>, sqlx::Error> {
+    let q = format!("SELECT {IMPORT_JOB_COLS} FROM import_jobs WHERE id = $1");
     sqlx::query_as::<_, ImportJob>(&q)
         .bind(id.to_string())
         .fetch_optional(pool)
@@ -102,14 +97,11 @@ pub async fn list_pending_import_jobs(
 ///
 /// Returns `true` if this caller successfully transitioned the job from
 /// `pending` → `processing`, `false` if another worker already claimed it.
-pub async fn try_claim_import_job(
-    pool: &AnyPool,
-    id: Uuid,
-) -> Result<bool, sqlx::Error> {
+pub async fn try_claim_import_job(pool: &AnyPool, id: Uuid) -> Result<bool, sqlx::Error> {
     let result = sqlx::query(
         "UPDATE import_jobs \
          SET status = 'processing', updated_at = CURRENT_TIMESTAMP \
-         WHERE id = $1 AND status = 'pending'"
+         WHERE id = $1 AND status = 'pending'",
     )
     .bind(id.to_string())
     .execute(pool)
@@ -129,7 +121,7 @@ pub async fn mark_import_completed(
         "UPDATE import_jobs \
          SET status = 'completed', imported_items = $2, total_items = $3, \
              error_log = NULL, updated_at = CURRENT_TIMESTAMP \
-         WHERE id = $1"
+         WHERE id = $1",
     )
     .bind(id.to_string())
     .bind(imported_items)
@@ -151,7 +143,7 @@ pub async fn mark_import_failed(
         "UPDATE import_jobs \
          SET status = 'failed', imported_items = $2, total_items = $3, \
              error_log = $4, updated_at = CURRENT_TIMESTAMP \
-         WHERE id = $1"
+         WHERE id = $1",
     )
     .bind(id.to_string())
     .bind(imported_items)

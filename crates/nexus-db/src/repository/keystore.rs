@@ -6,8 +6,8 @@
 
 use anyhow::Result;
 use nexus_common::models::crypto::{
-    Device, DeviceVerification, E2eeChannel, E2eeSession, EncryptedMessage, KeyBundle, OneTimePreKey,
-    OtpkPublic,
+    Device, DeviceVerification, E2eeChannel, E2eeSession, EncryptedMessage, KeyBundle,
+    OneTimePreKey, OtpkPublic,
 };
 
 use uuid::Uuid;
@@ -424,13 +424,14 @@ pub async fn enable_e2ee_channel(
 }
 
 /// Get E2EE config for a channel (returns None if not E2EE).
-pub async fn get_e2ee_channel(pool: &sqlx::AnyPool, channel_id: Uuid) -> Result<Option<E2eeChannel>> {
-    let row = sqlx::query_as::<_, E2eeChannel>(
-        "SELECT * FROM e2ee_channels WHERE channel_id = $1",
-    )
-    .bind(channel_id.to_string())
-    .fetch_optional(pool)
-    .await?;
+pub async fn get_e2ee_channel(
+    pool: &sqlx::AnyPool,
+    channel_id: Uuid,
+) -> Result<Option<E2eeChannel>> {
+    let row = sqlx::query_as::<_, E2eeChannel>("SELECT * FROM e2ee_channels WHERE channel_id = $1")
+        .bind(channel_id.to_string())
+        .fetch_optional(pool)
+        .await?;
     Ok(row)
 }
 
@@ -540,13 +541,11 @@ pub async fn delete_session(
     owner_device_id: Uuid,
     remote_device_id: Uuid,
 ) -> Result<()> {
-    sqlx::query(
-        "DELETE FROM e2ee_sessions WHERE owner_device_id = $1 AND remote_device_id = $2",
-    )
-    .bind(owner_device_id.to_string())
-    .bind(remote_device_id.to_string())
-    .execute(pool)
-    .await?;
+    sqlx::query("DELETE FROM e2ee_sessions WHERE owner_device_id = $1 AND remote_device_id = $2")
+        .bind(owner_device_id.to_string())
+        .bind(remote_device_id.to_string())
+        .execute(pool)
+        .await?;
     Ok(())
 }
 

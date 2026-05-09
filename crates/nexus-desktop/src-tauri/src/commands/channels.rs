@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 use uuid::Uuid;
 
-use crate::state::AppState;
 use super::api_client;
+use crate::state::AppState;
 
 /// Raw channel shape as returned by the server (snake_case).
 #[derive(Deserialize, Debug)]
@@ -60,7 +60,11 @@ pub async fn create_channel(
     let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
     let resp = client
         .post(format!("{base}/api/v1/servers/{server_id}/channels"))
-        .json(&CreateChannelRequest { name, channel_type, topic: None })
+        .json(&CreateChannelRequest {
+            name,
+            channel_type,
+            topic: None,
+        })
         .send()
         .await
         .map_err(|e| e.to_string())?;

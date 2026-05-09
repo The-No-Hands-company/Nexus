@@ -7,6 +7,25 @@
 //! * **Full mode** (`postgres://…`) — PostgreSQL + optional Redis + MinIO + MeiliSearch.
 //! * **Lite mode** (`sqlite://…`) — embedded SQLite, no external services required.
 
+#![allow(clippy::doc_markdown)]
+#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::missing_panics_doc)]
+#![allow(clippy::must_use_candidate)]
+#![allow(clippy::needless_raw_string_hashes)]
+#![allow(clippy::redundant_closure)]
+#![allow(clippy::uninlined_format_args)]
+#![allow(clippy::cast_possible_wrap)]
+#![allow(clippy::default_trait_access)]
+#![allow(clippy::format_push_string)]
+#![allow(clippy::manual_clamp)]
+#![allow(clippy::manual_let_else)]
+#![allow(clippy::option_if_let_else)]
+#![allow(clippy::pedantic)]
+#![allow(clippy::ref_option)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::wildcard_imports)]
+
 pub mod any_compat;
 pub mod email_crypto;
 pub mod postgres;
@@ -20,7 +39,7 @@ use anyhow::Result;
 use sqlx::migrate::Migrator;
 
 const POSTGRES_MIGRATION_LOCK_ID: i64 = 569_260_301;
-const LEGACY_RATCHET_MIGRATION_VERSION: i64 = 20260218000008;
+const LEGACY_RATCHET_MIGRATION_VERSION: i64 = 20_260_218_000_008;
 
 /// Which backing store is in use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

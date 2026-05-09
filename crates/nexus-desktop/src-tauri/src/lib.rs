@@ -10,6 +10,23 @@
 //! - Gaming overlay window
 //! - Auto-update checks
 
+#![allow(clippy::cast_possible_wrap)]
+#![allow(clippy::default_trait_access)]
+#![allow(clippy::doc_markdown)]
+#![allow(clippy::format_push_string)]
+#![allow(clippy::manual_clamp)]
+#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::missing_panics_doc)]
+#![allow(clippy::must_use_candidate)]
+#![allow(clippy::option_if_let_else)]
+#![allow(clippy::pedantic)]
+#![allow(clippy::redundant_closure)]
+#![allow(clippy::redundant_pattern_matching)]
+#![allow(clippy::ref_option)]
+#![allow(clippy::too_many_arguments)]
+#![allow(clippy::type_complexity)]
+#![allow(clippy::wildcard_imports)]
+
 pub mod commands;
 pub mod hotkeys;
 pub mod notifications;
@@ -18,7 +35,7 @@ pub mod state;
 pub mod tray;
 pub mod updater;
 
-use tracing_subscriber::{fmt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -150,11 +167,11 @@ pub fn run() {
         ])
         .on_window_event(|window, event| {
             // Intercept close on main window → minimise to tray instead
-            if window.label() == "main" {
-                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                    api.prevent_close();
-                    let _ = window.hide();
-                }
+            if window.label() == "main"
+                && let tauri::WindowEvent::CloseRequested { api, .. } = event
+            {
+                api.prevent_close();
+                let _ = window.hide();
             }
         })
         .run(tauri::generate_context!())

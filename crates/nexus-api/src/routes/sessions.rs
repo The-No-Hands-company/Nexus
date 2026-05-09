@@ -6,12 +6,12 @@
 //!   DELETE /auth/sessions           — revoke all sessions except the current one
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, State},
-    http::StatusCode,
     http::HeaderMap,
+    http::StatusCode,
     middleware,
     routing::{delete, get},
-    Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_db::repository::sessions;
@@ -20,15 +20,20 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{
-    middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip},
     AppState,
+    middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip},
 };
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/auth/sessions", get(list_sessions).delete(revoke_all_sessions))
+        .route(
+            "/auth/sessions",
+            get(list_sessions).delete(revoke_all_sessions),
+        )
         .route("/auth/sessions/{id}", delete(revoke_session))
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ── Response types ────────────────────────────────────────────────────────────
@@ -71,17 +76,19 @@ async fn revoke_session(
         format!("rl:session_revoke:user:{}", auth_ctx.user_id),
         10,
         300,
-    ).await?;
+    )
+    .await?;
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:session_revoke:ip:{ip}"),
         20,
         300,
-    ).await?;
+    )
+    .await?;
 
-    let session_id: Uuid = session_id_str
-        .parse()
-        .map_err(|_| NexusError::Validation { message: "Invalid session ID format".into() })?;
+    let session_id: Uuid = session_id_str.parse().map_err(|_| NexusError::Validation {
+        message: "Invalid session ID format".into(),
+    })?;
 
     let deleted = sessions::revoke_session(&state.db.pool, auth_ctx.user_id, session_id)
         .await
@@ -90,7 +97,9 @@ async fn revoke_session(
     if deleted {
         Ok(StatusCode::NO_CONTENT)
     } else {
-        Err(NexusError::NotFound { resource: "Session".into() })
+        Err(NexusError::NotFound {
+            resource: "Session".into(),
+        })
     }
 }
 
@@ -110,13 +119,15 @@ async fn revoke_all_sessions(
         format!("rl:session_revoke_all:user:{}", auth_ctx.user_id),
         5,
         3600,
-    ).await?;
+    )
+    .await?;
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:session_revoke_all:ip:{ip}"),
         10,
         3600,
-    ).await?;
+    )
+    .await?;
 
     // Use the JTI from the access token claims to exclude the current session.
     let current_session_id = auth_ctx.session_id.unwrap_or(Uuid::nil());

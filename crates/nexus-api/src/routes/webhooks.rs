@@ -4,12 +4,11 @@
 //! (No auth required — token in URL path authenticates the request.)
 
 use axum::{
+    Json, Router,
     extract::{ConnectInfo, Extension, Path, State},
     middleware,
     routing::{get, post},
-    Json, Router,
 };
-use std::net::SocketAddr;
 use nexus_common::{
     error::{NexusError, NexusResult},
     gateway_event::GatewayEvent,
@@ -20,12 +19,16 @@ use nexus_common::{
     snowflake,
 };
 use nexus_db::repository::{audit_log, channels, webhooks};
-use rand::distr::Alphanumeric;
 use rand::Rng;
+use rand::distr::Alphanumeric;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::{check_rate_limit_with_fallback, AuthContext, extract_client_ip}, AppState};
+use crate::{
+    AppState,
+    middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip},
+};
 
 /// Webhook routes — authenticated management + unauthenticated execution.
 pub fn router() -> Router<Arc<AppState>> {
@@ -35,24 +38,30 @@ pub fn router() -> Router<Arc<AppState>> {
             "/channels/{channel_id}/webhooks",
             get(get_channel_webhooks)
                 .post(create_incoming_webhook)
-                .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware)),
+                .route_layer(middleware::from_fn(
+                    crate::middleware::combined_auth_middleware,
+                )),
         )
         .route(
             "/servers/{server_id}/webhooks/outgoing",
-            post(create_outgoing_webhook)
-                .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware)),
+            post(create_outgoing_webhook).route_layer(middleware::from_fn(
+                crate::middleware::combined_auth_middleware,
+            )),
         )
         .route(
             "/servers/{server_id}/webhooks",
-            get(get_server_webhooks_route)
-                .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware)),
+            get(get_server_webhooks_route).route_layer(middleware::from_fn(
+                crate::middleware::combined_auth_middleware,
+            )),
         )
         .route(
             "/webhooks/{webhook_id}",
             get(get_webhook_authed)
                 .patch(modify_webhook)
                 .delete(delete_webhook)
-                .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware)),
+                .route_layer(middleware::from_fn(
+                    crate::middleware::combined_auth_middleware,
+                )),
         )
         // Public execution URL — token in path, no Bearer required
         .route(
@@ -99,17 +108,21 @@ async fn create_incoming_webhook(
         format!("rl:webhook:create:{}", auth.user_id),
         10,
         3600,
-    ).await?;
+    )
+    .await?;
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:webhook:create:ip:{ip}"),
         20,
         3600,
-    ).await?;
+    )
+    .await?;
     // Look up the channel to get server_id
     let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "channel".to_string() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "channel".to_string(),
+        })?;
     let server_id = channel.server_id.ok_or(NexusError::Validation {
         message: "Webhooks can only be created on server channels".into(),
     })?;
@@ -190,7 +203,9 @@ async fn get_webhook_authed(
 ) -> NexusResult<Json<Webhook>> {
     let wh = webhooks::get_webhook(&state.db.pool, webhook_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "webhook".to_string() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "webhook".to_string(),
+        })?;
 
     // Only creator can see full token
     if wh.creator_id != Some(auth.user_id) {
@@ -209,7 +224,9 @@ async fn modify_webhook(
 ) -> NexusResult<Json<Webhook>> {
     let existing = webhooks::get_webhook(&state.db.pool, webhook_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "webhook".to_string() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "webhook".to_string(),
+        })?;
     if existing.creator_id != Some(auth.user_id) {
         return Err(NexusError::Forbidden);
     }
@@ -225,7 +242,9 @@ async fn modify_webhook(
         body.active,
     )
     .await?
-    .ok_or(NexusError::NotFound { resource: "webhook".to_string() })?;
+    .ok_or(NexusError::NotFound {
+        resource: "webhook".to_string(),
+    })?;
 
     if let Some(sid) = existing.server_id {
         let _ = audit_log::write_entry(
@@ -253,7 +272,9 @@ async fn delete_webhook(
 ) -> NexusResult<axum::http::StatusCode> {
     let existing = webhooks::get_webhook(&state.db.pool, webhook_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "webhook".to_string() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "webhook".to_string(),
+        })?;
     if existing.creator_id != Some(auth.user_id) {
         return Err(NexusError::Forbidden);
     }
@@ -289,7 +310,9 @@ async fn get_webhook_public(
 ) -> NexusResult<Json<Webhook>> {
     let wh = webhooks::get_webhook_by_token(&state.db.pool, webhook_id, &token)
         .await?
-        .ok_or(NexusError::NotFound { resource: "webhook".to_string() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "webhook".to_string(),
+        })?;
     Ok(Json(wh))
 }
 
@@ -308,24 +331,28 @@ async fn execute_webhook(
         format!("rl:webhook:id:{}", webhook_id),
         30,
         60,
-    ).await?;
+    )
+    .await?;
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:webhook:ip:{ip}"),
         60,
         60,
-    ).await?;
+    )
+    .await?;
     // Validate token
     let wh = webhooks::get_webhook_by_token(&state.db.pool, webhook_id, &token)
         .await?
-        .ok_or(NexusError::NotFound { resource: "webhook".to_string() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "webhook".to_string(),
+        })?;
 
     let channel_id = wh.channel_id.ok_or(NexusError::Validation {
         message: "Webhook has no target channel".into(),
     })?;
 
     let content = body.content.unwrap_or_default();
-    if content.is_empty() && body.embeds.as_ref().map_or(true, |e| e.is_empty()) {
+    if content.is_empty() && body.embeds.as_ref().is_none_or(|e| e.is_empty()) {
         return Err(NexusError::Validation {
             message: "content or embeds must be provided".into(),
         });
@@ -339,7 +366,11 @@ async fn execute_webhook(
     let display_name = body.username.as_deref().unwrap_or(&wh.name);
     // Sanitize display name: strip dangerous formatting
     let display_name = display_name.trim().chars().take(80).collect::<String>();
-    let display_name = if display_name.is_empty() { wh.name.clone() } else { display_name };
+    let display_name = if display_name.is_empty() {
+        wh.name.clone()
+    } else {
+        display_name
+    };
 
     // Parse @mentions from content so unread badge counts stay correct
     let mentions = nexus_common::validation::parse_mentions_from_content(&content);
@@ -357,7 +388,7 @@ async fn execute_webhook(
         None, // reference_message_id (webhooks don't reply)
         None, // reference_channel_id
         &mentions,
-        &[],  // mention_roles (webhooks don't resolve role mentions)
+        &[], // mention_roles (webhooks don't resolve role mentions)
         content.contains("@everyone") || content.contains("@here"),
     )
     .await?;

@@ -109,6 +109,7 @@ bitflags! {
 
 impl Permissions {
     /// Default permissions for @everyone role in a new server.
+    #[must_use]
     pub fn default_everyone() -> Self {
         Self::VIEW_CHANNEL
             | Self::SEND_MESSAGES
@@ -130,11 +131,13 @@ impl Permissions {
     }
 
     /// Check if administrator (overrides all other checks).
+    #[must_use]
     pub fn is_admin(&self) -> bool {
         self.contains(Self::ADMINISTRATOR)
     }
 
     /// Check if a user with these permissions can perform an action.
+    #[must_use]
     pub fn has(&self, required: Permissions) -> bool {
         self.is_admin() || self.contains(required)
     }
@@ -169,6 +172,7 @@ pub enum OverwriteType {
 /// 4. Apply channel overrides for each role
 /// 5. Apply channel overrides for the specific user
 /// 6. If ADMINISTRATOR, return all permissions
+#[must_use]
 pub fn compute_permissions(
     base_permissions: Permissions,
     role_permissions: &[Permissions],
@@ -252,7 +256,11 @@ mod tests {
             Permissions::ADMINISTRATOR.bits(),
         ];
         let unique: std::collections::HashSet<_> = all_bits.iter().collect();
-        assert_eq!(all_bits.len(), unique.len(), "duplicate permission bits detected");
+        assert_eq!(
+            all_bits.len(),
+            unique.len(),
+            "duplicate permission bits detected"
+        );
     }
 
     #[test]
@@ -334,14 +342,7 @@ mod tests {
         let (everyone_id, member_id, _) = setup();
         let base = Permissions::VIEW_CHANNEL | Permissions::SEND_MESSAGES;
 
-        let effective = compute_permissions(
-            base,
-            &[],
-            &[],
-            &[],
-            member_id,
-            everyone_id,
-        );
+        let effective = compute_permissions(base, &[], &[], &[], member_id, everyone_id);
 
         assert!(effective.contains(Permissions::VIEW_CHANNEL));
         assert!(effective.contains(Permissions::SEND_MESSAGES));
@@ -354,14 +355,8 @@ mod tests {
         let base = Permissions::VIEW_CHANNEL;
         let role_perms = Permissions::BAN_MEMBERS | Permissions::KICK_MEMBERS;
 
-        let effective = compute_permissions(
-            base,
-            &[role_perms],
-            &[],
-            &[role_id],
-            member_id,
-            everyone_id,
-        );
+        let effective =
+            compute_permissions(base, &[role_perms], &[], &[role_id], member_id, everyone_id);
 
         assert!(effective.contains(Permissions::VIEW_CHANNEL));
         assert!(effective.contains(Permissions::BAN_MEMBERS));
@@ -380,14 +375,7 @@ mod tests {
             deny: Permissions::SEND_MESSAGES.bits(),
         };
 
-        let effective = compute_permissions(
-            base,
-            &[],
-            &[overwrite],
-            &[],
-            member_id,
-            everyone_id,
-        );
+        let effective = compute_permissions(base, &[], &[overwrite], &[], member_id, everyone_id);
 
         assert!(effective.contains(Permissions::VIEW_CHANNEL));
         assert!(!effective.contains(Permissions::SEND_MESSAGES));
@@ -406,14 +394,7 @@ mod tests {
             deny: 0,
         };
 
-        let effective = compute_permissions(
-            base,
-            &[],
-            &[overwrite],
-            &[],
-            member_id,
-            everyone_id,
-        );
+        let effective = compute_permissions(base, &[], &[overwrite], &[], member_id, everyone_id);
 
         assert!(effective.contains(Permissions::MANAGE_MESSAGES));
     }
@@ -488,14 +469,7 @@ mod tests {
             deny: i64::MAX, // deny everything
         };
 
-        let effective = compute_permissions(
-            base,
-            &[],
-            &[deny_all],
-            &[],
-            member_id,
-            everyone_id,
-        );
+        let effective = compute_permissions(base, &[], &[deny_all], &[], member_id, everyone_id);
 
         // Admin short-circuits before channel overwrites are applied
         assert!(effective.contains(Permissions::SEND_MESSAGES));

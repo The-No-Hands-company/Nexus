@@ -24,15 +24,15 @@
 //! | GET      | `/admin/federation/audit`                       | Federation audit log                 |
 //! | GET      | `/federation/search`                            | Cross-instance user search (auth'd)  |
 
+use axum::http::HeaderMap;
 use axum::{
+    Json, Router,
     extract::{Extension, Path, Query, State},
     http::StatusCode,
     middleware,
     response::IntoResponse,
     routing::{delete, get, patch, post},
-    Json, Router,
 };
-use axum::http::HeaderMap;
 use chrono::{DateTime, Utc};
 use nexus_common::{
     error::{NexusError, NexusResult},
@@ -40,13 +40,16 @@ use nexus_common::{
     snowflake,
 };
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use crate::{
+    AppState,
+    middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip},
+};
 use sqlx::Row;
-use crate::{middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
 
 // ─── Router ───────────────────────────────────────────────────────────────────
 
@@ -54,22 +57,22 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         // Instance status + identity
         .route("/admin/federation/status", get(get_federation_status))
-        .route("/admin/federation/identity", get(get_identity).patch(update_identity))
+        .route(
+            "/admin/federation/identity",
+            get(get_identity).patch(update_identity),
+        )
         // Peer management
-        .route(
-            "/admin/federation/peers",
-            get(list_peers).post(add_peer),
-        )
-        .route(
-            "/admin/federation/peers/{domain}/health",
-            get(peer_health),
-        )
+        .route("/admin/federation/peers", get(list_peers).post(add_peer))
+        .route("/admin/federation/peers/{domain}/health", get(peer_health))
         .route(
             "/admin/federation/peers/{domain}/trust",
             patch(update_trust),
         )
         .route("/admin/federation/peers/{domain}/block", post(block_peer))
-        .route("/admin/federation/peers/{domain}/unblock", post(unblock_peer))
+        .route(
+            "/admin/federation/peers/{domain}/unblock",
+            post(unblock_peer),
+        )
         .route("/admin/federation/peers/{domain}", delete(remove_peer))
         // Peering requests
         .route("/admin/federation/requests", get(list_requests))
@@ -85,7 +88,9 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/admin/federation/audit", get(get_audit_log))
         // Cross-instance user search (accessible to any authenticated user)
         .route("/federation/search", get(search_federated_users))
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
@@ -94,10 +99,7 @@ pub fn router() -> Router<Arc<AppState>> {
 ///
 /// Returns `Ok(Uuid)` with the admin's user ID on success, or a 403 error
 /// if the user is not an instance admin.
-async fn require_instance_admin(
-    pool: &sqlx::AnyPool,
-    user_id: Uuid,
-) -> NexusResult<()> {
+async fn require_instance_admin(pool: &sqlx::AnyPool, user_id: Uuid) -> NexusResult<()> {
     let row = sqlx::query("SELECT flags FROM users WHERE id = $1::uuid")
         .bind(user_id.to_string())
         .fetch_one(pool)
@@ -123,14 +125,15 @@ async fn write_audit(
 ) {
     if let Err(e) = sqlx::query(
         r#"INSERT INTO federation_audit_log (id, admin_id, action, target_domain, details)
-           VALUES ($1::uuid, $2::uuid, $3, $4, $5)"#)
-        .bind(snowflake::generate_id().to_string())
-        .bind(admin_id.to_string())
-        .bind(action)
-        .bind(target_domain)
-        .bind(serde_json::to_string(&details).unwrap_or_else(|_| "{}".to_string()))
-        .execute(pool)
-        .await
+           VALUES ($1::uuid, $2::uuid, $3, $4, $5)"#,
+    )
+    .bind(snowflake::generate_id().to_string())
+    .bind(admin_id.to_string())
+    .bind(action)
+    .bind(target_domain)
+    .bind(serde_json::to_string(&details).unwrap_or_else(|_| "{}".to_string()))
+    .execute(pool)
+    .await
     {
         warn!("Failed to write federation audit log: {}", e);
     }
@@ -148,25 +151,27 @@ async fn get_federation_status(
         r#"SELECT
                COUNT(*)                                     AS peer_count,
                COUNT(*) FILTER (WHERE is_healthy = true AND is_blocked = false) AS healthy_count
-           FROM federated_servers"#)
-        .fetch_one(&state.db.pool)
-        .await
-        .map_err(NexusError::from)?;
+           FROM federated_servers"#,
+    )
+    .fetch_one(&state.db.pool)
+    .await
+    .map_err(NexusError::from)?;
 
-    let peer_count: i64       = peer_row.try_get("peer_count").unwrap_or(0);
-    let healthy_count: i64    = peer_row.try_get("healthy_count").unwrap_or(0);
+    let peer_count: i64 = peer_row.try_get("peer_count").unwrap_or(0);
+    let healthy_count: i64 = peer_row.try_get("healthy_count").unwrap_or(0);
 
     let req_row = sqlx::query(
         r#"SELECT
                COUNT(*) FILTER (WHERE direction = 'inbound')  AS inbound_pending,
                COUNT(*) FILTER (WHERE direction = 'outbound') AS outbound_pending
            FROM federation_peer_requests
-           WHERE status = 'pending'"#)
-        .fetch_one(&state.db.pool)
-        .await
-        .map_err(NexusError::from)?;
+           WHERE status = 'pending'"#,
+    )
+    .fetch_one(&state.db.pool)
+    .await
+    .map_err(NexusError::from)?;
 
-    let inbound_pending: i64  = req_row.try_get("inbound_pending").unwrap_or(0);
+    let inbound_pending: i64 = req_row.try_get("inbound_pending").unwrap_or(0);
     let outbound_pending: i64 = req_row.try_get("outbound_pending").unwrap_or(0);
 
     let uptime_secs = state.started_at.elapsed().as_secs();
@@ -195,23 +200,28 @@ async fn get_identity(
     require_instance_admin(&state.db.pool, auth.user_id).await?;
 
     let row = sqlx::query(
-        r#"SELECT value::text AS value FROM instance_settings WHERE key = 'federation_identity'"#)
-        .fetch_optional(&state.db.pool)
-        .await
-        .map_err(NexusError::from)?;
+        r#"SELECT value::text AS value FROM instance_settings WHERE key = 'federation_identity'"#,
+    )
+    .fetch_optional(&state.db.pool)
+    .await
+    .map_err(NexusError::from)?;
 
     let identity: Value = row
         .and_then(|r| {
-            let v: Option<Value> = r.try_get::<String, _>("value").ok()
+            let v: Option<Value> = r
+                .try_get::<String, _>("value")
+                .ok()
                 .and_then(|s| serde_json::from_str(&s).ok());
             v
         })
-        .unwrap_or_else(|| json!({
-            "display_name":       null,
-            "description":        null,
-            "admin_contact":      null,
-            "federation_policy":  "open",
-        }));
+        .unwrap_or_else(|| {
+            json!({
+                "display_name":       null,
+                "description":        null,
+                "admin_contact":      null,
+                "federation_policy":  "open",
+            })
+        });
 
     Ok(Json(identity))
 }
@@ -240,18 +250,18 @@ async fn update_identity(
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:fedadmin:user:{}:identity", auth.user_id),
-        30,   // 30 updates per admin
-        300,  // per 5 minutes
-    ).await?;
+        30,  // 30 updates per admin
+        300, // per 5 minutes
+    )
+    .await?;
 
     // Validate federation_policy
-    if let Some(ref policy) = body.federation_policy {
-        if !matches!(policy.as_str(), "open" | "allowlist" | "closed") {
+    if let Some(ref policy) = body.federation_policy
+        && !matches!(policy.as_str(), "open" | "allowlist" | "closed") {
             return Err(NexusError::Validation {
                 message: "federation_policy must be 'open', 'allowlist', or 'closed'".to_string(),
             });
         }
-    }
 
     let value = json!({
         "display_name":      body.display_name,
@@ -263,13 +273,21 @@ async fn update_identity(
     sqlx::query(
         r#"INSERT INTO instance_settings (key, value)
            VALUES ('federation_identity', $1)
-           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()"#)
-        .bind(serde_json::to_string(&value).unwrap_or_default())
-        .execute(&state.db.pool)
-        .await
-        .map_err(NexusError::from)?;
+           ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()"#,
+    )
+    .bind(serde_json::to_string(&value).unwrap_or_default())
+    .execute(&state.db.pool)
+    .await
+    .map_err(NexusError::from)?;
 
-    write_audit(&state.db.pool, auth.user_id, "identity_updated", &state.server_name, value.clone()).await;
+    write_audit(
+        &state.db.pool,
+        auth.user_id,
+        "identity_updated",
+        &state.server_name,
+        value.clone(),
+    )
+    .await;
 
     info!("Instance federation identity updated by {}", auth.user_id);
     Ok(Json(value))
@@ -289,10 +307,11 @@ async fn list_peers(
                   is_blocked, is_healthy, latency_ms, last_seen_at, last_error,
                   first_seen_at, server_type
            FROM federated_servers
-           ORDER BY trust_score DESC, server_name"#)
-        .fetch_all(&state.db.pool)
-        .await
-        .map_err(NexusError::from)?;
+           ORDER BY trust_score DESC, server_name"#,
+    )
+    .fetch_all(&state.db.pool)
+    .await
+    .map_err(NexusError::from)?;
 
     let peers: Vec<Value> = rows
         .iter()
@@ -348,36 +367,45 @@ async fn add_peer(
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:fedadmin:user:{}:add_peer", auth.user_id),
-        10,   // 10 peering attempts per admin
-        300,  // per 5 minutes
-    ).await?;
+        10,  // 10 peering attempts per admin
+        300, // per 5 minutes
+    )
+    .await?;
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:fedadmin:ip:{_ip}:add_peer"),
-        20,   // 20 per IP
+        20, // 20 per IP
         300,
-    ).await?;
+    )
+    .await?;
 
     // Basic domain validation.
     let domain = body.domain.trim().to_lowercase();
     if domain.is_empty() || domain.contains('/') || domain.contains(' ') {
-        return Err(NexusError::Validation { message: "Invalid domain name".to_string() });
+        return Err(NexusError::Validation {
+            message: "Invalid domain name".to_string(),
+        });
     }
     if domain == state.server_name {
-        return Err(NexusError::Validation { message: "Cannot peer with yourself".to_string() });
+        return Err(NexusError::Validation {
+            message: "Cannot peer with yourself".to_string(),
+        });
     }
 
     let trust_score = body.trust_score.unwrap_or(50).clamp(0, 100);
 
     // Ping the remote to discover its identity.
-    let (latency_ms, well_known) = state
-        .federation_client
-        .ping(&domain)
-        .await
-        .map_err(|e| NexusError::Validation { message: format!("Could not reach {}: {}", domain, e) })?;
+    let (latency_ms, well_known) =
+        state
+            .federation_client
+            .ping(&domain)
+            .await
+            .map_err(|e| NexusError::Validation {
+                message: format!("Could not reach {}: {}", domain, e),
+            })?;
 
     let display_name = well_known.display_name.as_deref().unwrap_or("");
-    let description  = well_known.description.as_deref().unwrap_or("");
+    let description = well_known.description.as_deref().unwrap_or("");
 
     // Upsert into federated_servers.
     sqlx::query(
@@ -396,19 +424,20 @@ async fn add_peer(
                is_healthy        = true,
                latency_ms        = $9,
                last_seen_at      = NOW(),
-               last_error        = NULL"#)
-        .bind(snowflake::generate_id().to_string())
-        .bind(&domain)
-        .bind(&well_known.display_name)
-        .bind(&well_known.description)
-        .bind(&well_known.admin_contact)
-        .bind(&well_known.software_version)
-        .bind(&well_known.federation_policy)
-        .bind(trust_score)
-        .bind(latency_ms as i32)
-        .execute(&state.db.pool)
-        .await
-        .map_err(NexusError::from)?;
+               last_error        = NULL"#,
+    )
+    .bind(snowflake::generate_id().to_string())
+    .bind(&domain)
+    .bind(&well_known.display_name)
+    .bind(&well_known.description)
+    .bind(&well_known.admin_contact)
+    .bind(&well_known.software_version)
+    .bind(&well_known.federation_policy)
+    .bind(trust_score)
+    .bind(latency_ms as i32)
+    .execute(&state.db.pool)
+    .await
+    .map_err(NexusError::from)?;
 
     // Create an outbound peering request.
     let req_id = snowflake::generate_id().to_string();
@@ -432,9 +461,13 @@ async fn add_peer(
         "peer_added",
         &domain,
         json!({ "trust_score": trust_score, "latency_ms": latency_ms }),
-    ).await;
+    )
+    .await;
 
-    info!("Admin {} initiated peering with {} (latency {}ms)", auth.user_id, domain, latency_ms);
+    info!(
+        "Admin {} initiated peering with {} (latency {}ms)",
+        auth.user_id, domain, latency_ms
+    );
 
     Ok((
         StatusCode::CREATED,
@@ -466,13 +499,14 @@ async fn peer_health(
                    SET is_healthy = true, latency_ms = $1, last_seen_at = NOW(),
                        last_error = NULL, display_name = COALESCE($2, display_name),
                        software_version = COALESCE($3, software_version)
-                   WHERE server_name = $4"#)
-                .bind(latency_ms as i32)
-                .bind(&info.display_name)
-                .bind(&info.software_version)
-                .bind(&domain)
-                .execute(&state.db.pool)
-                .await;
+                   WHERE server_name = $4"#,
+            )
+            .bind(latency_ms as i32)
+            .bind(&info.display_name)
+            .bind(&info.software_version)
+            .bind(&domain)
+            .execute(&state.db.pool)
+            .await;
 
             Ok(Json(json!({
                 "domain":           domain,
@@ -489,11 +523,12 @@ async fn peer_health(
             // Update DB to reflect offline.
             let _ = sqlx::query(
                 r#"UPDATE federated_servers
-                   SET is_healthy = false, last_error = $1 WHERE server_name = $2"#)
-                .bind(&error_str)
-                .bind(&domain)
-                .execute(&state.db.pool)
-                .await;
+                   SET is_healthy = false, last_error = $1 WHERE server_name = $2"#,
+            )
+            .bind(&error_str)
+            .bind(&domain)
+            .execute(&state.db.pool)
+            .await;
 
             Ok(Json(json!({
                 "domain":   domain,
@@ -523,15 +558,18 @@ async fn update_trust(
     let score = body.trust_score.clamp(0, 100);
 
     let result = sqlx::query(
-        "UPDATE federated_servers SET trust_score = $1 WHERE server_name = $2 RETURNING id")
-        .bind(score)
-        .bind(&domain)
-        .fetch_optional(&state.db.pool)
-        .await
-        .map_err(NexusError::from)?;
+        "UPDATE federated_servers SET trust_score = $1 WHERE server_name = $2 RETURNING id",
+    )
+    .bind(score)
+    .bind(&domain)
+    .fetch_optional(&state.db.pool)
+    .await
+    .map_err(NexusError::from)?;
 
     if result.is_none() {
-        return Err(NexusError::NotFound { resource: "Peer not found".to_string() });
+        return Err(NexusError::NotFound {
+            resource: "Peer not found".to_string(),
+        });
     }
 
     write_audit(
@@ -540,7 +578,8 @@ async fn update_trust(
         "trust_changed",
         &domain,
         json!({ "trust_score": score }),
-    ).await;
+    )
+    .await;
 
     Ok(Json(json!({ "domain": domain, "trust_score": score })))
 }
@@ -560,9 +599,10 @@ async fn block_peer(
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:fedadmin:user:{}:block", auth.user_id),
-        50,   // 50 blocks per admin
-        60,   // per minute
-    ).await?;
+        50, // 50 blocks per admin
+        60, // per minute
+    )
+    .await?;
 
     let result = sqlx::query(
         "UPDATE federated_servers SET is_blocked = true, trust_score = 0 WHERE server_name = $1 RETURNING id")
@@ -576,15 +616,23 @@ async fn block_peer(
         sqlx::query(
             r#"INSERT INTO federated_servers (id, server_name, is_blocked, trust_score)
                VALUES ($1::uuid, $2, true, 0)
-               ON CONFLICT (server_name) DO UPDATE SET is_blocked = true, trust_score = 0"#)
-            .bind(snowflake::generate_id().to_string())
-            .bind(&domain)
-            .execute(&state.db.pool)
-            .await
-            .map_err(NexusError::from)?;
+               ON CONFLICT (server_name) DO UPDATE SET is_blocked = true, trust_score = 0"#,
+        )
+        .bind(snowflake::generate_id().to_string())
+        .bind(&domain)
+        .execute(&state.db.pool)
+        .await
+        .map_err(NexusError::from)?;
     }
 
-    write_audit(&state.db.pool, auth.user_id, "peer_blocked", &domain, json!({})).await;
+    write_audit(
+        &state.db.pool,
+        auth.user_id,
+        "peer_blocked",
+        &domain,
+        json!({}),
+    )
+    .await;
 
     info!("Admin {} blocked peer {}", auth.user_id, domain);
     Ok(Json(json!({ "domain": domain, "is_blocked": true })))
@@ -600,13 +648,21 @@ async fn unblock_peer(
     require_instance_admin(&state.db.pool, auth.user_id).await?;
 
     sqlx::query(
-        "UPDATE federated_servers SET is_blocked = false, trust_score = 25 WHERE server_name = $1")
-        .bind(&domain)
-        .execute(&state.db.pool)
-        .await
-        .map_err(NexusError::from)?;
+        "UPDATE federated_servers SET is_blocked = false, trust_score = 25 WHERE server_name = $1",
+    )
+    .bind(&domain)
+    .execute(&state.db.pool)
+    .await
+    .map_err(NexusError::from)?;
 
-    write_audit(&state.db.pool, auth.user_id, "peer_unblocked", &domain, json!({})).await;
+    write_audit(
+        &state.db.pool,
+        auth.user_id,
+        "peer_unblocked",
+        &domain,
+        json!({}),
+    )
+    .await;
 
     Ok(Json(json!({ "domain": domain, "is_blocked": false })))
 }
@@ -620,18 +676,26 @@ async fn remove_peer(
 ) -> NexusResult<impl IntoResponse> {
     require_instance_admin(&state.db.pool, auth.user_id).await?;
 
-    let result = sqlx::query(
-        "DELETE FROM federated_servers WHERE server_name = $1 RETURNING id")
+    let result = sqlx::query("DELETE FROM federated_servers WHERE server_name = $1 RETURNING id")
         .bind(&domain)
         .fetch_optional(&state.db.pool)
         .await
         .map_err(NexusError::from)?;
 
     if result.is_none() {
-        return Err(NexusError::NotFound { resource: "Peer not found".to_string() });
+        return Err(NexusError::NotFound {
+            resource: "Peer not found".to_string(),
+        });
     }
 
-    write_audit(&state.db.pool, auth.user_id, "peer_removed", &domain, json!({})).await;
+    write_audit(
+        &state.db.pool,
+        auth.user_id,
+        "peer_removed",
+        &domain,
+        json!({}),
+    )
+    .await;
 
     info!("Admin {} removed peer {}", auth.user_id, domain);
     Ok(StatusCode::NO_CONTENT)
@@ -641,8 +705,8 @@ async fn remove_peer(
 
 #[derive(Debug, Deserialize)]
 struct ListRequestsQuery {
-    direction: Option<String>,  // "inbound" | "outbound"
-    status: Option<String>,     // "pending" | "accepted" | "rejected" | "cancelled"
+    direction: Option<String>, // "inbound" | "outbound"
+    status: Option<String>,    // "pending" | "accepted" | "rejected" | "cancelled"
 }
 
 async fn list_requests(
@@ -660,12 +724,13 @@ async fn list_requests(
            WHERE ($1::text IS NULL OR direction = $1)
              AND ($2::text IS NULL OR status    = $2)
            ORDER BY created_at DESC
-           LIMIT 100"#)
-        .bind(q.direction)
-        .bind(q.status.as_deref().or(Some("pending")))
-        .fetch_all(&state.db.pool)
-        .await
-        .map_err(NexusError::from)?;
+           LIMIT 100"#,
+    )
+    .bind(q.direction)
+    .bind(q.status.as_deref().or(Some("pending")))
+    .fetch_all(&state.db.pool)
+    .await
+    .map_err(NexusError::from)?;
 
     let requests: Vec<Value> = rows.iter().map(|r| json!({
         "id":                   r.try_get::<String, _>("id").unwrap_or_default(),
@@ -679,7 +744,9 @@ async fn list_requests(
         "resolved_at":          r.try_get::<Option<String>, _>("resolved_at").unwrap_or(None),
     })).collect();
 
-    Ok(Json(json!({ "requests": requests, "total": requests.len() })))
+    Ok(Json(
+        json!({ "requests": requests, "total": requests.len() }),
+    ))
 }
 
 // ─── POST /admin/federation/requests/{id}/accept ──────────────────────────────
@@ -694,34 +761,42 @@ async fn accept_request(
     // Fetch and validate the request.
     let row = sqlx::query(
         r#"SELECT remote_domain, direction, status, remote_display_name, remote_description
-           FROM federation_peer_requests WHERE id = $1::uuid"#)
-        .bind(&request_id)
-        .fetch_optional(&state.db.pool)
-        .await
-        .map_err(NexusError::from)?
-        .ok_or_else(|| NexusError::NotFound { resource: "Request not found".to_string() })?;
+           FROM federation_peer_requests WHERE id = $1::uuid"#,
+    )
+    .bind(&request_id)
+    .fetch_optional(&state.db.pool)
+    .await
+    .map_err(NexusError::from)?
+    .ok_or_else(|| NexusError::NotFound {
+        resource: "Request not found".to_string(),
+    })?;
 
     let direction: String = row.try_get("direction").unwrap_or_default();
-    let status: String    = row.try_get("status").unwrap_or_default();
-    let domain: String    = row.try_get("remote_domain").unwrap_or_default();
+    let status: String = row.try_get("status").unwrap_or_default();
+    let domain: String = row.try_get("remote_domain").unwrap_or_default();
 
     if direction != "inbound" {
-        return Err(NexusError::Validation { message: "Only inbound requests can be accepted".to_string() });
+        return Err(NexusError::Validation {
+            message: "Only inbound requests can be accepted".to_string(),
+        });
     }
     if status != "pending" {
-        return Err(NexusError::Validation { message: format!("Request is already {}", status) });
+        return Err(NexusError::Validation {
+            message: format!("Request is already {}", status),
+        });
     }
 
     // Mark as accepted.
     sqlx::query(
         r#"UPDATE federation_peer_requests
            SET status = 'accepted', acted_by = $1::uuid, resolved_at = NOW()
-           WHERE id = $2::uuid"#)
-        .bind(auth.user_id.to_string())
-        .bind(&request_id)
-        .execute(&state.db.pool)
-        .await
-        .map_err(NexusError::from)?;
+           WHERE id = $2::uuid"#,
+    )
+    .bind(auth.user_id.to_string())
+    .bind(&request_id)
+    .execute(&state.db.pool)
+    .await
+    .map_err(NexusError::from)?;
 
     // Ensure the peer is in federated_servers with a healthy trust score.
     sqlx::query(
@@ -739,11 +814,17 @@ async fn accept_request(
         .map_err(NexusError::from)?;
 
     write_audit(
-        &state.db.pool, auth.user_id, "request_accepted", &domain,
+        &state.db.pool,
+        auth.user_id,
+        "request_accepted",
+        &domain,
         json!({ "request_id": request_id }),
-    ).await;
+    )
+    .await;
 
-    Ok(Json(json!({ "request_id": request_id, "domain": domain, "status": "accepted" })))
+    Ok(Json(
+        json!({ "request_id": request_id, "domain": domain, "status": "accepted" }),
+    ))
 }
 
 // ─── POST /admin/federation/requests/{id}/reject ──────────────────────────────
@@ -756,36 +837,48 @@ async fn reject_request(
     require_instance_admin(&state.db.pool, auth.user_id).await?;
 
     let row = sqlx::query(
-        "SELECT remote_domain, status FROM federation_peer_requests WHERE id = $1::uuid")
-        .bind(&request_id)
-        .fetch_optional(&state.db.pool)
-        .await
-        .map_err(NexusError::from)?
-        .ok_or_else(|| NexusError::NotFound { resource: "Request not found".to_string() })?;
+        "SELECT remote_domain, status FROM federation_peer_requests WHERE id = $1::uuid",
+    )
+    .bind(&request_id)
+    .fetch_optional(&state.db.pool)
+    .await
+    .map_err(NexusError::from)?
+    .ok_or_else(|| NexusError::NotFound {
+        resource: "Request not found".to_string(),
+    })?;
 
     let status: String = row.try_get("status").unwrap_or_default();
     let domain: String = row.try_get("remote_domain").unwrap_or_default();
 
     if status != "pending" {
-        return Err(NexusError::Validation { message: format!("Request is already {}", status) });
+        return Err(NexusError::Validation {
+            message: format!("Request is already {}", status),
+        });
     }
 
     sqlx::query(
         r#"UPDATE federation_peer_requests
            SET status = 'rejected', acted_by = $1::uuid, resolved_at = NOW()
-           WHERE id = $2::uuid"#)
-        .bind(auth.user_id.to_string())
-        .bind(&request_id)
-        .execute(&state.db.pool)
-        .await
-        .map_err(NexusError::from)?;
+           WHERE id = $2::uuid"#,
+    )
+    .bind(auth.user_id.to_string())
+    .bind(&request_id)
+    .execute(&state.db.pool)
+    .await
+    .map_err(NexusError::from)?;
 
     write_audit(
-        &state.db.pool, auth.user_id, "request_rejected", &domain,
+        &state.db.pool,
+        auth.user_id,
+        "request_rejected",
+        &domain,
         json!({ "request_id": request_id }),
-    ).await;
+    )
+    .await;
 
-    Ok(Json(json!({ "request_id": request_id, "domain": domain, "status": "rejected" })))
+    Ok(Json(
+        json!({ "request_id": request_id, "domain": domain, "status": "rejected" }),
+    ))
 }
 
 // ─── GET /admin/federation/audit ─────────────────────────────────────────────
@@ -812,13 +905,14 @@ async fn get_audit_log(
            WHERE ($1::text     IS NULL OR target_domain = $1)
              AND ($2::timestamptz IS NULL OR created_at < $2)
            ORDER BY created_at DESC
-           LIMIT $3"#)
-        .bind(q.domain)
-        .bind(q.before.map(|d| d.to_rfc3339()))
-        .bind(limit)
-        .fetch_all(&state.db.pool)
-        .await
-        .map_err(NexusError::from)?;
+           LIMIT $3"#,
+    )
+    .bind(q.domain)
+    .bind(q.before.map(|d| d.to_rfc3339()))
+    .bind(limit)
+    .fetch_all(&state.db.pool)
+    .await
+    .map_err(NexusError::from)?;
 
     let entries: Vec<Value> = rows.iter().map(|r| json!({
         "id":            r.try_get::<String, _>("id").unwrap_or_default(),
@@ -857,14 +951,14 @@ async fn search_federated_users(
 
         if !remote_server.is_empty() && remote_server != state.server_name {
             // Check the remote server isn't blocked.
-            let blocked: bool = sqlx::query(
-                "SELECT is_blocked FROM federated_servers WHERE server_name = $1")
-                .bind(remote_server)
-                .fetch_optional(&state.db.pool)
-                .await
-                .map_err(NexusError::from)?
-                .and_then(|r| r.try_get::<bool, _>("is_blocked").ok())
-                .unwrap_or(false);
+            let blocked: bool =
+                sqlx::query("SELECT is_blocked FROM federated_servers WHERE server_name = $1")
+                    .bind(remote_server)
+                    .fetch_optional(&state.db.pool)
+                    .await
+                    .map_err(NexusError::from)?
+                    .and_then(|r| r.try_get::<bool, _>("is_blocked").ok())
+                    .unwrap_or(false);
 
             if blocked {
                 return Err(NexusError::Forbidden);
@@ -874,7 +968,8 @@ async fn search_federated_users(
             let user_id_mxid = format!("@{}:{}", localpart, remote_server);
 
             // Use the federation client's authenticated GET.
-            let profile: Value = state.federation_client
+            let profile: Value = state
+                .federation_client
                 .get_user_profile(remote_server, &user_id_mxid)
                 .await
                 .unwrap_or_else(|_| json!({}));
@@ -895,12 +990,13 @@ async fn search_federated_users(
            WHERE (LOWER(username) LIKE $1 OR LOWER(display_name) LIKE $1)
              AND (flags & $2 = 0)
            ORDER BY username
-           LIMIT 25"#)
-        .bind(format!("{}%", query.to_lowercase()))
-        .bind(user_flags::BOT | user_flags::SUSPENDED | user_flags::DISABLED)
-        .fetch_all(&state.db.pool)
-        .await
-        .map_err(NexusError::from)?;
+           LIMIT 25"#,
+    )
+    .bind(format!("{}%", query.to_lowercase()))
+    .bind(user_flags::BOT | user_flags::SUSPENDED | user_flags::DISABLED)
+    .fetch_all(&state.db.pool)
+    .await
+    .map_err(NexusError::from)?;
 
     let users: Vec<Value> = rows.iter().map(|r| json!({
         "type":         "local",

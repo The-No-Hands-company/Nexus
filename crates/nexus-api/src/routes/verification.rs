@@ -6,10 +6,10 @@
 //! DELETE /users/:user_id/devices/:device_id/verify        — Remove verification record
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, State},
     middleware,
     routing::{get, post},
-    Json, Router,
 };
 use nexus_common::{
     crypto::compute_safety_number,
@@ -20,7 +20,7 @@ use nexus_db::repository::keystore;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -33,7 +33,9 @@ pub fn router() -> Router<Arc<AppState>> {
             post(verify_device).delete(remove_verification),
         )
         .route("/users/@me/verifications", get(list_my_verifications))
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ============================================================
@@ -51,7 +53,7 @@ async fn get_safety_number(
     // Fetch the target device
     let target_device = keystore::find_device(&state.db.pool, target_device_id)
         .await
-        .map_err(|e| NexusError::Internal(e))?
+        .map_err(NexusError::Internal)?
         .ok_or(NexusError::NotFound {
             resource: "Device".into(),
         })?;
@@ -65,11 +67,14 @@ async fn get_safety_number(
     // Fetch the caller's first/primary device for their identity key
     let my_devices = keystore::list_devices(&state.db.pool, auth.user_id)
         .await
-        .map_err(|e| NexusError::Internal(e))?;
+        .map_err(NexusError::Internal)?;
 
-    let my_device = my_devices.into_iter().next().ok_or(NexusError::Validation {
-        message: "Register a device before computing safety numbers".into(),
-    })?;
+    let my_device = my_devices
+        .into_iter()
+        .next()
+        .ok_or(NexusError::Validation {
+            message: "Register a device before computing safety numbers".into(),
+        })?;
 
     let fingerprint = compute_safety_number(
         auth.user_id,
@@ -101,7 +106,7 @@ async fn verify_device(
     // Ensure device exists
     keystore::find_device(&state.db.pool, device_id)
         .await
-        .map_err(|e| NexusError::Internal(e))?
+        .map_err(NexusError::Internal)?
         .ok_or(NexusError::NotFound {
             resource: "Device".into(),
         })?;
@@ -114,7 +119,7 @@ async fn verify_device(
 
     let verification = keystore::verify_device(&state.db.pool, auth.user_id, device_id, method_str)
         .await
-        .map_err(|e| NexusError::Internal(e))?;
+        .map_err(NexusError::Internal)?;
 
     Ok(Json(verification))
 }
@@ -135,7 +140,7 @@ async fn remove_verification(
     .bind(device_id.to_string())
     .execute(&state.db.pool)
     .await
-    .map_err(|e| NexusError::Database(e))?;
+    .map_err(NexusError::Database)?;
 
     Ok(())
 }
@@ -150,6 +155,6 @@ async fn list_my_verifications(
 ) -> NexusResult<Json<Vec<DeviceVerification>>> {
     let verifications = keystore::list_verifications(&state.db.pool, auth.user_id)
         .await
-        .map_err(|e| NexusError::Internal(e))?;
+        .map_err(NexusError::Internal)?;
     Ok(Json(verifications))
 }

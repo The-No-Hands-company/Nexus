@@ -19,7 +19,7 @@
 //!
 //! The top-level `status` is `"degraded"` if any individual check reports `"error"`.
 
-use axum::{extract::State, http::StatusCode, routing::get, Json, Router};
+use axum::{Json, Router, extract::State, http::StatusCode, routing::get};
 use scylla::SessionBuilder;
 use serde::Serialize;
 use sqlx::AnyPool;
@@ -88,10 +88,35 @@ async fn health_check(State(state): State<Arc<AppState>>) -> (StatusCode, Json<H
     // ── Database ──────────────────────────────────────────────────────────────
     let db_check = {
         let t = Instant::now();
-        match tokio::time::timeout(timeout, nexus_db::postgres::health_check(&state.db.pool)).await {
-            Ok(true)  => CheckResult { status: "ok", latency_ms: Some(t.elapsed().as_millis() as u64), backend: None, error: None, pending: None, dispatched: None, failed: None },
-            Ok(false) => CheckResult { status: "error", latency_ms: None, backend: None, error: Some("ping query failed".into()), pending: None, dispatched: None, failed: None },
-            Err(_)    => CheckResult { status: "error", latency_ms: None, backend: None, error: Some("timeout".into()), pending: None, dispatched: None, failed: None },
+        match tokio::time::timeout(timeout, nexus_db::postgres::health_check(&state.db.pool)).await
+        {
+            Ok(true) => CheckResult {
+                status: "ok",
+                latency_ms: Some(t.elapsed().as_millis() as u64),
+                backend: None,
+                error: None,
+                pending: None,
+                dispatched: None,
+                failed: None,
+            },
+            Ok(false) => CheckResult {
+                status: "error",
+                latency_ms: None,
+                backend: None,
+                error: Some("ping query failed".into()),
+                pending: None,
+                dispatched: None,
+                failed: None,
+            },
+            Err(_) => CheckResult {
+                status: "error",
+                latency_ms: None,
+                backend: None,
+                error: Some("timeout".into()),
+                pending: None,
+                dispatched: None,
+                failed: None,
+            },
         }
     };
 
@@ -99,10 +124,42 @@ async fn health_check(State(state): State<Arc<AppState>>) -> (StatusCode, Json<H
     let redis_check = {
         let t = Instant::now();
         match tokio::time::timeout(timeout, state.db.health_redis()).await {
-            Ok(Some(true))  => CheckResult { status: "ok", latency_ms: Some(t.elapsed().as_millis() as u64), backend: None, error: None, pending: None, dispatched: None, failed: None },
-            Ok(Some(false)) => CheckResult { status: "error", latency_ms: None, backend: None, error: Some("PING failed".into()), pending: None, dispatched: None, failed: None },
-            Ok(None)        => CheckResult { status: "not_configured", latency_ms: None, backend: None, error: None, pending: None, dispatched: None, failed: None },
-            Err(_)          => CheckResult { status: "error", latency_ms: None, backend: None, error: Some("timeout".into()), pending: None, dispatched: None, failed: None },
+            Ok(Some(true)) => CheckResult {
+                status: "ok",
+                latency_ms: Some(t.elapsed().as_millis() as u64),
+                backend: None,
+                error: None,
+                pending: None,
+                dispatched: None,
+                failed: None,
+            },
+            Ok(Some(false)) => CheckResult {
+                status: "error",
+                latency_ms: None,
+                backend: None,
+                error: Some("PING failed".into()),
+                pending: None,
+                dispatched: None,
+                failed: None,
+            },
+            Ok(None) => CheckResult {
+                status: "not_configured",
+                latency_ms: None,
+                backend: None,
+                error: None,
+                pending: None,
+                dispatched: None,
+                failed: None,
+            },
+            Err(_) => CheckResult {
+                status: "error",
+                latency_ms: None,
+                backend: None,
+                error: Some("timeout".into()),
+                pending: None,
+                dispatched: None,
+                failed: None,
+            },
         }
     };
 
@@ -158,12 +215,16 @@ async fn health_check(State(state): State<Arc<AppState>>) -> (StatusCode, Json<H
             .unwrap_or((false, "unknown", Some("timeout".to_string())));
         let status = match (ok, backend_name) {
             (true, "disabled") => "disabled",
-            (true, _)          => "ok",
-            (false, _)         => "error",
+            (true, _) => "ok",
+            (false, _) => "error",
         };
         CheckResult {
             status,
-            latency_ms: if ok { Some(t.elapsed().as_millis() as u64) } else { None },
+            latency_ms: if ok {
+                Some(t.elapsed().as_millis() as u64)
+            } else {
+                None
+            },
             backend: Some(backend_name),
             error: err,
             pending: None,
@@ -178,7 +239,11 @@ async fn health_check(State(state): State<Arc<AppState>>) -> (StatusCode, Json<H
         || scylla_check.status == "error"
         || search_check.status == "error";
 
-    let http_status = if degraded { StatusCode::SERVICE_UNAVAILABLE } else { StatusCode::OK };
+    let http_status = if degraded {
+        StatusCode::SERVICE_UNAVAILABLE
+    } else {
+        StatusCode::OK
+    };
 
     (
         http_status,
@@ -186,7 +251,12 @@ async fn health_check(State(state): State<Arc<AppState>>) -> (StatusCode, Json<H
             status: if degraded { "degraded" } else { "healthy" },
             version: env!("CARGO_PKG_VERSION"),
             uptime_secs: state.started_at.elapsed().as_secs(),
-            checks: Checks { database: db_check, redis: redis_check, scylla: scylla_check, search: search_check },
+            checks: Checks {
+                database: db_check,
+                redis: redis_check,
+                scylla: scylla_check,
+                search: search_check,
+            },
         }),
     )
 }

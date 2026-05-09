@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 use uuid::Uuid;
 
-use crate::state::AppState;
 use super::{api_client, friendly_api_error, friendly_network_error};
+use crate::state::AppState;
 
 /// Raw shape returned by the Nexus API (snake_case)
 #[derive(Deserialize, Debug, Clone)]
@@ -321,10 +321,7 @@ pub async fn update_server(
 
 /// Delete a server permanently.
 #[tauri::command]
-pub async fn delete_server(
-    state: State<'_, AppState>,
-    server_id: Uuid,
-) -> Result<(), String> {
+pub async fn delete_server(state: State<'_, AppState>, server_id: Uuid) -> Result<(), String> {
     let session = state.session_snapshot();
     let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
     let resp = client
@@ -351,7 +348,9 @@ pub async fn transfer_server_ownership(
     let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
     let body = serde_json::json!({ "new_owner_id": new_owner_id });
     let resp = client
-        .post(format!("{base}/api/v1/servers/{server_id}/transfer-ownership"))
+        .post(format!(
+            "{base}/api/v1/servers/{server_id}/transfer-ownership"
+        ))
         .json(&body)
         .send()
         .await
@@ -366,10 +365,7 @@ pub async fn transfer_server_ownership(
 
 /// Leave a server (non-owner members only).
 #[tauri::command]
-pub async fn leave_server(
-    state: State<'_, AppState>,
-    server_id: Uuid,
-) -> Result<(), String> {
+pub async fn leave_server(state: State<'_, AppState>, server_id: Uuid) -> Result<(), String> {
     let session = state.session_snapshot();
     let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
     let resp = client

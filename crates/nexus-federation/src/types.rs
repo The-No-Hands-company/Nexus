@@ -403,24 +403,26 @@ pub struct FederatedFriendResponse {
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
 /// Generate a new locally-unique event ID on this server.
+#[must_use] 
 pub fn new_event_id(server_name: &str) -> String {
-    let id = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .encode(Uuid::new_v4().as_bytes());
-    format!("${}:{}", id, server_name)
+    let id = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(Uuid::new_v4().as_bytes());
+    format!("${id}:{server_name}")
 }
 
 /// Build a Matrix-style MXID from a local user and server.
 ///
 /// Example: `@alice:nexus.example.com`
+#[must_use] 
 pub fn mxid(local_part: &str, server_name: &str) -> String {
-    format!("@{}:{}", local_part, server_name)
+    format!("@{local_part}:{server_name}")
 }
 
 /// Build a federated room ID from a local channel ID and server.
 ///
 /// Example: `!channelid:nexus.example.com`
+#[must_use] 
 pub fn room_id(channel_id: &str, server_name: &str) -> String {
-    format!("!{}:{}", channel_id, server_name)
+    format!("!{channel_id}:{server_name}")
 }
 
 #[cfg(test)]
@@ -431,7 +433,10 @@ mod tests {
 
     #[test]
     fn mxid_format_is_at_local_colon_server() {
-        assert_eq!(mxid("alice", "nexus.example.com"), "@alice:nexus.example.com");
+        assert_eq!(
+            mxid("alice", "nexus.example.com"),
+            "@alice:nexus.example.com"
+        );
     }
 
     #[test]

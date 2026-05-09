@@ -1,10 +1,10 @@
 //! Plugin & theme routes — marketplace listing, installs, and user settings.
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, Query, State},
     middleware,
     routing::{delete, get, post},
-    Json, Router,
 };
 use nexus_common::{
     error::{NexusError, NexusResult},
@@ -19,7 +19,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 /// Plugin and theme routes.
 pub fn router() -> Router<Arc<AppState>> {
@@ -42,8 +42,13 @@ pub fn router() -> Router<Arc<AppState>> {
         // User theme installs
         .route("/users/@me/themes", get(get_my_themes).post(install_theme))
         .route("/users/@me/themes/{theme_id}", delete(uninstall_theme))
-        .route("/users/@me/themes/{theme_id}/activate", post(activate_theme))
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route(
+            "/users/@me/themes/{theme_id}/activate",
+            post(activate_theme),
+        )
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ============================================================================
@@ -81,7 +86,9 @@ async fn get_plugin(
 ) -> NexusResult<Json<ClientPlugin>> {
     let plugin = plugins::get_plugin_by_slug(&state.db.pool, &slug)
         .await?
-        .ok_or(NexusError::NotFound { resource: "plugin".to_string() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "plugin".to_string(),
+        })?;
     Ok(Json(plugin))
 }
 
@@ -135,7 +142,9 @@ async fn install_plugin(
     // Verify plugin exists
     plugins::get_plugin_by_id(&state.db.pool, body.plugin_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "plugin".to_string() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "plugin".to_string(),
+        })?;
 
     plugins::install_plugin(&state.db.pool, auth.user_id, body.plugin_id).await?;
     Ok(axum::http::StatusCode::NO_CONTENT)
@@ -192,7 +201,9 @@ async fn get_theme(
 ) -> NexusResult<Json<Theme>> {
     let theme = plugins::get_theme_by_slug(&state.db.pool, &slug)
         .await?
-        .ok_or(NexusError::NotFound { resource: "theme".to_string() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "theme".to_string(),
+        })?;
     Ok(Json(theme))
 }
 
@@ -265,7 +276,9 @@ async fn activate_theme(
 ) -> NexusResult<axum::http::StatusCode> {
     let success = plugins::activate_theme(&state.db.pool, auth.user_id, theme_id).await?;
     if !success {
-        return Err(NexusError::NotFound { resource: "theme".to_string() });
+        return Err(NexusError::NotFound {
+            resource: "theme".to_string(),
+        });
     }
     Ok(axum::http::StatusCode::NO_CONTENT)
 }

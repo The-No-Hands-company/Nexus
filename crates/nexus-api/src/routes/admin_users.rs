@@ -17,24 +17,27 @@
 
 use axum::http::HeaderMap;
 use axum::{
+    Json, Router,
     extract::{Extension, Path, Query, State},
     http::header::USER_AGENT,
     middleware,
     routing::{get, post},
-    Json, Router,
 };
+use nexus_common::snowflake;
 use nexus_common::{
     error::{NexusError, NexusResult},
     models::user::user_flags,
 };
 use nexus_db::repository::{audit_log, users};
-use nexus_common::snowflake;
 use serde::{Deserialize, Serialize};
+use sqlx::Row;
 use std::sync::Arc;
 use uuid::Uuid;
-use sqlx::Row;
 
-use crate::{middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
+use crate::{
+    AppState,
+    middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip},
+};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -50,10 +53,7 @@ pub fn router() -> Router<Arc<AppState>> {
 
 // ── Auth guard ────────────────────────────────────────────────────────────────
 
-async fn require_instance_admin(
-    pool: &sqlx::AnyPool,
-    user_id: Uuid,
-) -> NexusResult<()> {
+async fn require_instance_admin(pool: &sqlx::AnyPool, user_id: Uuid) -> NexusResult<()> {
     let user = users::find_by_id(pool, user_id)
         .await
         .map_err(NexusError::from)?
@@ -75,7 +75,9 @@ struct ListUsersQuery {
     offset: i64,
     q: Option<String>,
 }
-fn default_limit() -> i64 { 50 }
+fn default_limit() -> i64 {
+    50
+}
 
 #[derive(Serialize)]
 struct AdminUserView {
@@ -121,14 +123,9 @@ async fn list_users(
     let limit = params.limit.clamp(1, 200);
     let offset = params.offset.max(0);
 
-    let user_list = users::list_users(
-        &state.db.pool,
-        limit,
-        offset,
-        params.q.as_deref(),
-    )
-    .await
-    .map_err(NexusError::from)?;
+    let user_list = users::list_users(&state.db.pool, limit, offset, params.q.as_deref())
+        .await
+        .map_err(NexusError::from)?;
 
     let total = users::count_users(&state.db.pool)
         .await
@@ -189,7 +186,9 @@ async fn get_user(
     let user = users::find_by_id(&state.db.pool, user_id)
         .await
         .map_err(NexusError::from)?
-        .ok_or(NexusError::NotFound { resource: "User".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "User".into(),
+        })?;
 
     Ok(Json(user.into()))
 }
@@ -210,13 +209,10 @@ async fn suspend_user(
         format!("rl:admin:user:{}", auth.user_id),
         10,
         60,
-    ).await?;
-    check_rate_limit_with_fallback(
-        state.db.redis.as_ref(),
-        format!("rl:admin:ip:{ip}"),
-        20,
-        60,
-    ).await?;
+    )
+    .await?;
+    check_rate_limit_with_fallback(state.db.redis.as_ref(), format!("rl:admin:ip:{ip}"), 20, 60)
+        .await?;
 
     if user_id == auth.user_id {
         return Err(NexusError::Validation {
@@ -242,7 +238,8 @@ async fn suspend_user(
         None,
         ip.parse().ok(),
         ua,
-    ).await;
+    )
+    .await;
 
     tracing::warn!(
         admin = %auth.user_id,
@@ -269,13 +266,10 @@ async fn unsuspend_user(
         format!("rl:admin:user:{}", auth.user_id),
         10,
         60,
-    ).await?;
-    check_rate_limit_with_fallback(
-        state.db.redis.as_ref(),
-        format!("rl:admin:ip:{ip}"),
-        20,
-        60,
-    ).await?;
+    )
+    .await?;
+    check_rate_limit_with_fallback(state.db.redis.as_ref(), format!("rl:admin:ip:{ip}"), 20, 60)
+        .await?;
 
     users::remove_user_flags(&state.db.pool, user_id, user_flags::SUSPENDED)
         .await
@@ -295,7 +289,8 @@ async fn unsuspend_user(
         None,
         ip.parse().ok(),
         ua,
-    ).await;
+    )
+    .await;
 
     tracing::info!(
         admin = %auth.user_id,
@@ -322,13 +317,10 @@ async fn disable_user(
         format!("rl:admin:user:{}", auth.user_id),
         10,
         60,
-    ).await?;
-    check_rate_limit_with_fallback(
-        state.db.redis.as_ref(),
-        format!("rl:admin:ip:{ip}"),
-        20,
-        60,
-    ).await?;
+    )
+    .await?;
+    check_rate_limit_with_fallback(state.db.redis.as_ref(), format!("rl:admin:ip:{ip}"), 20, 60)
+        .await?;
 
     if user_id == auth.user_id {
         return Err(NexusError::Validation {
@@ -354,7 +346,8 @@ async fn disable_user(
         None,
         ip.parse().ok(),
         ua,
-    ).await;
+    )
+    .await;
 
     tracing::warn!(
         admin = %auth.user_id,
@@ -381,7 +374,7 @@ async fn list_servers(
                 created_at::text, owner_id::text \
          FROM servers \
          ORDER BY member_count DESC NULLS LAST, created_at DESC \
-         LIMIT $1 OFFSET $2"
+         LIMIT $1 OFFSET $2",
     )
     .bind(limit)
     .bind(offset)
@@ -394,17 +387,20 @@ async fn list_servers(
         .await
         .map_err(NexusError::from)?;
 
-    let servers: Vec<serde_json::Value> = rows.iter().map(|r| {
-        serde_json::json!({
-            "id":           r.try_get::<String, _>("id").unwrap_or_default(),
-            "name":         r.try_get::<String, _>("name").unwrap_or_default(),
-            "description":  r.try_get::<Option<String>, _>("description").unwrap_or_default(),
-            "member_count": r.try_get::<i64, _>("member_count").unwrap_or(0),
-            "is_public":    r.try_get::<bool, _>("is_public").unwrap_or(false),
-            "owner_id":     r.try_get::<String, _>("owner_id").unwrap_or_default(),
-            "created_at":   r.try_get::<String, _>("created_at").unwrap_or_default(),
+    let servers: Vec<serde_json::Value> = rows
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "id":           r.try_get::<String, _>("id").unwrap_or_default(),
+                "name":         r.try_get::<String, _>("name").unwrap_or_default(),
+                "description":  r.try_get::<Option<String>, _>("description").unwrap_or_default(),
+                "member_count": r.try_get::<i64, _>("member_count").unwrap_or(0),
+                "is_public":    r.try_get::<bool, _>("is_public").unwrap_or(false),
+                "owner_id":     r.try_get::<String, _>("owner_id").unwrap_or_default(),
+                "created_at":   r.try_get::<String, _>("created_at").unwrap_or_default(),
+            })
         })
-    }).collect();
+        .collect();
 
     Ok(Json(serde_json::json!({
         "servers": servers,

@@ -1,10 +1,14 @@
 //! Repository: federation_batches — Phase 20-02.
 
-use nexus_common::models::scalability::{FederationEventBatch, FederationRoute, FederationDedupEntry};
+use nexus_common::models::scalability::{
+    FederationDedupEntry, FederationEventBatch, FederationRoute,
+};
 use sqlx::AnyPool;
 use uuid::Uuid;
 
-use crate::select_cols::{FEDERATION_EVENT_BATCH_COLS, FEDERATION_ROUTE_COLS, FEDERATION_DEDUP_COLS};
+use crate::select_cols::{
+    FEDERATION_DEDUP_COLS, FEDERATION_EVENT_BATCH_COLS, FEDERATION_ROUTE_COLS,
+};
 
 // ── Event Batches ─────────────────────────────────────────────────────────
 
@@ -43,14 +47,8 @@ pub async fn list_pending_batches(
         .await
 }
 
-pub async fn mark_batch_sent(
-    pool: &AnyPool,
-    id: Uuid,
-    status: &str,
-) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "UPDATE federation_event_batches SET status = $2, sent_at = now() WHERE id = $1"
-    )
+pub async fn mark_batch_sent(pool: &AnyPool, id: Uuid, status: &str) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE federation_event_batches SET status = $2, sent_at = now() WHERE id = $1")
         .bind(id.to_string())
         .bind(status)
         .execute(pool)
@@ -90,9 +88,7 @@ pub async fn upsert_federation_route(
         .await
 }
 
-pub async fn list_federation_routes(
-    pool: &AnyPool,
-) -> Result<Vec<FederationRoute>, sqlx::Error> {
+pub async fn list_federation_routes(pool: &AnyPool) -> Result<Vec<FederationRoute>, sqlx::Error> {
     let q = format!(
         "SELECT {FEDERATION_ROUTE_COLS} FROM federation_routes ORDER BY priority DESC, latency_ms ASC"
     );

@@ -11,10 +11,10 @@
 //! DELETE /channels/:id/scheduled-messages/:sm_id         — Cancel
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, State},
     middleware,
     routing::get,
-    Json, Router,
 };
 use chrono::{DateTime, Utc};
 use nexus_common::{
@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 async fn ensure_channel_access(
     state: &AppState,
@@ -72,7 +72,9 @@ pub fn router() -> Router<Arc<AppState>> {
             "/channels/{channel_id}/scheduled-messages/{sm_id}",
             axum::routing::patch(update_scheduled).delete(cancel_scheduled),
         )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ============================================================
@@ -116,7 +118,7 @@ struct ScheduledRow {
     channel_id: String,
     author_id: String,
     content: String,
-    attachments: String,  // jsonb as text
+    attachments: String, // jsonb as text
     scheduled_at: String,
     status: String,
     created_at: String,
@@ -143,9 +145,18 @@ impl TryFrom<ScheduledRow> for ScheduledMessage {
 
     fn try_from(r: ScheduledRow) -> Result<Self, Self::Error> {
         Ok(Self {
-            id: r.id.parse::<Uuid>().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
-            channel_id: r.channel_id.parse::<Uuid>().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
-            author_id: r.author_id.parse::<Uuid>().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
+            id: r
+                .id
+                .parse::<Uuid>()
+                .map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
+            channel_id: r
+                .channel_id
+                .parse::<Uuid>()
+                .map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
+            author_id: r
+                .author_id
+                .parse::<Uuid>()
+                .map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
             content: r.content,
             attachments: serde_json::from_str::<Vec<serde_json::Value>>(&r.attachments)
                 .unwrap_or_default(),
@@ -182,14 +193,14 @@ async fn create_scheduled(
     }
     if body.content.trim().is_empty() {
         metrics::counter!("nexus_scheduled_messages_requests_total", "route" => "create", "outcome" => "invalid_content").increment(1);
-        return Err(NexusError::Validation { message: "Message content cannot be empty".into() });
+        return Err(NexusError::Validation {
+            message: "Message content cannot be empty".into(),
+        });
     }
 
     let sm_id = snowflake::generate_id();
-    let attachments_json = serde_json::to_string(
-        &body.attachments.unwrap_or_default(),
-    )
-    .map_err(|e| NexusError::Internal(e.into()))?;
+    let attachments_json = serde_json::to_string(&body.attachments.unwrap_or_default())
+        .map_err(|e| NexusError::Internal(e.into()))?;
 
     let row: ScheduledRow = sqlx::query_as(
         r#"
@@ -259,14 +270,13 @@ async fn update_scheduled(
     metrics::counter!("nexus_scheduled_messages_requests_total", "route" => "update").increment(1);
     ensure_channel_access(&state, ctx.user_id, channel_id).await?;
 
-    if let Some(scheduled_at) = body.scheduled_at {
-        if scheduled_at <= Utc::now() {
+    if let Some(scheduled_at) = body.scheduled_at
+        && scheduled_at <= Utc::now() {
             metrics::counter!("nexus_scheduled_messages_requests_total", "route" => "update", "outcome" => "invalid_time").increment(1);
             return Err(NexusError::Validation {
                 message: "scheduled_at must be in the future".into(),
             });
         }
-    }
 
     // Fetch existing — must be owned and pending
     let existing: Option<ScheduledRow> = sqlx::query_as(
@@ -289,7 +299,9 @@ async fn update_scheduled(
         Some(r) => ScheduledMessage::try_from(r)?,
         None => {
             metrics::counter!("nexus_scheduled_messages_requests_total", "route" => "update", "outcome" => "not_found").increment(1);
-            return Err(NexusError::NotFound { resource: "Scheduled message".into() });
+            return Err(NexusError::NotFound {
+                resource: "Scheduled message".into(),
+            });
         }
     };
 
@@ -350,7 +362,9 @@ async fn cancel_scheduled(
 
     if result.rows_affected() == 0 {
         metrics::counter!("nexus_scheduled_messages_requests_total", "route" => "cancel", "outcome" => "not_found").increment(1);
-        return Err(NexusError::NotFound { resource: "Scheduled message".into() });
+        return Err(NexusError::NotFound {
+            resource: "Scheduled message".into(),
+        });
     }
 
     metrics::counter!("nexus_scheduled_messages_requests_total", "route" => "cancel", "outcome" => "ok").increment(1);

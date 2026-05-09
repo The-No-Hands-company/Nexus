@@ -9,10 +9,10 @@
 //! POST   /channels/:id/digests                        — Save a new digest
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, Query, State},
     middleware,
     routing::get,
-    Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_common::models::collaboration::{AiPreferences, ChannelDigest};
@@ -21,7 +21,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -33,7 +33,9 @@ pub fn router() -> Router<Arc<AppState>> {
             "/channels/{channel_id}/digests",
             get(list_digests).post(save_digest),
         )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ── Request types ─────────────────────────────────────────────────────────────
@@ -87,13 +89,12 @@ async fn update_preferences(
     Extension(ctx): Extension<AuthContext>,
     Json(body): Json<UpdatePrefsRequest>,
 ) -> NexusResult<Json<AiPreferences>> {
-    if let Some(ref interval) = body.digest_interval {
-        if !matches!(interval.as_str(), "daily" | "weekly") {
+    if let Some(ref interval) = body.digest_interval
+        && !matches!(interval.as_str(), "daily" | "weekly") {
             return Err(NexusError::Validation {
                 message: "digest_interval must be 'daily' or 'weekly'".into(),
             });
         }
-    }
 
     let row = sqlx::query_as::<_, AiPreferences>(
         "INSERT INTO ai_preferences (user_id) VALUES ($1) \

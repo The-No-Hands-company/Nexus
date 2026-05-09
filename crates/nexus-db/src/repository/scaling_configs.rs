@@ -43,34 +43,24 @@ pub async fn upsert_scaling_config(
         .await
 }
 
-pub async fn list_scaling_configs(
-    pool: &AnyPool,
-) -> Result<Vec<ScalingConfig>, sqlx::Error> {
-    let q = format!(
-        "SELECT {SCALING_CONFIG_COLS} FROM scaling_configs ORDER BY region, instance_id"
-    );
-    sqlx::query_as::<_, ScalingConfig>(&q)
-        .fetch_all(pool)
-        .await
+pub async fn list_scaling_configs(pool: &AnyPool) -> Result<Vec<ScalingConfig>, sqlx::Error> {
+    let q =
+        format!("SELECT {SCALING_CONFIG_COLS} FROM scaling_configs ORDER BY region, instance_id");
+    sqlx::query_as::<_, ScalingConfig>(&q).fetch_all(pool).await
 }
 
 pub async fn get_scaling_config(
     pool: &AnyPool,
     id: Uuid,
 ) -> Result<Option<ScalingConfig>, sqlx::Error> {
-    let q = format!(
-        "SELECT {SCALING_CONFIG_COLS} FROM scaling_configs WHERE id = $1"
-    );
+    let q = format!("SELECT {SCALING_CONFIG_COLS} FROM scaling_configs WHERE id = $1");
     sqlx::query_as::<_, ScalingConfig>(&q)
         .bind(id.to_string())
         .fetch_optional(pool)
         .await
 }
 
-pub async fn delete_scaling_config(
-    pool: &AnyPool,
-    id: Uuid,
-) -> Result<(), sqlx::Error> {
+pub async fn delete_scaling_config(pool: &AnyPool, id: Uuid) -> Result<(), sqlx::Error> {
     sqlx::query("DELETE FROM scaling_configs WHERE id = $1")
         .bind(id.to_string())
         .execute(pool)

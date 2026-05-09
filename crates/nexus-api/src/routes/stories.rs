@@ -9,10 +9,10 @@
 //! GET    /stories/:id/viewers     — List viewers (author only)
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, State},
     middleware,
     routing::{get, post},
-    Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_common::snowflake;
@@ -21,7 +21,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -31,7 +31,9 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/stories/{id}", get(get_story).delete(delete_story))
         .route("/stories/{id}/view", post(record_view))
         .route("/stories/{id}/viewers", get(list_viewers))
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ── Request / Response ────────────────────────────────────────────────────────
@@ -74,7 +76,7 @@ async fn create_story(
             message: "visibility must be friends, server, or everyone".into(),
         });
     }
-    let duration_hours = body.duration_hours.unwrap_or(24).max(1).min(72);
+    let duration_hours = body.duration_hours.unwrap_or(24).clamp(1, 72);
     let text_style_str = body
         .text_style
         .as_ref()

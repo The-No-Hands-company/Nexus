@@ -8,8 +8,8 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 use uuid::Uuid;
 
-use crate::state::AppState;
 use super::api_client;
+use crate::state::AppState;
 
 // ─── Client-side types ────────────────────────────────────────────────────────
 
@@ -48,7 +48,9 @@ pub async fn list_server_bots(
     let session = state.session_snapshot();
     let (client, base_url) = api_client(&session).map_err(|e| e.to_string())?;
     let resp = client
-        .get(format!("{base_url}/api/v1/servers/{server_id}/integrations"))
+        .get(format!(
+            "{base_url}/api/v1/servers/{server_id}/integrations"
+        ))
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -57,7 +59,9 @@ pub async fn list_server_bots(
         let msg = resp.text().await.unwrap_or_default();
         return Err(format!("Failed to list bots: {msg}"));
     }
-    resp.json::<Vec<BotInstall>>().await.map_err(|e| e.to_string())
+    resp.json::<Vec<BotInstall>>()
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Install a bot into a server by its application UUID.
@@ -78,7 +82,9 @@ pub async fn install_bot(
     });
 
     let resp = client
-        .post(format!("{base_url}/api/v1/servers/{server_id}/integrations"))
+        .post(format!(
+            "{base_url}/api/v1/servers/{server_id}/integrations"
+        ))
         .json(&body)
         .send()
         .await
@@ -101,7 +107,9 @@ pub async fn uninstall_bot(
     let session = state.session_snapshot();
     let (client, base_url) = api_client(&session).map_err(|e| e.to_string())?;
     let resp = client
-        .delete(format!("{base_url}/api/v1/servers/{server_id}/integrations/{bot_id}"))
+        .delete(format!(
+            "{base_url}/api/v1/servers/{server_id}/integrations/{bot_id}"
+        ))
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -135,6 +143,9 @@ pub async fn get_public_bot_info(
         let msg = resp.text().await.unwrap_or_default();
         return Err(format!("Failed to fetch bot info: {msg}"));
     }
-    let info = resp.json::<PublicBotInfo>().await.map_err(|e| e.to_string())?;
+    let info = resp
+        .json::<PublicBotInfo>()
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(Some(info))
 }

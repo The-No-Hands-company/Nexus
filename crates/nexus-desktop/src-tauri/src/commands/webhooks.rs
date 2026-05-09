@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 use uuid::Uuid;
 
-use crate::state::AppState;
 use super::api_client;
+use crate::state::AppState;
 
 /// Webhook type.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -82,10 +82,7 @@ pub async fn create_incoming_webhook(
 
 /// Delete a webhook.
 #[tauri::command]
-pub async fn delete_webhook(
-    state: State<'_, AppState>,
-    webhook_id: Uuid,
-) -> Result<(), String> {
+pub async fn delete_webhook(state: State<'_, AppState>, webhook_id: Uuid) -> Result<(), String> {
     let session = state.session_snapshot();
     let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
     let resp = client

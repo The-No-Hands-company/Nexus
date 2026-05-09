@@ -33,10 +33,7 @@ pub async fn create_caption(
 }
 
 /// Retrieve a caption by ID.
-pub async fn find_by_id(
-    pool: &AnyPool,
-    id: Uuid,
-) -> Result<Option<VoiceCaption>, sqlx::Error> {
+pub async fn find_by_id(pool: &AnyPool, id: Uuid) -> Result<Option<VoiceCaption>, sqlx::Error> {
     let q = format!(
         "SELECT {VOICE_CAPTION_COLS} FROM voice_captions \
          WHERE id = $1"
@@ -84,13 +81,9 @@ pub async fn list_channel_captions(
 }
 
 /// Purge captions older than the given number of hours.
-pub async fn purge_old_captions(
-    pool: &AnyPool,
-    hours: i64,
-) -> Result<u64, sqlx::Error> {
-    let q = format!(
-        "DELETE FROM voice_captions WHERE created_at < NOW() - interval '{hours} hours'"
-    );
+pub async fn purge_old_captions(pool: &AnyPool, hours: i64) -> Result<u64, sqlx::Error> {
+    let q =
+        format!("DELETE FROM voice_captions WHERE created_at < NOW() - interval '{hours} hours'");
     let res = sqlx::query(&q).execute(pool).await?;
     Ok(res.rows_affected())
 }

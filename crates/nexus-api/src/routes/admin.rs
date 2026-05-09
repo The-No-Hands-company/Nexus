@@ -9,10 +9,10 @@
 //!   DELETE /admin/servers/:id    — permanently delete a server
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, Query, State},
     middleware,
     routing::{delete, get, patch},
-    Json, Router,
 };
 use nexus_common::{
     error::{NexusError, NexusResult},
@@ -24,7 +24,7 @@ use sqlx::Row;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 use nexus_common::snowflake;
 
 pub fn router() -> Router<Arc<AppState>> {
@@ -82,29 +82,41 @@ async fn get_overview(
     require_instance_admin(&state.db.pool, auth.user_id).await?;
     let pool = &state.db.pool;
 
-    let total_users: i64 = sqlx::query(
-        "SELECT COUNT(*) AS c FROM users WHERE is_remote = FALSE")
-        .fetch_one(pool).await
-        .map(|r| r.try_get("c").unwrap_or(0)).unwrap_or(0);
+    let total_users: i64 = sqlx::query("SELECT COUNT(*) AS c FROM users WHERE is_remote = FALSE")
+        .fetch_one(pool)
+        .await
+        .map(|r| r.try_get("c").unwrap_or(0))
+        .unwrap_or(0);
 
     let active_users_24h: i64 = sqlx::query(
         "SELECT COUNT(*) AS c FROM users \
-         WHERE is_remote = FALSE AND updated_at > NOW() - INTERVAL '24 hours'")
-        .fetch_one(pool).await
-        .map(|r| r.try_get("c").unwrap_or(0)).unwrap_or(0);
+         WHERE is_remote = FALSE AND updated_at > NOW() - INTERVAL '24 hours'",
+    )
+    .fetch_one(pool)
+    .await
+    .map(|r| r.try_get("c").unwrap_or(0))
+    .unwrap_or(0);
 
-    let suspended_users: i64 = sqlx::query(
-        &format!("SELECT COUNT(*) AS c FROM users WHERE flags & {} != 0", user_flags::SUSPENDED))
-        .fetch_one(pool).await
-        .map(|r| r.try_get("c").unwrap_or(0)).unwrap_or(0);
+    let suspended_users: i64 = sqlx::query(&format!(
+        "SELECT COUNT(*) AS c FROM users WHERE flags & {} != 0",
+        user_flags::SUSPENDED
+    ))
+    .fetch_one(pool)
+    .await
+    .map(|r| r.try_get("c").unwrap_or(0))
+    .unwrap_or(0);
 
     let total_servers: i64 = sqlx::query("SELECT COUNT(*) AS c FROM servers")
-        .fetch_one(pool).await
-        .map(|r| r.try_get("c").unwrap_or(0)).unwrap_or(0);
+        .fetch_one(pool)
+        .await
+        .map(|r| r.try_get("c").unwrap_or(0))
+        .unwrap_or(0);
 
     let total_messages: i64 = sqlx::query("SELECT COUNT(*) AS c FROM messages")
-        .fetch_one(pool).await
-        .map(|r| r.try_get("c").unwrap_or(0)).unwrap_or(0);
+        .fetch_one(pool)
+        .await
+        .map(|r| r.try_get("c").unwrap_or(0))
+        .unwrap_or(0);
 
     let voice_connections = state.voice_state.stats().await.total_connections;
     let uptime_secs = state.started_at.elapsed().as_secs();
@@ -136,22 +148,30 @@ async fn update_user_flags(
     require_instance_admin(&state.db.pool, auth.user_id).await?;
 
     match (body.set_flags, body.clear_flags) {
-        (None, None) => return Err(NexusError::Validation {
-            message: "Provide set_flags or clear_flags".into(),
-        }),
+        (None, None) => {
+            return Err(NexusError::Validation {
+                message: "Provide set_flags or clear_flags".into(),
+            });
+        }
         (Some(set), None) => {
             sqlx::query(
-                "UPDATE users SET flags = flags | $1, updated_at = NOW() WHERE id = $2::uuid")
-                .bind(set).bind(user_id.to_string())
-                .execute(&state.db.pool).await
-                .map_err(|e| NexusError::Internal(e.into()))?;
+                "UPDATE users SET flags = flags | $1, updated_at = NOW() WHERE id = $2::uuid",
+            )
+            .bind(set)
+            .bind(user_id.to_string())
+            .execute(&state.db.pool)
+            .await
+            .map_err(|e| NexusError::Internal(e.into()))?;
         }
         (None, Some(clear)) => {
             sqlx::query(
-                "UPDATE users SET flags = flags & ~$1, updated_at = NOW() WHERE id = $2::uuid")
-                .bind(clear).bind(user_id.to_string())
-                .execute(&state.db.pool).await
-                .map_err(|e| NexusError::Internal(e.into()))?;
+                "UPDATE users SET flags = flags & ~$1, updated_at = NOW() WHERE id = $2::uuid",
+            )
+            .bind(clear)
+            .bind(user_id.to_string())
+            .execute(&state.db.pool)
+            .await
+            .map_err(|e| NexusError::Internal(e.into()))?;
         }
         (Some(set), Some(clear)) => {
             sqlx::query(
@@ -178,9 +198,10 @@ async fn update_user_flags(
             "clear_flags": body.clear_flags,
         }),
         None,
-        None,  // IP address not available here, would need headers
-        None,  // user_agent
-    ).await;
+        None, // IP address not available here, would need headers
+        None, // user_agent
+    )
+    .await;
 
     Ok(Json(serde_json::json!({ "updated": true })))
 }
@@ -195,12 +216,15 @@ async fn delete_server(
 
     let affected = sqlx::query("DELETE FROM servers WHERE id = $1::uuid")
         .bind(server_id.to_string())
-        .execute(&state.db.pool).await
+        .execute(&state.db.pool)
+        .await
         .map_err(|e| NexusError::Internal(e.into()))?
         .rows_affected();
 
     if affected == 0 {
-        return Err(NexusError::NotFound { resource: "Server".into() });
+        return Err(NexusError::NotFound {
+            resource: "Server".into(),
+        });
     }
 
     // Write audit log entry
@@ -214,7 +238,8 @@ async fn delete_server(
         Some(server_id),
         &serde_json::json!({ "affected_rows": affected }),
         Some("Instance admin permanently deleted server and all associated data"),
-    ).await;
+    )
+    .await;
 
     tracing::warn!(admin = %auth.user_id, server = %server_id, "Admin deleted server");
     Ok(Json(serde_json::json!({ "deleted": true })))
@@ -224,15 +249,17 @@ async fn delete_server(
 
 #[derive(Deserialize)]
 struct InstanceAuditQuery {
-    action:      Option<String>,
-    actor_id:    Option<Uuid>,
+    action: Option<String>,
+    actor_id: Option<Uuid>,
     target_type: Option<String>,
     #[serde(default = "default_audit_limit")]
-    limit:  i64,
+    limit: i64,
     #[serde(default)]
     offset: i64,
 }
-fn default_audit_limit() -> i64 { 100 }
+fn default_audit_limit() -> i64 {
+    100
+}
 
 /// GET /admin/instance-audit — recent instance-wide admin actions.
 ///
@@ -258,17 +285,24 @@ async fn get_instance_audit(
     .await
     .map_err(NexusError::Database)?;
 
-    let items: Vec<serde_json::Value> = entries.iter().map(|e| serde_json::json!({
-        "id":          e.id,
-        "actor_id":    e.actor_id,
-        "action":      e.action,
-        "target_type": e.target_type,
-        "target_id":   e.target_id,
-        "changes":     e.changes,
-        "reason":      e.reason,
-        "ip_address":  e.ip_address,
-        "created_at":  e.created_at,
-    })).collect();
+    let items: Vec<serde_json::Value> = entries
+        .iter()
+        .map(|e| {
+            serde_json::json!({
+                "id":          e.id,
+                "actor_id":    e.actor_id,
+                "action":      e.action,
+                "target_type": e.target_type,
+                "target_id":   e.target_id,
+                "changes":     e.changes,
+                "reason":      e.reason,
+                "ip_address":  e.ip_address,
+                "created_at":  e.created_at,
+            })
+        })
+        .collect();
 
-    Ok(Json(serde_json::json!({ "entries": items, "total": items.len() })))
+    Ok(Json(
+        serde_json::json!({ "entries": items, "total": items.len() }),
+    ))
 }

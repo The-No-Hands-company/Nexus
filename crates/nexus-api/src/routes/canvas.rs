@@ -9,15 +9,15 @@
 //! POST   /channels/{id}/canvas/blocks/reorder        — update positions
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, State},
     middleware,
     routing::{get, post, put},
-    Json, Router,
 };
 use chrono::{DateTime, Utc};
 use nexus_common::{
     error::{NexusError, NexusResult},
-    gateway_event::{event_types, GatewayEvent},
+    gateway_event::{GatewayEvent, event_types},
     permissions::Permissions,
 };
 use nexus_db::repository::{members, roles, servers};
@@ -25,7 +25,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -67,7 +67,7 @@ struct CanvasBlockRow {
     id: String,
     channel_id: String,
     block_type: String,
-    content: String,   // jsonb cast to ::text
+    content: String, // jsonb cast to ::text
     position: i32,
     updated_by: Option<String>,
     updated_at: String, // timestamptz cast to ::text
@@ -102,8 +102,14 @@ impl TryFrom<CanvasBlockRow> for CanvasBlock {
     type Error = NexusError;
     fn try_from(r: CanvasBlockRow) -> Result<Self, Self::Error> {
         Ok(CanvasBlock {
-            id: r.id.parse().map_err(|_| NexusError::Internal(anyhow::anyhow!("invalid block id")))?,
-            channel_id: r.channel_id.parse().map_err(|_| NexusError::Internal(anyhow::anyhow!("invalid channel_id")))?,
+            id: r
+                .id
+                .parse()
+                .map_err(|_| NexusError::Internal(anyhow::anyhow!("invalid block id")))?,
+            channel_id: r
+                .channel_id
+                .parse()
+                .map_err(|_| NexusError::Internal(anyhow::anyhow!("invalid channel_id")))?,
             block_type: r.block_type,
             content: serde_json::from_str(&r.content)
                 .map_err(|e| NexusError::Internal(anyhow::anyhow!("invalid block content: {e}")))?,
@@ -146,13 +152,12 @@ pub struct BlockPosition {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn require_channel_server(state: &AppState, channel_id: Uuid) -> NexusResult<Uuid> {
-    let row: Option<(String,)> = sqlx::query_as(
-        "SELECT server_id::text FROM channels WHERE id = $1::uuid",
-    )
-    .bind(channel_id.to_string())
-    .fetch_optional(&state.db.pool)
-    .await
-    .map_err(NexusError::Database)?;
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT server_id::text FROM channels WHERE id = $1::uuid")
+            .bind(channel_id.to_string())
+            .fetch_optional(&state.db.pool)
+            .await
+            .map_err(NexusError::Database)?;
 
     row.and_then(|(s,)| s.parse::<Uuid>().ok())
         .ok_or_else(|| NexusError::NotFound {
@@ -188,12 +193,14 @@ async fn require_write_access(
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
 
-    let base = all_roles.iter()
+    let base = all_roles
+        .iter()
         .find(|r| r.is_default)
         .map(|r| Permissions::from_bits_truncate(r.permissions))
         .unwrap_or_else(Permissions::empty);
 
-    let effective = all_roles.iter()
+    let effective = all_roles
+        .iter()
         .filter(|r| !r.is_default && member.roles.contains(&r.id))
         .map(|r| Permissions::from_bits_truncate(r.permissions))
         .fold(base, |acc, p| acc | p);
@@ -255,13 +262,12 @@ async fn upsert_block(
     let position = if let Some(p) = body.position {
         p
     } else {
-        let max_row: Option<(Option<i32>,)> = sqlx::query_as(
-            "SELECT MAX(position) FROM canvas_blocks WHERE channel_id = $1::uuid",
-        )
-        .bind(channel_id.to_string())
-        .fetch_optional(&state.db.pool)
-        .await
-        .map_err(NexusError::Database)?;
+        let max_row: Option<(Option<i32>,)> =
+            sqlx::query_as("SELECT MAX(position) FROM canvas_blocks WHERE channel_id = $1::uuid")
+                .bind(channel_id.to_string())
+                .fetch_optional(&state.db.pool)
+                .await
+                .map_err(NexusError::Database)?;
         max_row.and_then(|(v,)| v).unwrap_or(0) + 1000
     };
 
@@ -311,14 +317,13 @@ async fn delete_block(
     let server_id = require_channel_server(&state, channel_id).await?;
     require_write_access(&state, auth.user_id, server_id, true).await?;
 
-    let result = sqlx::query(
-        "DELETE FROM canvas_blocks WHERE id = $1::uuid AND channel_id = $2::uuid",
-    )
-    .bind(block_id.to_string())
-    .bind(channel_id.to_string())
-    .execute(&state.db.pool)
-    .await
-    .map_err(NexusError::Database)?;
+    let result =
+        sqlx::query("DELETE FROM canvas_blocks WHERE id = $1::uuid AND channel_id = $2::uuid")
+            .bind(block_id.to_string())
+            .bind(channel_id.to_string())
+            .execute(&state.db.pool)
+            .await
+            .map_err(NexusError::Database)?;
 
     if result.rows_affected() == 0 {
         return Err(NexusError::NotFound {

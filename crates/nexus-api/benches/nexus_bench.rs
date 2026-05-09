@@ -25,7 +25,9 @@ fn bench_message_serialise(c: &mut Criterion) {
     });
 
     c.bench_function("message/serialise", |b| {
-        b.iter(|| serde_json::to_string(black_box(&msg)).unwrap())
+        b.iter(|| {
+            let _ = serde_json::to_string(black_box(&msg)).unwrap();
+        });
     });
 }
 
@@ -46,7 +48,7 @@ fn bench_message_deserialise(c: &mut Criterion) {
     c.bench_function("message/deserialise", |b| {
         b.iter(|| {
             let _: serde_json::Value = serde_json::from_str(black_box(raw)).unwrap();
-        })
+        });
     });
 }
 
@@ -54,21 +56,28 @@ fn bench_message_deserialise(c: &mut Criterion) {
 
 fn bench_uuid_v7(c: &mut Criterion) {
     c.bench_function("id/uuid_v7_generate", |b| {
-        b.iter(|| uuid::Uuid::now_v7())
+        b.iter(|| {
+            let _ = uuid::Uuid::now_v7();
+        });
     });
 }
 
 fn bench_uuid_parse(c: &mut Criterion) {
     let s = "01929a5e-6e1b-7000-9c4a-dead00000001";
     c.bench_function("id/uuid_parse", |b| {
-        b.iter(|| uuid::Uuid::parse_str(black_box(s)).unwrap())
+        b.iter(|| {
+            let _ = uuid::Uuid::parse_str(black_box(s)).unwrap();
+        });
     });
 }
 
 // ── Argon2 password hashing ───────────────────────────────────────────────────
 
 fn bench_argon2_hash(c: &mut Criterion) {
-    use argon2::{Argon2, PasswordHasher, password_hash::{SaltString, rand_core::OsRng}};
+    use argon2::{
+        Argon2, PasswordHasher,
+        password_hash::{SaltString, rand_core::OsRng},
+    };
 
     // Use a less-intensive config for benchmarking (still realistic for dev)
     c.bench_function("auth/argon2_hash", |b| {
@@ -77,13 +86,16 @@ fn bench_argon2_hash(c: &mut Criterion) {
             Argon2::default()
                 .hash_password(black_box(b"hunter2-password-bench"), &salt)
                 .unwrap()
-                .to_string()
-        })
+                .to_string();
+        });
     });
 }
 
 fn bench_argon2_verify(c: &mut Criterion) {
-    use argon2::{Argon2, PasswordHasher, PasswordVerifier, password_hash::{SaltString, rand_core::OsRng}};
+    use argon2::{
+        Argon2, PasswordHasher, PasswordVerifier,
+        password_hash::{SaltString, rand_core::OsRng},
+    };
 
     let salt = SaltString::generate(&mut OsRng);
     let hash = Argon2::default()
@@ -97,8 +109,8 @@ fn bench_argon2_verify(c: &mut Criterion) {
         b.iter(|| {
             Argon2::default()
                 .verify_password(black_box(b"hunter2-password-bench"), &parsed)
-                .unwrap()
-        })
+                .unwrap();
+        });
     });
 }
 
@@ -124,7 +136,9 @@ fn bench_jwt_encode(c: &mut Criterion) {
     };
 
     c.bench_function("auth/jwt_encode", |b| {
-        b.iter(|| encode(black_box(&header), black_box(&claims), black_box(&key)).unwrap())
+        b.iter(|| {
+            let _ = encode(black_box(&header), black_box(&claims), black_box(&key)).unwrap();
+        });
     });
 }
 
@@ -154,8 +168,8 @@ fn bench_jwt_decode(c: &mut Criterion) {
 
     c.bench_function("auth/jwt_decode", |b| {
         b.iter(|| {
-            decode::<Claims>(black_box(&token), black_box(&dec_key), &validation).unwrap()
-        })
+            let _ = decode::<Claims>(black_box(&token), black_box(&dec_key), &validation).unwrap();
+        });
     });
 }
 
@@ -173,7 +187,7 @@ fn bench_message_size_scaling(c: &mut Criterion) {
         });
 
         group.bench_with_input(BenchmarkId::from_parameter(size), &msg, |b, m| {
-            b.iter(|| serde_json::to_string(black_box(m)).unwrap())
+            b.iter(|| serde_json::to_string(black_box(m)).unwrap());
         });
     }
 
@@ -189,11 +203,7 @@ criterion_group!(
     bench_message_size_scaling,
 );
 
-criterion_group!(
-    ids,
-    bench_uuid_v7,
-    bench_uuid_parse,
-);
+criterion_group!(ids, bench_uuid_v7, bench_uuid_parse);
 
 criterion_group!(
     auth,

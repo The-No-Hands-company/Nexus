@@ -64,10 +64,7 @@ pub async fn list_translations(
 }
 
 /// Delete cached translations for a message (e.g. after message edit).
-pub async fn delete_translations(
-    pool: &AnyPool,
-    message_id: Uuid,
-) -> Result<bool, sqlx::Error> {
+pub async fn delete_translations(pool: &AnyPool, message_id: Uuid) -> Result<bool, sqlx::Error> {
     let res = sqlx::query("DELETE FROM message_translations WHERE message_id = $1")
         .bind(message_id.to_string())
         .execute(pool)

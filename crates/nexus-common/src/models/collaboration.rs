@@ -102,6 +102,7 @@ pub struct ServerStorageQuota {
 // ── 16-04: AI-Assist Preferences ──────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct AiPreferences {
     pub user_id: Uuid,
     pub summaries_enabled: bool,

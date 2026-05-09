@@ -1,7 +1,7 @@
 //! Redis connection pool and helpers.
 
-use redis::aio::ConnectionManager;
 use redis::AsyncCommands;
+use redis::aio::ConnectionManager;
 
 /// Set a key with expiration (for sessions, rate limits, etc.).
 pub async fn set_ex(
@@ -14,7 +14,10 @@ pub async fn set_ex(
 }
 
 /// Get a value by key.
-pub async fn get(conn: &mut ConnectionManager, key: &str) -> Result<Option<String>, redis::RedisError> {
+pub async fn get(
+    conn: &mut ConnectionManager,
+    key: &str,
+) -> Result<Option<String>, redis::RedisError> {
     conn.get(key).await
 }
 

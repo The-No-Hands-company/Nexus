@@ -52,12 +52,8 @@ pub async fn list_sfu_nodes(
             .fetch_all(pool)
             .await
     } else {
-        let q = format!(
-            "SELECT {SFU_NODE_COLS} FROM sfu_nodes ORDER BY region, current_load ASC"
-        );
-        sqlx::query_as::<_, SfuNode>(&q)
-            .fetch_all(pool)
-            .await
+        let q = format!("SELECT {SFU_NODE_COLS} FROM sfu_nodes ORDER BY region, current_load ASC");
+        sqlx::query_as::<_, SfuNode>(&q).fetch_all(pool).await
     }
 }
 
@@ -66,9 +62,7 @@ pub async fn update_sfu_load(
     id: Uuid,
     current_load: i32,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "UPDATE sfu_nodes SET current_load = $2, last_heartbeat = now() WHERE id = $1"
-    )
+    sqlx::query("UPDATE sfu_nodes SET current_load = $2, last_heartbeat = now() WHERE id = $1")
         .bind(id.to_string())
         .bind(current_load)
         .execute(pool)

@@ -343,9 +343,7 @@ pub async fn upsert_migration_guide(
         .await
 }
 
-pub async fn list_migration_guides(
-    pool: &AnyPool,
-) -> Result<Vec<MigrationGuide>, sqlx::Error> {
+pub async fn list_migration_guides(pool: &AnyPool) -> Result<Vec<MigrationGuide>, sqlx::Error> {
     let q = format!(
         "SELECT {MIGRATION_GUIDE_COLS} FROM migration_guides WHERE is_published = TRUE ORDER BY from_platform"
     );

@@ -6,7 +6,6 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 pub enum FederationError {
     // ── Key management ──────────────────────────────────────────────────────
-
     #[error("No signing key found for key ID '{0}'")]
     KeyNotFound(String),
 
@@ -17,7 +16,6 @@ pub enum FederationError {
     KeyLoad(String),
 
     // ── Signature verification ───────────────────────────────────────────────
-
     #[error("Missing Authorization header on federated request")]
     MissingAuthHeader,
 
@@ -31,7 +29,6 @@ pub enum FederationError {
     ClockSkew,
 
     // ── Discovery ───────────────────────────────────────────────────────────
-
     #[error("Failed to resolve server '{0}': {1}")]
     DiscoveryFailed(String, String),
 
@@ -39,7 +36,6 @@ pub enum FederationError {
     BadWellKnown(String),
 
     // ── Remote communication ─────────────────────────────────────────────────
-
     #[error("HTTP error communicating with remote server '{0}': {1}")]
     RemoteHttp(String, String),
 
@@ -50,7 +46,6 @@ pub enum FederationError {
     RemoteUnreachable(String),
 
     // ── General ─────────────────────────────────────────────────────────────
-
     #[error("Serialisation error: {0}")]
     Serialisation(#[from] serde_json::Error),
 
@@ -63,7 +58,10 @@ pub enum FederationError {
 
 impl From<reqwest::Error> for FederationError {
     fn from(e: reqwest::Error) -> Self {
-        let server = e.url().map(|u| u.host_str().unwrap_or("?").to_owned()).unwrap_or_default();
+        let server = e
+            .url()
+            .map(|u| u.host_str().unwrap_or("?").to_owned())
+            .unwrap_or_default();
         FederationError::RemoteHttp(server, e.to_string())
     }
 }
@@ -111,8 +109,10 @@ mod tests {
     #[test]
     fn clock_skew_error_has_descriptive_message() {
         let s = FederationError::ClockSkew.to_string();
-        assert!(s.contains("30") || s.contains("skew") || s.contains("timestamp"),
-            "expected clock-skew description, got: {s}");
+        assert!(
+            s.contains("30") || s.contains("skew") || s.contains("timestamp"),
+            "expected clock-skew description, got: {s}"
+        );
     }
 
     #[test]

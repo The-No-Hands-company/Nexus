@@ -15,14 +15,16 @@
 //! - Local filesystem uploads (`./data/uploads/`)
 //! - No Docker, no MinIO, no MeiliSearch required.
 
+#![allow(clippy::pedantic)]
+
 use clap::{Parser, Subcommand};
 use metrics_exporter_prometheus::PrometheusBuilder;
-use nexus_api::{build_router, AppState};
+use nexus_api::{AppState, build_router};
 use nexus_common::gateway_event::GatewayEvent;
 use nexus_db::{
+    Database,
     search::SearchClient,
     storage::{StorageClient, StorageConfig as DbStorageConfig},
-    Database,
 };
 use nexus_federation::{FederationClient, KeyManager};
 use nexus_gateway::GatewayState;
@@ -108,8 +110,9 @@ async fn main() -> anyhow::Result<()> {
         Command::GenVapidKey => {
             let private_key = nexus_api::push_sender::PushSender::generate_private_key();
             let subject = "mailto:admin@your-domain.com";
-            let sender = nexus_api::push_sender::PushSender::from_private_key(&private_key, subject)
-                .expect("freshly generated key must be valid");
+            let sender =
+                nexus_api::push_sender::PushSender::from_private_key(&private_key, subject)
+                    .expect("freshly generated key must be valid");
 
             println!("# Add to your .env file:");
             println!("NEXUS__PUSH__VAPID_PRIVATE_KEY={private_key}");
@@ -249,8 +252,8 @@ async fn run_server(
     let voice_state = voice_server.state.voice_state.clone();
 
     // ── Storage ───────────────────────────────────────────────────────────────
-    let public_base = std::env::var("NEXUS_PUBLIC_URL")
-        .unwrap_or_else(|_| format!("http://127.0.0.1:{port}"));
+    let public_base =
+        std::env::var("NEXUS_PUBLIC_URL").unwrap_or_else(|_| format!("http://127.0.0.1:{port}"));
 
     let storage = if lite || config.storage.endpoint.is_empty() {
         let data_dir = &config.storage.data_dir;
@@ -278,7 +281,12 @@ async fn run_server(
         s
     } else if lite {
         let data_dir = &config.storage.data_dir;
-        tracing::info!(subsystem = "search", backend = "tantivy", mode = "embedded", "search ready");
+        tracing::info!(
+            subsystem = "search",
+            backend = "tantivy",
+            mode = "embedded",
+            "search ready"
+        );
         SearchClient::new_tantivy(data_dir)?
     } else {
         SearchClient::disabled()
@@ -399,12 +407,10 @@ async fn run_server(
 
             #[cfg(unix)]
             let sigterm = async {
-                tokio::signal::unix::signal(
-                    tokio::signal::unix::SignalKind::terminate(),
-                )
-                .expect("failed to install SIGTERM handler")
-                .recv()
-                .await;
+                tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                    .expect("failed to install SIGTERM handler")
+                    .recv()
+                    .await;
             };
             #[cfg(not(unix))]
             let sigterm = std::future::pending::<()>();
@@ -430,8 +436,8 @@ async fn run_server(
     ) {
         // NEXUS_CLOUD_UPSTREAM_URL overrides PUBLIC_URL for Cloud portal iframe embedding
         // (e.g. point at the web frontend on 5174 rather than the raw API on 8080)
-        let upstream_url = std::env::var("NEXUS_CLOUD_UPSTREAM_URL")
-            .unwrap_or_else(|_| public_url.clone());
+        let upstream_url =
+            std::env::var("NEXUS_CLOUD_UPSTREAM_URL").unwrap_or_else(|_| public_url.clone());
         let api_key = std::env::var("NEXUS_CLOUD_API_KEY").unwrap_or_default();
         {
             let cu = cloud_url.clone();
@@ -580,9 +586,7 @@ async fn run_server(
         let pool = db.pool.clone();
         let mut sweep_rx = shutdown_tx.subscribe();
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(
-                tokio::time::Duration::from_secs(5 * 60),
-            );
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5 * 60));
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 tokio::select! {
@@ -621,9 +625,7 @@ async fn run_server(
         let pool = db.pool.clone();
         let mut deletion_rx = shutdown_tx.subscribe();
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(
-                tokio::time::Duration::from_secs(60 * 60),
-            );
+            let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60 * 60));
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 tokio::select! {
@@ -818,10 +820,10 @@ async fn run_server(
                                     if search.sync_message_delete(&pool, message_id).await.is_ok() {
                                         search_deleted += 1;
                                     }
-                                    if scylla_enabled {
-                                        if nexus_db::repository::scylla_outbox::enqueue_delete_message(&pool, message_id).await.is_ok() {
-                                            scylla_enqueued += 1;
-                                        }
+                                    if scylla_enabled
+                                        && nexus_db::repository::scylla_outbox::enqueue_delete_message(&pool, message_id).await.is_ok()
+                                    {
+                                        scylla_enqueued += 1;
                                     }
 
                                     let _ = gw_tx.send(nexus_common::gateway_event::GatewayEvent {
@@ -930,16 +932,18 @@ async fn run_server(
 
     // Pre-subscribe each server before spawning so they receive the signal even
     // if it fires before the async block starts.
-    let api_shutdown_rx     = shutdown_tx.subscribe();
+    let api_shutdown_rx = shutdown_tx.subscribe();
     let gateway_shutdown_rx = shutdown_tx.subscribe();
-    let voice_shutdown_rx   = shutdown_tx.subscribe();
+    let voice_shutdown_rx = shutdown_tx.subscribe();
 
     tokio::try_join!(
         async {
             let listener = tokio::net::TcpListener::bind(api_addr).await?;
             let mut rx = api_shutdown_rx;
             axum::serve(listener, api_router)
-                .with_graceful_shutdown(async move { let _ = rx.recv().await; })
+                .with_graceful_shutdown(async move {
+                    let _ = rx.recv().await;
+                })
                 .await?;
             tracing::info!(server = "api", "server drained and stopped");
             Ok::<_, anyhow::Error>(())
@@ -948,7 +952,9 @@ async fn run_server(
             let listener = tokio::net::TcpListener::bind(gateway_addr).await?;
             let mut rx = gateway_shutdown_rx;
             axum::serve(listener, gateway_router)
-                .with_graceful_shutdown(async move { let _ = rx.recv().await; })
+                .with_graceful_shutdown(async move {
+                    let _ = rx.recv().await;
+                })
                 .await?;
             tracing::info!(server = "gateway", "server drained and stopped");
             Ok::<_, anyhow::Error>(())
@@ -957,7 +963,9 @@ async fn run_server(
             let listener = tokio::net::TcpListener::bind(voice_addr).await?;
             let mut rx = voice_shutdown_rx;
             axum::serve(listener, voice_router)
-                .with_graceful_shutdown(async move { let _ = rx.recv().await; })
+                .with_graceful_shutdown(async move {
+                    let _ = rx.recv().await;
+                })
                 .await?;
             tracing::info!(server = "voice", "server drained and stopped");
             Ok::<_, anyhow::Error>(())
@@ -984,12 +992,11 @@ fn generate_or_load_lite_secret(path: &str) -> anyhow::Result<String> {
         let mut contents = String::new();
         f.read_to_string(&mut contents)?;
         for line in contents.lines() {
-            if let Some(rest) = line.strip_prefix("jwt_secret = \"") {
-                if let Some(secret) = rest.strip_suffix('"') {
-                    if !secret.is_empty() {
-                        return Ok(secret.to_string());
-                    }
-                }
+            if let Some(rest) = line.strip_prefix("jwt_secret = \"")
+                && let Some(secret) = rest.strip_suffix('"')
+                && !secret.is_empty()
+            {
+                return Ok(secret.to_string());
             }
         }
     }

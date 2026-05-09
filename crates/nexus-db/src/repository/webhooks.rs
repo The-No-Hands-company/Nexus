@@ -13,16 +13,31 @@ fn row_to_webhook(row: &sqlx::any::AnyRow) -> Webhook {
         _ => WebhookType::Incoming,
     };
     Webhook {
-        id: row.try_get::<String, _>("id").unwrap_or_default().parse().unwrap_or_default(),
+        id: row
+            .try_get::<String, _>("id")
+            .unwrap_or_default()
+            .parse()
+            .unwrap_or_default(),
         webhook_type,
-        server_id: row.try_get::<Option<String>, _>("server_id").unwrap_or(None).and_then(|s| s.parse().ok()),
-        channel_id: row.try_get::<Option<String>, _>("channel_id").unwrap_or(None).and_then(|s| s.parse().ok()),
-        creator_id: row.try_get::<Option<String>, _>("creator_id").unwrap_or(None).and_then(|s| s.parse().ok()),
+        server_id: row
+            .try_get::<Option<String>, _>("server_id")
+            .unwrap_or(None)
+            .and_then(|s| s.parse().ok()),
+        channel_id: row
+            .try_get::<Option<String>, _>("channel_id")
+            .unwrap_or(None)
+            .and_then(|s| s.parse().ok()),
+        creator_id: row
+            .try_get::<Option<String>, _>("creator_id")
+            .unwrap_or(None)
+            .and_then(|s| s.parse().ok()),
         name: row.try_get("name").unwrap_or_default(),
         avatar: row.try_get("avatar").unwrap_or(None),
         token: row.try_get("token").unwrap_or(None),
         url: row.try_get("url").unwrap_or(None),
-        events: row.try_get::<Option<String>, _>("events").unwrap_or(None)
+        events: row
+            .try_get::<Option<String>, _>("events")
+            .unwrap_or(None)
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default(),
         active: row.try_get("active").unwrap_or(true),
@@ -54,22 +69,18 @@ pub async fn get_webhook_by_token(
 }
 
 pub async fn get_channel_webhooks(pool: &sqlx::AnyPool, channel_id: Uuid) -> Result<Vec<Webhook>> {
-    let rows = sqlx::query(
-        "SELECT * FROM webhooks WHERE channel_id = $1 ORDER BY created_at DESC",
-    )
-    .bind(channel_id.to_string())
-    .fetch_all(pool)
-    .await?;
+    let rows = sqlx::query("SELECT * FROM webhooks WHERE channel_id = $1 ORDER BY created_at DESC")
+        .bind(channel_id.to_string())
+        .fetch_all(pool)
+        .await?;
     Ok(rows.iter().map(row_to_webhook).collect())
 }
 
 pub async fn get_server_webhooks(pool: &sqlx::AnyPool, server_id: Uuid) -> Result<Vec<Webhook>> {
-    let rows = sqlx::query(
-        "SELECT * FROM webhooks WHERE server_id = $1 ORDER BY created_at DESC",
-    )
-    .bind(server_id.to_string())
-    .fetch_all(pool)
-    .await?;
+    let rows = sqlx::query("SELECT * FROM webhooks WHERE server_id = $1 ORDER BY created_at DESC")
+        .bind(server_id.to_string())
+        .fetch_all(pool)
+        .await?;
     Ok(rows.iter().map(row_to_webhook).collect())
 }
 

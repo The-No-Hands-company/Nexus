@@ -4,20 +4,20 @@
 //! POST /servers/:server_id/analytics-snapshots  — Upsert a daily snapshot (system/admin)
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, Query, State},
     middleware,
     routing::get,
-    Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
+use nexus_common::models::Member;
 use nexus_common::models::ecosystem::ServerAnalyticsSnapshot;
 use nexus_db::repository::{analytics_snapshots, members};
-use nexus_common::models::Member;
 use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 // ── Router ────────────────────────────────────────────────────────────────────
 
@@ -27,7 +27,9 @@ pub fn router() -> Router<Arc<AppState>> {
             "/servers/{server_id}/analytics-snapshots",
             get(list_snapshots).post(upsert_snapshot),
         )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ── Request / Query ───────────────────────────────────────────────────────────
@@ -63,7 +65,9 @@ async fn list_snapshots(
     let _member: Option<Member> = members::find_member(&state.db.pool, ctx.user_id, server_id)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
-    if _member.is_none() { return Err(NexusError::Forbidden); }
+    if _member.is_none() {
+        return Err(NexusError::Forbidden);
+    }
 
     let days = q.days.unwrap_or(30).min(365);
 
@@ -84,7 +88,9 @@ async fn upsert_snapshot(
     let _member: Option<Member> = members::find_member(&state.db.pool, ctx.user_id, server_id)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
-    if _member.is_none() { return Err(NexusError::Forbidden); }
+    if _member.is_none() {
+        return Err(NexusError::Forbidden);
+    }
 
     // Basic date format validation
     if chrono::NaiveDate::parse_from_str(&body.period_date, "%Y-%m-%d").is_err() {

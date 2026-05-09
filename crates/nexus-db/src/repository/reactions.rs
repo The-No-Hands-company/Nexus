@@ -62,14 +62,13 @@ pub async fn remove_reaction(
     user_id: Uuid,
     emoji: &str,
 ) -> Result<bool, sqlx::Error> {
-    let result = sqlx::query(
-        "DELETE FROM reactions WHERE message_id = $1 AND user_id = $2 AND emoji = $3",
-    )
-    .bind(message_id.to_string())
-    .bind(user_id.to_string())
-    .bind(emoji)
-    .execute(pool)
-    .await?;
+    let result =
+        sqlx::query("DELETE FROM reactions WHERE message_id = $1 AND user_id = $2 AND emoji = $3")
+            .bind(message_id.to_string())
+            .bind(user_id.to_string())
+            .bind(emoji)
+            .execute(pool)
+            .await?;
     Ok(result.rows_affected() > 0)
 }
 
@@ -79,13 +78,11 @@ pub async fn remove_all_reactions_for_emoji(
     message_id: Uuid,
     emoji: &str,
 ) -> Result<u64, sqlx::Error> {
-    let result = sqlx::query(
-        "DELETE FROM reactions WHERE message_id = $1 AND emoji = $2",
-    )
-    .bind(message_id.to_string())
-    .bind(emoji)
-    .execute(pool)
-    .await?;
+    let result = sqlx::query("DELETE FROM reactions WHERE message_id = $1 AND emoji = $2")
+        .bind(message_id.to_string())
+        .bind(emoji)
+        .execute(pool)
+        .await?;
     Ok(result.rows_affected())
 }
 
@@ -149,7 +146,9 @@ pub async fn get_reaction_counts_for_messages(
     let mut out: HashMap<Uuid, Vec<ReactionCount>> = HashMap::new();
     for (message_id, emoji, count) in rows {
         if let Ok(mid) = message_id.parse::<Uuid>() {
-            out.entry(mid).or_default().push(ReactionCount { emoji, count });
+            out.entry(mid)
+                .or_default()
+                .push(ReactionCount { emoji, count });
         }
     }
     Ok(out)
@@ -231,8 +230,5 @@ pub async fn get_reactors(
     .bind(limit.min(100))
     .fetch_all(pool)
     .await?;
-    Ok(rows
-        .into_iter()
-        .filter_map(|r| r.0.parse().ok())
-        .collect())
+    Ok(rows.into_iter().filter_map(|r| r.0.parse().ok()).collect())
 }

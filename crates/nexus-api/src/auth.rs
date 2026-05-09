@@ -3,19 +3,19 @@
 //! No phone numbers. No government ID. No facial recognition. No age estimation.
 //! Just a username, optional email, and a strong password.
 
-use argon2::{
-    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
-    Argon2,
-};
 #[cfg(debug_assertions)]
 use argon2::{Algorithm, Params, Version};
+use argon2::{
+    Argon2,
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
+};
 use chrono::{Duration, Utc};
-use jsonwebtoken::{encode, EncodingKey, Header};
+use jsonwebtoken::{EncodingKey, Header, encode};
 use serde::Serialize;
 use uuid::Uuid;
 
 // Re-export Claims and validate_token from nexus-common so existing code keeps working
-pub use nexus_common::auth::{validate_token, Claims};
+pub use nexus_common::auth::{Claims, validate_token};
 
 /// Token pair returned on login/register.
 #[derive(Debug, Serialize)]
@@ -82,7 +82,11 @@ pub fn generate_access_token(
         two_fa_verified,
         email_verified,
     };
-    encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes()))
+    encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(secret.as_bytes()),
+    )
 }
 
 /// Generate a JWT refresh token (longer-lived, same session JTI as the access token).
@@ -104,7 +108,11 @@ pub fn generate_refresh_token(
         two_fa_verified: false,
         email_verified: false,
     };
-    encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes()))
+    encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(secret.as_bytes()),
+    )
 }
 
 /// Generate both access and refresh tokens for a newly authenticated session.
@@ -123,7 +131,13 @@ pub fn generate_token_pair(
     let session_id = Uuid::new_v4();
     Ok(TokenPair {
         access_token: generate_access_token(
-            user_id, username, secret, access_ttl, session_id, two_fa_verified, email_verified,
+            user_id,
+            username,
+            secret,
+            access_ttl,
+            session_id,
+            two_fa_verified,
+            email_verified,
         )?,
         refresh_token: generate_refresh_token(user_id, username, secret, refresh_ttl, session_id)?,
         expires_in: access_ttl,
@@ -152,9 +166,12 @@ pub fn generate_mfa_challenge_token(
         two_fa_verified: false,
         email_verified: false,
     };
-    encode(&Header::default(), &claims, &EncodingKey::from_secret(secret.as_bytes()))
+    encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(secret.as_bytes()),
+    )
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -168,7 +185,10 @@ mod tests {
     fn hash_produces_phc_string() {
         let hash = hash_password("hunter2").expect("hash should succeed");
         // Argon2id PHC strings start with $argon2id$
-        assert!(hash.starts_with("$argon2id$"), "expected PHC format, got: {hash}");
+        assert!(
+            hash.starts_with("$argon2id$"),
+            "expected PHC format, got: {hash}"
+        );
     }
 
     #[test]
@@ -206,10 +226,9 @@ mod tests {
     fn generated_token_decodes_correctly() {
         let user_id = Uuid::new_v4();
         let session_id = Uuid::new_v4();
-        let token = generate_access_token(
-            user_id, "alice", TEST_SECRET, 3600,
-            session_id, false, true,
-        ).unwrap();
+        let token =
+            generate_access_token(user_id, "alice", TEST_SECRET, 3600, session_id, false, true)
+                .unwrap();
 
         let claims = nexus_common::auth::validate_token(&token, TEST_SECRET).unwrap();
         assert_eq!(claims.sub, user_id.to_string());
@@ -223,21 +242,36 @@ mod tests {
     #[test]
     fn wrong_secret_is_rejected() {
         let token = generate_access_token(
-            Uuid::new_v4(), "bob", TEST_SECRET, 3600,
-            Uuid::new_v4(), false, false,
-        ).unwrap();
+            Uuid::new_v4(),
+            "bob",
+            TEST_SECRET,
+            3600,
+            Uuid::new_v4(),
+            false,
+            false,
+        )
+        .unwrap();
 
         let err = nexus_common::auth::validate_token(&token, "wrong-secret");
-        assert!(err.is_err(), "should reject token signed with different secret");
+        assert!(
+            err.is_err(),
+            "should reject token signed with different secret"
+        );
     }
 
     #[test]
     fn expired_token_is_rejected() {
         // TTL of 0 seconds — already expired by the time we validate
         let token = generate_access_token(
-            Uuid::new_v4(), "carol", TEST_SECRET, 0,
-            Uuid::new_v4(), false, false,
-        ).unwrap();
+            Uuid::new_v4(),
+            "carol",
+            TEST_SECRET,
+            0,
+            Uuid::new_v4(),
+            false,
+            false,
+        )
+        .unwrap();
 
         // Give it a moment to definitely expire
         std::thread::sleep(std::time::Duration::from_secs(1));
@@ -259,23 +293,24 @@ mod tests {
     #[test]
     fn token_pair_access_and_refresh_share_session_id() {
         let user_id = Uuid::new_v4();
-        let pair = generate_token_pair(
-            user_id, "dave", TEST_SECRET, 900, 86400, false, false,
-        ).unwrap();
+        let pair =
+            generate_token_pair(user_id, "dave", TEST_SECRET, 900, 86400, false, false).unwrap();
 
         let access = nexus_common::auth::validate_token(&pair.access_token, TEST_SECRET).unwrap();
         let refresh = nexus_common::auth::validate_token(&pair.refresh_token, TEST_SECRET).unwrap();
 
-        assert_eq!(access.jti, refresh.jti,
-            "access and refresh tokens in a pair must share the same jti (session_id)");
+        assert_eq!(
+            access.jti, refresh.jti,
+            "access and refresh tokens in a pair must share the same jti (session_id)"
+        );
         assert_eq!(access.jti, pair.session_id.to_string());
     }
 
     #[test]
     fn token_pair_has_correct_token_types() {
-        let pair = generate_token_pair(
-            Uuid::new_v4(), "eve", TEST_SECRET, 900, 86400, false, false,
-        ).unwrap();
+        let pair =
+            generate_token_pair(Uuid::new_v4(), "eve", TEST_SECRET, 900, 86400, false, false)
+                .unwrap();
 
         let access = nexus_common::auth::validate_token(&pair.access_token, TEST_SECRET).unwrap();
         let refresh = nexus_common::auth::validate_token(&pair.refresh_token, TEST_SECRET).unwrap();
@@ -287,23 +322,41 @@ mod tests {
     #[test]
     fn token_pair_propagates_two_fa_flag_to_access_token_only() {
         let pair = generate_token_pair(
-            Uuid::new_v4(), "frank", TEST_SECRET, 900, 86400,
+            Uuid::new_v4(),
+            "frank",
+            TEST_SECRET,
+            900,
+            86400,
             true,  // two_fa_verified
             false, // email_verified
-        ).unwrap();
+        )
+        .unwrap();
 
         let access = nexus_common::auth::validate_token(&pair.access_token, TEST_SECRET).unwrap();
         let refresh = nexus_common::auth::validate_token(&pair.refresh_token, TEST_SECRET).unwrap();
 
-        assert!(access.two_fa_verified,  "access token should carry two_fa_verified=true");
-        assert!(!refresh.two_fa_verified, "refresh token never carries two_fa_verified");
+        assert!(
+            access.two_fa_verified,
+            "access token should carry two_fa_verified=true"
+        );
+        assert!(
+            !refresh.two_fa_verified,
+            "refresh token never carries two_fa_verified"
+        );
     }
 
     #[test]
     fn token_pair_reports_correct_expires_in() {
         let pair = generate_token_pair(
-            Uuid::new_v4(), "grace", TEST_SECRET, 3600, 86400, false, false,
-        ).unwrap();
+            Uuid::new_v4(),
+            "grace",
+            TEST_SECRET,
+            3600,
+            86400,
+            false,
+            false,
+        )
+        .unwrap();
         assert_eq!(pair.expires_in, 3600);
         assert_eq!(pair.token_type, "Bearer");
     }

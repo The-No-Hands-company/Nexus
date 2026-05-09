@@ -4,6 +4,7 @@
 //!
 //! When the PTT key is pressed:
 //!   1. Backend emits `ptt-start` event → frontend enables mic capture.
+//!
 //! When released:
 //!   2. Backend emits `ptt-stop` event → frontend disables mic capture.
 
@@ -22,23 +23,34 @@ pub fn register_defaults<R: Runtime>(app: &mut App<R>) -> tauri::Result<()> {
     let _ = handle.global_shortcut().unregister_all();
     if let Err(e) = register_ptt_shortcut(&handle, DEFAULT_PTT_SHORTCUT) {
         // Log and continue — PTT simply won't work until the user changes it in Settings.
-        tracing::warn!("Could not register PTT shortcut '{}': {}. PTT disabled until reassigned in Settings > Voice.", DEFAULT_PTT_SHORTCUT, e);
+        tracing::warn!(
+            "Could not register PTT shortcut '{}': {}. PTT disabled until reassigned in Settings > Voice.",
+            DEFAULT_PTT_SHORTCUT,
+            e
+        );
     }
     Ok(())
 }
 
 /// Register a specific shortcut string as the PTT key.
-pub fn register_ptt_shortcut<R: Runtime>(app: &AppHandle<R>, shortcut_str: &str) -> tauri::Result<()> {
+pub fn register_ptt_shortcut<R: Runtime>(
+    app: &AppHandle<R>,
+    shortcut_str: &str,
+) -> tauri::Result<()> {
     let handle = app.clone();
     let shortcut: Shortcut = shortcut_str.parse().map_err(|e| {
-        tauri::Error::Anyhow(anyhow::anyhow!("Invalid shortcut '{}': {}", shortcut_str, e))
+        tauri::Error::Anyhow(anyhow::anyhow!(
+            "Invalid shortcut '{}': {}",
+            shortcut_str,
+            e
+        ))
     })?;
 
     // Always clear our own shortcuts first — safe to call even if nothing is registered.
     let _ = app.global_shortcut().unregister_all();
 
-    app.global_shortcut().on_shortcut(shortcut, move |_app, _shortcut, event| {
-        match event.state {
+    app.global_shortcut()
+        .on_shortcut(shortcut, move |_app, _shortcut, event| match event.state {
             ShortcutState::Pressed => {
                 if let Some(state) = handle.try_state::<AppState>() {
                     let mut ptt = state.ptt.lock().unwrap();
@@ -57,8 +69,8 @@ pub fn register_ptt_shortcut<R: Runtime>(app: &AppHandle<R>, shortcut_str: &str)
                     tracing::debug!("PTT stop");
                 }
             }
-        }
-    }).map_err(|e| tauri::Error::Anyhow(anyhow::anyhow!("GlobalShortcut error: {}", e)))?;
+        })
+        .map_err(|e| tauri::Error::Anyhow(anyhow::anyhow!("GlobalShortcut error: {}", e)))?;
 
     // Store the new shortcut string
     if let Some(state) = app.try_state::<AppState>() {
@@ -72,12 +84,11 @@ pub fn register_ptt_shortcut<R: Runtime>(app: &AppHandle<R>, shortcut_str: &str)
 ///
 /// Unregisters the old shortcut, registers the new one, persists to store.
 #[tauri::command]
-pub fn set_ptt_shortcut(
-    app: AppHandle,
-    shortcut: String,
-) -> Result<(), String> {
+pub fn set_ptt_shortcut(app: AppHandle, shortcut: String) -> Result<(), String> {
     // Unregister all existing shortcuts managed by us
-    app.global_shortcut().unregister_all().map_err(|e| e.to_string())?;
+    app.global_shortcut()
+        .unregister_all()
+        .map_err(|e| e.to_string())?;
 
     // Register the new one
     register_ptt_shortcut(&app, &shortcut).map_err(|e| e.to_string())?;
@@ -89,12 +100,7 @@ pub fn set_ptt_shortcut(
 /// Tauri command: return the current PTT shortcut string.
 #[tauri::command]
 pub fn get_ptt_shortcut(app: AppHandle) -> String {
-    let shortcut = app.state::<AppState>()
-        .ptt
-        .lock()
-        .unwrap()
-        .shortcut
-        .clone();
+    let shortcut = app.state::<AppState>().ptt.lock().unwrap().shortcut.clone();
     if shortcut.is_empty() {
         DEFAULT_PTT_SHORTCUT.to_owned()
     } else {

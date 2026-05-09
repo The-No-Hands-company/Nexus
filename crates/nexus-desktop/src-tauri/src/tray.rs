@@ -1,9 +1,9 @@
 //! System tray — presence menu, quick actions, show/hide main window.
 
 use tauri::{
+    App, Emitter, Manager, Runtime,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    App, Emitter, Manager, Runtime,
 };
 
 /// Build and attach the system tray icon + context menu.
@@ -16,9 +16,20 @@ pub fn setup_tray<R: Runtime>(app: &mut App<R>) -> tauri::Result<()> {
 
     let online = MenuItem::with_id(handle, "presence_online", "● Online", true, None::<&str>)?;
     let idle = MenuItem::with_id(handle, "presence_idle", "◑ Idle", true, None::<&str>)?;
-    let dnd = MenuItem::with_id(handle, "presence_dnd", "⊘ Do Not Disturb", true, None::<&str>)?;
-    let invisible =
-        MenuItem::with_id(handle, "presence_invisible", "○ Invisible", true, None::<&str>)?;
+    let dnd = MenuItem::with_id(
+        handle,
+        "presence_dnd",
+        "⊘ Do Not Disturb",
+        true,
+        None::<&str>,
+    )?;
+    let invisible = MenuItem::with_id(
+        handle,
+        "presence_invisible",
+        "○ Invisible",
+        true,
+        None::<&str>,
+    )?;
 
     let separator2 = PredefinedMenuItem::separator(handle)?;
     let quit = MenuItem::with_id(handle, "quit", "Quit Nexus", true, None::<&str>)?;
@@ -87,10 +98,7 @@ pub fn setup_tray<R: Runtime>(app: &mut App<R>) -> tauri::Result<()> {
 }
 
 /// Update the tray tooltip to show current presence/server.
-pub fn update_tray_tooltip<R: Runtime>(
-    app: &tauri::AppHandle<R>,
-    text: &str,
-) -> tauri::Result<()> {
+pub fn update_tray_tooltip<R: Runtime>(app: &tauri::AppHandle<R>, text: &str) -> tauri::Result<()> {
     if let Some(tray) = app.tray_by_id("main-tray") {
         tray.set_tooltip(Some(text))?;
     }

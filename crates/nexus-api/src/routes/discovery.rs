@@ -17,10 +17,10 @@
 use std::sync::Arc;
 
 use axum::{
+    Json, Router,
     extract::{Path, Query, State},
     middleware,
     routing::{get, post},
-    Json, Router,
 };
 use nexus_common::{
     error::{NexusError, NexusResult},
@@ -30,7 +30,7 @@ use nexus_db::repository::{channels, servers};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 // ─── Router ───────────────────────────────────────────────────────────────────
 
@@ -45,8 +45,9 @@ pub fn router() -> Router<Arc<AppState>> {
         // Authenticated
         .route(
             "/discover/servers/{server_id}/feature",
-            post(toggle_feature)
-                .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware)),
+            post(toggle_feature).route_layer(middleware::from_fn(
+                crate::middleware::combined_auth_middleware,
+            )),
         )
 }
 
@@ -137,9 +138,7 @@ async fn browse_servers(
 }
 
 /// `GET /api/v1/discover/servers/featured`
-async fn featured_servers(
-    State(state): State<Arc<AppState>>,
-) -> NexusResult<Json<DiscoverList>> {
+async fn featured_servers(State(state): State<Arc<AppState>>) -> NexusResult<Json<DiscoverList>> {
     let servers = servers::list_featured_servers(&state.db.pool, 20).await?;
     let total = servers.len();
     Ok(Json(DiscoverList {
@@ -155,7 +154,10 @@ async fn search_servers(
 ) -> NexusResult<Json<DiscoverList>> {
     let query = q.q.unwrap_or_default();
     if query.is_empty() {
-        return Ok(Json(DiscoverList { servers: vec![], total: 0 }));
+        return Ok(Json(DiscoverList {
+            servers: vec![],
+            total: 0,
+        }));
     }
     let limit = q.limit.unwrap_or(20).min(100);
     let offset = q.offset.unwrap_or(0);
@@ -177,7 +179,9 @@ async fn server_preview(
 ) -> NexusResult<Json<ServerPreview>> {
     let server = servers::get_server_preview(&state.db.pool, server_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Server".into(),
+        })?;
 
     let chans = channels::list_server_channels(&state.db.pool, server_id).await?;
     let previews: Vec<ChannelPreview> = chans
@@ -208,7 +212,9 @@ async fn toggle_feature(
 ) -> NexusResult<Json<ServerResponse>> {
     let server = servers::find_by_id(&state.db.pool, server_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Server".into(),
+        })?;
 
     if server.owner_id != auth.user_id {
         return Err(NexusError::Forbidden);

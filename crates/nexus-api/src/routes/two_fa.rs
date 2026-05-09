@@ -8,26 +8,29 @@
 //!   GET  /auth/2fa/backup-codes       — count of unused backup codes
 //!   POST /auth/2fa/backup-codes/regenerate — generate a fresh set of 8 codes
 
+use crate::{
+    AppState, auth,
+    middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip},
+};
 use axum::http::HeaderMap;
 use axum::{
+    Json, Router,
     extract::{Extension, State},
     middleware,
     routing::{get, post},
-    Json, Router,
 };
+use chrono::{Duration, Utc};
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_db::repository::{sessions, two_fa, users};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use totp_rs::{Algorithm, Secret, TOTP};
-use chrono::{Duration, Utc};
-use crate::{auth, middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const ISSUER: &str = "Nexus";
 const BACKUP_CODE_COUNT: usize = 10; // 10 single-use codes
-const BACKUP_CODE_LEN: usize = 12;  // 12 chars × 62 alphabet = ~71 bits entropy
+const BACKUP_CODE_LEN: usize = 12; // 12 chars × 62 alphabet = ~71 bits entropy
 
 // ── Router ───────────────────────────────────────────────────────────────────
 
@@ -43,8 +46,13 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/auth/2fa/enable", post(enable))
         .route("/auth/2fa/disable", post(disable))
         .route("/auth/2fa/backup-codes", get(backup_code_count))
-        .route("/auth/2fa/backup-codes/regenerate", post(regenerate_backup_codes))
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route(
+            "/auth/2fa/backup-codes/regenerate",
+            post(regenerate_backup_codes),
+        )
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -107,7 +115,9 @@ async fn setup(
     // Rate limiting: 5 TOTP setup attempts per user per hour (prevents enumeration)
     let user = users::find_by_id(&state.db.pool, auth_ctx.user_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "User".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "User".into(),
+        })?;
 
     // Generate a fresh base32-encoded TOTP secret.
     // `Secret::generate_secret()` (from `gen_secret` feature) returns `Secret::Encoded(b32)`.
@@ -133,7 +143,10 @@ async fn setup(
 
     // Generate and persist backup codes
     let raw_codes = generate_raw_backup_codes();
-    let hashes: Vec<String> = raw_codes.iter().map(|c| two_fa::hash_backup_code(c)).collect();
+    let hashes: Vec<String> = raw_codes
+        .iter()
+        .map(|c| two_fa::hash_backup_code(c))
+        .collect();
     two_fa::replace_backup_codes(&state.db.pool, user.id, &hashes)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
@@ -171,26 +184,34 @@ async fn enable(
         format!("rl:2fa:enable:user:{}", auth_ctx.user_id),
         10,
         600,
-    ).await?;
+    )
+    .await?;
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:2fa:enable:ip:{ip}"),
         20,
         600,
-    ).await?;
+    )
+    .await?;
 
     let user = users::find_by_id(&state.db.pool, auth_ctx.user_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "User".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "User".into(),
+        })?;
 
     if user.totp_enabled {
-        return Err(NexusError::AlreadyExists { resource: "TOTP 2FA".into() });
+        return Err(NexusError::AlreadyExists {
+            resource: "TOTP 2FA".into(),
+        });
     }
 
     let secret_b32 = two_fa::get_totp_secret(&state.db.pool, user.id)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?
-        .ok_or_else(|| NexusError::Validation { message: "No TOTP setup in progress. Call /auth/2fa/setup first.".into() })?;
+        .ok_or_else(|| NexusError::Validation {
+            message: "No TOTP setup in progress. Call /auth/2fa/setup first.".into(),
+        })?;
 
     let totp = totp_from_secret(&secret_b32, &user.username)?;
     let valid = totp
@@ -234,20 +255,26 @@ async fn disable(
         format!("rl:2fa:disable:user:{}", auth_ctx.user_id),
         10,
         600,
-    ).await?;
+    )
+    .await?;
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:2fa:disable:ip:{ip}"),
         20,
         600,
-    ).await?;
+    )
+    .await?;
 
     let user = users::find_by_id(&state.db.pool, auth_ctx.user_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "User".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "User".into(),
+        })?;
 
     if !user.totp_enabled {
-        return Err(NexusError::Validation { message: "2FA is not enabled on this account".into() });
+        return Err(NexusError::Validation {
+            message: "2FA is not enabled on this account".into(),
+        });
     }
 
     // Verify password
@@ -261,7 +288,9 @@ async fn disable(
     let secret_b32 = two_fa::get_totp_secret(&state.db.pool, user.id)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?
-        .ok_or_else(|| NexusError::Internal(anyhow::anyhow!("TOTP enabled but no secret stored")))?;
+        .ok_or_else(|| {
+            NexusError::Internal(anyhow::anyhow!("TOTP enabled but no secret stored"))
+        })?;
 
     let totp = totp_from_secret(&secret_b32, &user.username)?;
     let totp_valid = totp
@@ -334,13 +363,15 @@ async fn verify_mfa(
         format!("rl:2fa:verify:user:{}", user_id),
         5,
         300,
-    ).await?;
+    )
+    .await?;
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:2fa:verify:ip:{ip}"),
         10,
         300,
-    ).await?;
+    )
+    .await?;
 
     let user = users::find_by_id(&state.db.pool, user_id)
         .await?
@@ -453,20 +484,26 @@ async fn regenerate_backup_codes(
         format!("rl:2fa:regen:user:{}", auth_ctx.user_id),
         3,
         3600,
-    ).await?;
+    )
+    .await?;
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:2fa:regen:ip:{ip}"),
         5,
         3600,
-    ).await?;
+    )
+    .await?;
 
     let user = users::find_by_id(&state.db.pool, auth_ctx.user_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "User".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "User".into(),
+        })?;
 
     if !user.totp_enabled {
-        return Err(NexusError::Validation { message: "2FA is not enabled on this account".into() });
+        return Err(NexusError::Validation {
+            message: "2FA is not enabled on this account".into(),
+        });
     }
 
     let secret_b32 = two_fa::get_totp_secret(&state.db.pool, user.id)
@@ -483,11 +520,16 @@ async fn regenerate_backup_codes(
     }
 
     let raw_codes = generate_raw_backup_codes();
-    let hashes: Vec<String> = raw_codes.iter().map(|c| two_fa::hash_backup_code(c)).collect();
+    let hashes: Vec<String> = raw_codes
+        .iter()
+        .map(|c| two_fa::hash_backup_code(c))
+        .collect();
     two_fa::replace_backup_codes(&state.db.pool, user.id, &hashes)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
 
     tracing::info!(user_id = %user.id, "Backup codes regenerated");
-    Ok(Json(RegenerateResponse { backup_codes: raw_codes }))
+    Ok(Json(RegenerateResponse {
+        backup_codes: raw_codes,
+    }))
 }

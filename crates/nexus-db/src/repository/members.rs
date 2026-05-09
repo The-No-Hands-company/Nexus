@@ -18,10 +18,10 @@ pub async fn add_member(
          RETURNING {MEMBER_COLS}"
     );
     sqlx::query_as::<_, Member>(&q)
-    .bind(user_id.to_string())
-    .bind(server_id.to_string())
-    .fetch_one(pool)
-    .await
+        .bind(user_id.to_string())
+        .bind(server_id.to_string())
+        .fetch_one(pool)
+        .await
 }
 
 /// Remove a member from a server.
@@ -44,12 +44,14 @@ pub async fn find_member(
     user_id: Uuid,
     server_id: Uuid,
 ) -> Result<Option<Member>, sqlx::Error> {
-    let q = format!("SELECT {MEMBER_COLS} FROM members WHERE user_id = $1::uuid AND server_id = $2::uuid");
+    let q = format!(
+        "SELECT {MEMBER_COLS} FROM members WHERE user_id = $1::uuid AND server_id = $2::uuid"
+    );
     sqlx::query_as::<_, Member>(&q)
-    .bind(user_id.to_string())
-    .bind(server_id.to_string())
-    .fetch_optional(pool)
-    .await
+        .bind(user_id.to_string())
+        .bind(server_id.to_string())
+        .fetch_optional(pool)
+        .await
 }
 
 /// List members of a server with pagination.
@@ -66,11 +68,11 @@ pub async fn list_members(
          LIMIT $2 OFFSET $3"
     );
     sqlx::query_as::<_, Member>(&q)
-    .bind(server_id.to_string())
-    .bind(limit)
-    .bind(offset)
-    .fetch_all(pool)
-    .await
+        .bind(server_id.to_string())
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(pool)
+        .await
 }
 
 /// Update member nickname.
@@ -80,12 +82,14 @@ pub async fn update_nickname(
     server_id: Uuid,
     nickname: Option<&str>,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("UPDATE members SET nickname = $1 WHERE user_id = $2::uuid AND server_id = $3::uuid")
-        .bind(nickname)
-        .bind(user_id.to_string())
-        .bind(server_id.to_string())
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "UPDATE members SET nickname = $1 WHERE user_id = $2::uuid AND server_id = $3::uuid",
+    )
+    .bind(nickname)
+    .bind(user_id.to_string())
+    .bind(server_id.to_string())
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -146,12 +150,11 @@ pub async fn list_server_ids_for_user(
     pool: &sqlx::AnyPool,
     user_id: Uuid,
 ) -> Result<Vec<Uuid>, sqlx::Error> {
-    let rows: Vec<(String,)> = sqlx::query_as(
-        "SELECT server_id::text FROM members WHERE user_id = $1::uuid",
-    )
-    .bind(user_id.to_string())
-    .fetch_all(pool)
-    .await?;
+    let rows: Vec<(String,)> =
+        sqlx::query_as("SELECT server_id::text FROM members WHERE user_id = $1::uuid")
+            .bind(user_id.to_string())
+            .fetch_all(pool)
+            .await?;
 
     Ok(rows
         .into_iter()

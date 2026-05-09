@@ -14,13 +14,11 @@ pub async fn set_totp_secret(
     user_id: Uuid,
     secret_b32: &str,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "UPDATE users SET totp_secret = $1, totp_enabled = false WHERE id = $2::uuid",
-    )
-    .bind(secret_b32)
-    .bind(user_id.to_string())
-    .execute(pool)
-    .await?;
+    sqlx::query("UPDATE users SET totp_secret = $1, totp_enabled = false WHERE id = $2::uuid")
+        .bind(secret_b32)
+        .bind(user_id.to_string())
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
@@ -49,12 +47,10 @@ pub async fn enable_totp(pool: &sqlx::AnyPool, user_id: Uuid) -> Result<(), sqlx
 
 /// Disable TOTP on the account and clear the stored secret.
 pub async fn disable_totp(pool: &sqlx::AnyPool, user_id: Uuid) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "UPDATE users SET totp_enabled = false, totp_secret = NULL WHERE id = $1::uuid",
-    )
-    .bind(user_id.to_string())
-    .execute(pool)
-    .await?;
+    sqlx::query("UPDATE users SET totp_enabled = false, totp_secret = NULL WHERE id = $1::uuid")
+        .bind(user_id.to_string())
+        .execute(pool)
+        .await?;
     Ok(())
 }
 

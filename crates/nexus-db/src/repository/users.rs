@@ -20,7 +20,7 @@ pub async fn create_user(
     password_hash: &str,
 ) -> Result<User, sqlx::Error> {
     let stored_email = email.map(|e| crate::email_crypto::encrypt(e));
-    let email_hash  = email.and_then(|e| crate::email_crypto::lookup_hash(e));
+    let email_hash = email.and_then(|e| crate::email_crypto::lookup_hash(e));
 
     let q = format!(
         "INSERT INTO users \
@@ -74,7 +74,10 @@ pub async fn find_by_ids_map(
 }
 
 /// Find a user by username (case-insensitive).
-pub async fn find_by_username(pool: &sqlx::AnyPool, username: &str) -> Result<Option<User>, sqlx::Error> {
+pub async fn find_by_username(
+    pool: &sqlx::AnyPool,
+    username: &str,
+) -> Result<Option<User>, sqlx::Error> {
     let q = format!("SELECT {USER_COLS} FROM users WHERE LOWER(username) = LOWER($1)");
     sqlx::query_as::<_, User>(&q)
         .bind(username)
@@ -127,14 +130,14 @@ pub async fn update_user(
            RETURNING {USER_COLS}"
     );
     sqlx::query_as::<_, User>(&q)
-    .bind(username)
-    .bind(display_name)
-    .bind(bio)
-    .bind(status)
-    .bind(id.to_string())
-    .bind(avatar)
-    .fetch_one(pool)
-    .await
+        .bind(username)
+        .bind(display_name)
+        .bind(bio)
+        .bind(status)
+        .bind(id.to_string())
+        .bind(avatar)
+        .fetch_one(pool)
+        .await
 }
 
 /// Update user presence state.
@@ -195,10 +198,12 @@ pub async fn soft_delete_user(pool: &sqlx::AnyPool, id: Uuid) -> Result<(), sqlx
         .bind(&user_id)
         .execute(pool)
         .await?;
-    sqlx::query("DELETE FROM user_relationships WHERE requester_id = $1::uuid OR addressee_id = $1::uuid")
-        .bind(&user_id)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "DELETE FROM user_relationships WHERE requester_id = $1::uuid OR addressee_id = $1::uuid",
+    )
+    .bind(&user_id)
+    .execute(pool)
+    .await?;
     sqlx::query("DELETE FROM device_verifications WHERE verifier_id = $1::uuid")
         .bind(&user_id)
         .execute(pool)
@@ -242,7 +247,10 @@ pub async fn count_users(pool: &sqlx::AnyPool) -> Result<i64, sqlx::Error> {
 }
 
 /// Clear any scheduled account deletion for a user.
-pub async fn cancel_scheduled_deletion(pool: &sqlx::AnyPool, id: Uuid) -> Result<bool, sqlx::Error> {
+pub async fn cancel_scheduled_deletion(
+    pool: &sqlx::AnyPool,
+    id: Uuid,
+) -> Result<bool, sqlx::Error> {
     let result = sqlx::query(
         "UPDATE users SET scheduled_deletion_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1::uuid AND scheduled_deletion_at IS NOT NULL",
     )
@@ -387,7 +395,11 @@ pub async fn add_user_flags(pool: &sqlx::AnyPool, id: Uuid, flags: i64) -> Resul
 }
 
 /// Clear specific flag bits on a user account (AND NOT the bits).
-pub async fn remove_user_flags(pool: &sqlx::AnyPool, id: Uuid, flags: i64) -> Result<(), sqlx::Error> {
+pub async fn remove_user_flags(
+    pool: &sqlx::AnyPool,
+    id: Uuid,
+    flags: i64,
+) -> Result<(), sqlx::Error> {
     sqlx::query("UPDATE users SET flags = flags & ~$1, updated_at = NOW() WHERE id = $2::uuid")
         .bind(flags)
         .bind(id.to_string())

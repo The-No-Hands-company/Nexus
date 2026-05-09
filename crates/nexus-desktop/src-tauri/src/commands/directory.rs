@@ -9,8 +9,8 @@
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use crate::state::AppState;
 use super::api_client;
+use crate::state::AppState;
 
 // ─── Response types (camelCase for TypeScript) ─────────────────────────────
 
@@ -195,10 +195,7 @@ pub async fn directory_search_rooms(
     let session = state.session_snapshot();
     let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
     let limit = limit.unwrap_or(50);
-    let mut params: Vec<(&str, String)> = vec![
-        ("q", query),
-        ("limit", limit.to_string()),
-    ];
+    let mut params: Vec<(&str, String)> = vec![("q", query), ("limit", limit.to_string())];
     if let Some(ref s) = server {
         params.push(("server", s.clone()));
     }
@@ -239,5 +236,7 @@ pub async fn directory_join_room(
         let text = resp.text().await.unwrap_or_default();
         return Err(text);
     }
-    resp.json::<serde_json::Value>().await.map_err(|e| e.to_string())
+    resp.json::<serde_json::Value>()
+        .await
+        .map_err(|e| e.to_string())
 }

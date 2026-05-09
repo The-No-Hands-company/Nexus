@@ -1,23 +1,26 @@
 //! Channel routes — CRUD for channels within a server.
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, State},
     middleware,
     routing::get,
-    Json, Router,
 };
+use nexus_common::permissions::Permissions;
 use nexus_common::{
     error::{NexusError, NexusResult},
     models::channel::{CreateChannelRequest, UpdateChannelRequest},
     snowflake,
     validation::validate_request,
 };
-use nexus_common::permissions::Permissions;
 use nexus_db::repository::{audit_log, channels, members, roles, servers};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
+use crate::{
+    AppState,
+    middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip},
+};
 
 /// Verify that `user_id` holds `required` permission in a server.
 ///
@@ -81,9 +84,13 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         .route(
             "/channels/{channel_id}",
-            get(get_channel).patch(update_channel).delete(delete_channel),
+            get(get_channel)
+                .patch(update_channel)
+                .delete(delete_channel),
         )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 /// GET /api/v1/servers/:server_id/channels
@@ -139,7 +146,7 @@ async fn create_channel(
     .await?;
 
     let channel_id = snowflake::generate_id();
-    let channel_type_str = serde_json::to_value(&body.channel_type)
+    let channel_type_str = serde_json::to_value(body.channel_type)
         .map_err(|e| NexusError::Internal(e.into()))?
         .as_str()
         .unwrap_or("text")

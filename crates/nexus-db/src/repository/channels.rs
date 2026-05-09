@@ -27,15 +27,15 @@ pub async fn create_channel(
          RETURNING {CHANNEL_COLS}"
     );
     sqlx::query_as::<_, Channel>(&q)
-    .bind(id.to_string())
-    .bind(server_id.map(|u| u.to_string()))
-    .bind(parent_id.map(|u| u.to_string()))
-    .bind(channel_type)
-    .bind(name)
-    .bind(topic)
-    .bind(position)
-    .fetch_one(pool)
-    .await
+        .bind(id.to_string())
+        .bind(server_id.map(|u| u.to_string()))
+        .bind(parent_id.map(|u| u.to_string()))
+        .bind(channel_type)
+        .bind(name)
+        .bind(topic)
+        .bind(position)
+        .fetch_one(pool)
+        .await
 }
 
 /// List channels in a server.
@@ -43,11 +43,13 @@ pub async fn list_server_channels(
     pool: &sqlx::AnyPool,
     server_id: Uuid,
 ) -> Result<Vec<Channel>, sqlx::Error> {
-    let q = format!("SELECT {CHANNEL_COLS} FROM channels WHERE server_id = $1::uuid ORDER BY position, created_at");
+    let q = format!(
+        "SELECT {CHANNEL_COLS} FROM channels WHERE server_id = $1::uuid ORDER BY position, created_at"
+    );
     sqlx::query_as::<_, Channel>(&q)
-    .bind(server_id.to_string())
-    .fetch_all(pool)
-    .await
+        .bind(server_id.to_string())
+        .fetch_all(pool)
+        .await
 }
 
 /// Find a channel by ID.
@@ -83,15 +85,15 @@ pub async fn update_channel(
          RETURNING {CHANNEL_COLS}"
     );
     sqlx::query_as::<_, Channel>(&q)
-    .bind(name)
-    .bind(topic)
-    .bind(position)
-    .bind(nsfw)
-    .bind(rate_limit_per_user)
-    .bind(id.to_string())
-    .bind(is_stream)
-    .fetch_one(pool)
-    .await
+        .bind(name)
+        .bind(topic)
+        .bind(position)
+        .bind(nsfw)
+        .bind(rate_limit_per_user)
+        .bind(id.to_string())
+        .bind(is_stream)
+        .fetch_one(pool)
+        .await
 }
 
 /// Delete a channel.
@@ -119,10 +121,10 @@ pub async fn find_or_create_dm(
          LIMIT 1"
     );
     let existing = sqlx::query_as::<_, Channel>(&q)
-    .bind(user1.to_string())
-    .bind(user2.to_string())
-    .fetch_optional(pool)
-    .await?;
+        .bind(user1.to_string())
+        .bind(user2.to_string())
+        .fetch_optional(pool)
+        .await?;
 
     if let Some(channel) = existing {
         return Ok(channel);
@@ -151,12 +153,11 @@ pub async fn list_dm_participants(
     pool: &sqlx::AnyPool,
     channel_id: uuid::Uuid,
 ) -> Result<Vec<uuid::Uuid>, sqlx::Error> {
-    let rows: Vec<(String,)> = sqlx::query_as(
-        "SELECT user_id::text FROM dm_participants WHERE channel_id = $1::uuid",
-    )
-    .bind(channel_id.to_string())
-    .fetch_all(pool)
-    .await?;
+    let rows: Vec<(String,)> =
+        sqlx::query_as("SELECT user_id::text FROM dm_participants WHERE channel_id = $1::uuid")
+            .bind(channel_id.to_string())
+            .fetch_all(pool)
+            .await?;
 
     Ok(rows
         .into_iter()

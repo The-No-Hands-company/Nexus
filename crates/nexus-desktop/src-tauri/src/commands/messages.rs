@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 use uuid::Uuid;
 
-use crate::state::AppState;
 use super::api_client;
+use crate::state::AppState;
 
 /// Raw message shape returned by the server (snake_case JSON).
 #[derive(Deserialize, Debug)]
@@ -70,7 +70,10 @@ pub async fn send_message(
     let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
     let resp = client
         .post(format!("{base}/api/v1/channels/{channel_id}/messages"))
-        .json(&SendMessageRequest { content, nonce: None })
+        .json(&SendMessageRequest {
+            content,
+            nonce: None,
+        })
         .send()
         .await
         .map_err(|e| e.to_string())?;

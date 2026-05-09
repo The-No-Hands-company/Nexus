@@ -14,58 +14,62 @@
 //! conflict entirely.  Since the codebase now uses AnyPool exclusively we only
 //! need the AnyRow impl.
 
+#![allow(clippy::cast_possible_truncation)]
+
 use chrono::{DateTime, Utc};
-use sqlx::{any::AnyRow, Row};
+use sqlx::{Row, any::AnyRow};
 use uuid::Uuid;
 
 use crate::models::{
-    channel::{Channel, ChannelType},
-    collaboration::{
-        AiPreferences, CalendarEvent, CalendarRsvp, ChannelDigest,
-        ChecklistItem, FileVersion, ServerStorageQuota, Task, TaskReminder,
-    },
-    crypto::{Device, DeviceType, DeviceVerification, E2eeChannel, E2eeSession, EncryptedMessage, OneTimePreKey, VerificationMethod},
-    member::Member,
-    multimedia::{
-        Drawing, MediaGalleryFilter, Story, StoryView, VideoNote, VoiceMusicQueueItem,
-        VoiceNote, VoiceSettings,
-    },
     accessibility::{
         MessageTranslation, MessageTtsRequest, UserAccessibilitySettings, VoiceCaption,
     },
-    ecosystem::{
-        BulkInvitation, CreatorVetting, IdentityLevel, ImportJob,
-        MarketplaceMonetization, MarketplacePlugin, OnboardingProgress,
-        PluginInstall, PluginReview, ServerAnalyticsSnapshot, ServerTemplate,
-    },
-    scalability::{
-        ScalingConfig, SfuNode, FederationEventBatch, FederationRoute,
-        FederationDedupEntry, VoiceQualityLog, MemberPruneRule, SlowModeOverride,
-        ScalingMetric, UpgradeRecord,
-    },
     ai_intelligence::{
-        SearchEmbedding, SearchQuery, AiSuggestion, ThreadSummary, ToxicityScore,
-        RaidDetection, VoiceTranscript, VoiceCommand, AiConsent, AiAuditEntry,
+        AiAuditEntry, AiConsent, AiSuggestion, RaidDetection, SearchEmbedding, SearchQuery,
+        ThreadSummary, ToxicityScore, VoiceCommand, VoiceTranscript,
     },
-    voice_collab::{
-        VideoLayout, VirtualBackground, LiveStream, StreamViewer, BreakoutRoom,
-        CollabSession, SpatialAudioConfig, VoicePreset,
+    channel::{Channel, ChannelType},
+    collaboration::{
+        AiPreferences, CalendarEvent, CalendarRsvp, ChannelDigest, ChecklistItem, FileVersion,
+        ServerStorageQuota, Task, TaskReminder,
+    },
+    crypto::{
+        Device, DeviceType, DeviceVerification, E2eeChannel, E2eeSession, EncryptedMessage,
+        OneTimePreKey, VerificationMethod,
+    },
+    ecosystem::{
+        BulkInvitation, CreatorVetting, IdentityLevel, ImportJob, MarketplaceMonetization,
+        MarketplacePlugin, OnboardingProgress, PluginInstall, PluginReview,
+        ServerAnalyticsSnapshot, ServerTemplate,
     },
     growth::{
-        ServerRecommendation, OnboardingFlow, DeviceSession, ClipboardSync, UserXp,
-        GamificationConfig, Achievement, UserAchievement, ActivityStreak,
-        SyncCursor, OfflineQueueItem,
+        Achievement, ActivityStreak, ClipboardSync, DeviceSession, GamificationConfig,
+        OfflineQueueItem, OnboardingFlow, ServerRecommendation, SyncCursor, UserAchievement,
+        UserXp,
     },
-    sustainability::{
-        ProtocolVersion, CapabilityNegotiation, GovernancePoll, PollVote,
-        GovernanceProposal, ContributorBadge, SecurityAudit, VulnerabilityRecord,
-        TutorialProgress, MigrationGuide,
+    member::Member,
+    multimedia::{
+        Drawing, MediaGalleryFilter, Story, StoryView, VideoNote, VoiceMusicQueueItem, VoiceNote,
+        VoiceSettings,
     },
     relationship::{Relationship, RelationshipStatus},
     rich::{AttachmentRow, ServerEmojiRow, ThreadRow},
     role::Role,
+    scalability::{
+        FederationDedupEntry, FederationEventBatch, FederationRoute, MemberPruneRule,
+        ScalingConfig, ScalingMetric, SfuNode, SlowModeOverride, UpgradeRecord, VoiceQualityLog,
+    },
     server::{Invite, Server},
+    sustainability::{
+        CapabilityNegotiation, ContributorBadge, GovernancePoll, GovernanceProposal,
+        MigrationGuide, PollVote, ProtocolVersion, SecurityAudit, TutorialProgress,
+        VulnerabilityRecord,
+    },
     user::{User, UserPresence},
+    voice_collab::{
+        BreakoutRoom, CollabSession, LiveStream, SpatialAudioConfig, StreamViewer, VideoLayout,
+        VirtualBackground, VoicePreset,
+    },
 };
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
@@ -83,21 +87,16 @@ fn opt_uuid(row: &AnyRow, col: &str) -> Result<Option<Uuid>, sqlx::Error> {
 
 fn dt(row: &AnyRow, col: &str) -> Result<DateTime<Utc>, sqlx::Error> {
     let s: String = row.try_get(col)?;
-    parse_dt(&s).map_err(|e| sqlx::Error::Decode(e))
+    parse_dt(&s).map_err(sqlx::Error::Decode)
 }
 
 fn opt_dt(row: &AnyRow, col: &str) -> Result<Option<DateTime<Utc>>, sqlx::Error> {
     let s: Option<String> = row.try_get(col)?;
-    s.map(|v| parse_dt(&v).map_err(|e| sqlx::Error::Decode(e)))
+    s.map(|v| parse_dt(&v).map_err(sqlx::Error::Decode))
         .transpose()
 }
 
-fn parse_dt(
-    s: &str,
-) -> Result<
-    DateTime<Utc>,
-    Box<dyn std::error::Error + Send + Sync + 'static>,
-> {
+fn parse_dt(s: &str) -> Result<DateTime<Utc>, Box<dyn std::error::Error + Send + Sync + 'static>> {
     // RFC 3339 / ISO 8601 (e.g. "2024-01-15T10:30:00+00:00")
     if let Ok(d) = DateTime::parse_from_rfc3339(s) {
         return Ok(d.with_timezone(&Utc));
@@ -112,7 +111,7 @@ fn parse_dt(
             if (last3.starts_with('+') || last3.starts_with('-'))
                 && last3[1..].chars().all(|c| c.is_ascii_digit())
             {
-                format!("{}:00", iso)
+                format!("{iso}:00")
             } else {
                 iso
             }
@@ -159,11 +158,7 @@ fn str_vec(row: &AnyRow, col: &str) -> Result<Vec<String>, sqlx::Error> {
     serde_json::from_str(&s).map_err(|e| sqlx::Error::Decode(Box::new(e) as _))
 }
 
-fn parse_enum<T>(
-    row: &AnyRow,
-    col: &str,
-    f: impl Fn(&str) -> Option<T>,
-) -> Result<T, sqlx::Error> {
+fn parse_enum<T>(row: &AnyRow, col: &str, f: impl Fn(&str) -> Option<T>) -> Result<T, sqlx::Error> {
     let s: String = row.try_get(col)?;
     f(&s).ok_or_else(|| sqlx::Error::Decode(format!("unknown enum variant: {s}").into()))
 }
@@ -631,9 +626,10 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for FileVersion {
             version_number: row.try_get("version_number").unwrap_or(1),
             filename: row.try_get("filename")?,
             content_type: row.try_get("content_type").unwrap_or(None),
-            size: row.try_get::<i64, _>("size").or_else(|_| {
-                row.try_get::<i32, _>("size").map(|v| v as i64)
-            }).unwrap_or(0),
+            size: row
+                .try_get::<i64, _>("size")
+                .or_else(|_| row.try_get::<i32, _>("size").map(i64::from))
+                .unwrap_or(0),
             storage_key: row.try_get("storage_key")?,
             sha256: row.try_get("sha256").unwrap_or(None),
             comment: row.try_get("comment").unwrap_or(None),
@@ -646,12 +642,14 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for ServerStorageQuota {
     fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
         Ok(ServerStorageQuota {
             server_id: uuid(row, "server_id")?,
-            max_bytes: row.try_get::<i64, _>("max_bytes").or_else(|_| {
-                row.try_get::<i32, _>("max_bytes").map(|v| v as i64)
-            }).unwrap_or(0),
-            used_bytes: row.try_get::<i64, _>("used_bytes").or_else(|_| {
-                row.try_get::<i32, _>("used_bytes").map(|v| v as i64)
-            }).unwrap_or(0),
+            max_bytes: row
+                .try_get::<i64, _>("max_bytes")
+                .or_else(|_| row.try_get::<i32, _>("max_bytes").map(i64::from))
+                .unwrap_or(0),
+            used_bytes: row
+                .try_get::<i64, _>("used_bytes")
+                .or_else(|_| row.try_get::<i32, _>("used_bytes").map(i64::from))
+                .unwrap_or(0),
             updated_at: dt(row, "updated_at")?,
         })
     }
@@ -667,7 +665,9 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for AiPreferences {
             smart_replies: row.try_get("smart_replies").unwrap_or(false),
             auto_mod_suggest: row.try_get("auto_mod_suggest").unwrap_or(false),
             digest_enabled: row.try_get("digest_enabled").unwrap_or(false),
-            digest_interval: row.try_get("digest_interval").unwrap_or_else(|_| "daily".to_string()),
+            digest_interval: row
+                .try_get("digest_interval")
+                .unwrap_or_else(|_| "daily".to_string()),
             updated_at: dt(row, "updated_at")?,
         })
     }
@@ -703,12 +703,14 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for VoiceNote {
             storage_key: row.try_get("storage_key")?,
             filename: row.try_get("filename")?,
             content_type: row.try_get("content_type")?,
-            size: row.try_get::<i64, _>("size").or_else(|_| {
-                row.try_get::<i32, _>("size").map(|v| v as i64)
-            })?,
+            size: row
+                .try_get::<i64, _>("size")
+                .or_else(|_| row.try_get::<i32, _>("size").map(i64::from))?,
             duration_ms: row.try_get("duration_ms")?,
             waveform: row.try_get::<Option<String>, _>("waveform").unwrap_or(None),
-            transcript: row.try_get::<Option<String>, _>("transcript").unwrap_or(None),
+            transcript: row
+                .try_get::<Option<String>, _>("transcript")
+                .unwrap_or(None),
             message_id: opt_uuid(row, "message_id")?,
             created_at: dt(row, "created_at")?,
         })
@@ -726,14 +728,18 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for VideoNote {
             storage_key: row.try_get("storage_key")?,
             filename: row.try_get("filename")?,
             content_type: row.try_get("content_type")?,
-            size: row.try_get::<i64, _>("size").or_else(|_| {
-                row.try_get::<i32, _>("size").map(|v| v as i64)
-            })?,
+            size: row
+                .try_get::<i64, _>("size")
+                .or_else(|_| row.try_get::<i32, _>("size").map(i64::from))?,
             duration_ms: row.try_get("duration_ms")?,
             width: row.try_get::<Option<i32>, _>("width").unwrap_or(None),
             height: row.try_get::<Option<i32>, _>("height").unwrap_or(None),
-            thumbnail_key: row.try_get::<Option<String>, _>("thumbnail_key").unwrap_or(None),
-            transcript: row.try_get::<Option<String>, _>("transcript").unwrap_or(None),
+            thumbnail_key: row
+                .try_get::<Option<String>, _>("thumbnail_key")
+                .unwrap_or(None),
+            transcript: row
+                .try_get::<Option<String>, _>("transcript")
+                .unwrap_or(None),
             message_id: opt_uuid(row, "message_id")?,
             created_at: dt(row, "created_at")?,
         })
@@ -748,8 +754,12 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for Story {
             id: uuid(row, "id")?,
             author_id: uuid(row, "author_id")?,
             media_type: row.try_get("media_type")?,
-            storage_key: row.try_get::<Option<String>, _>("storage_key").unwrap_or(None),
-            text_content: row.try_get::<Option<String>, _>("text_content").unwrap_or(None),
+            storage_key: row
+                .try_get::<Option<String>, _>("storage_key")
+                .unwrap_or(None),
+            text_content: row
+                .try_get::<Option<String>, _>("text_content")
+                .unwrap_or(None),
             text_style: json(row, "text_style").ok(),
             expires_at: dt(row, "expires_at")?,
             visibility: row.try_get("visibility")?,
@@ -781,7 +791,9 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for Drawing {
             drawing_data: json(row, "drawing_data")?,
             width: row.try_get("width").unwrap_or(800),
             height: row.try_get("height").unwrap_or(600),
-            preview_key: row.try_get::<Option<String>, _>("preview_key").unwrap_or(None),
+            preview_key: row
+                .try_get::<Option<String>, _>("preview_key")
+                .unwrap_or(None),
             message_id: opt_uuid(row, "message_id")?,
             is_whiteboard: row.try_get("is_whiteboard").unwrap_or(false),
             created_at: dt(row, "created_at")?,
@@ -798,10 +810,16 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for VoiceSettings {
             user_id: uuid(row, "user_id")?,
             spatial_audio: row.try_get("spatial_audio").unwrap_or(false),
             noise_gate_enabled: row.try_get("noise_gate_enabled").unwrap_or(true),
-            noise_gate_threshold: row.try_get::<f32, _>("noise_gate_threshold")
-                .or_else(|_| row.try_get::<f64, _>("noise_gate_threshold").map(|v| v as f32))
+            noise_gate_threshold: row
+                .try_get::<f32, _>("noise_gate_threshold")
+                .or_else(|_| {
+                    row.try_get::<f64, _>("noise_gate_threshold")
+                        .map(|v| v as f32)
+                })
                 .unwrap_or(-50.0),
-            echo_cancel_level: row.try_get("echo_cancel_level").unwrap_or_else(|_| "moderate".to_string()),
+            echo_cancel_level: row
+                .try_get("echo_cancel_level")
+                .unwrap_or_else(|_| "moderate".to_string()),
             auto_gain: row.try_get("auto_gain").unwrap_or(true),
             updated_at: dt(row, "updated_at")?,
         })
@@ -859,20 +877,35 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for UserAccessibilitySettings {
             keyboard_shortcuts: row.try_get("keyboard_shortcuts").unwrap_or(true),
             high_contrast_mode: row.try_get("high_contrast_mode").unwrap_or(false),
             reduced_motion: row.try_get("reduced_motion").unwrap_or(false),
-            font_family: row.try_get("font_family").unwrap_or_else(|_| "system".to_string()),
-            custom_font_name: row.try_get::<Option<String>, _>("custom_font_name").unwrap_or(None),
-            color_blind_mode: row.try_get("color_blind_mode").unwrap_or_else(|_| "none".to_string()),
-            preferred_language: row.try_get("preferred_language").unwrap_or_else(|_| "en".to_string()),
+            font_family: row
+                .try_get("font_family")
+                .unwrap_or_else(|_| "system".to_string()),
+            custom_font_name: row
+                .try_get::<Option<String>, _>("custom_font_name")
+                .unwrap_or(None),
+            color_blind_mode: row
+                .try_get("color_blind_mode")
+                .unwrap_or_else(|_| "none".to_string()),
+            preferred_language: row
+                .try_get("preferred_language")
+                .unwrap_or_else(|_| "en".to_string()),
             auto_translate: row.try_get("auto_translate").unwrap_or(false),
             rtl_override: row.try_get("rtl_override").unwrap_or(false),
             captions_enabled: row.try_get("captions_enabled").unwrap_or(false),
-            caption_font_size: row.try_get("caption_font_size").unwrap_or_else(|_| "md".to_string()),
-            caption_position: row.try_get("caption_position").unwrap_or_else(|_| "bottom".to_string()),
+            caption_font_size: row
+                .try_get("caption_font_size")
+                .unwrap_or_else(|_| "md".to_string()),
+            caption_position: row
+                .try_get("caption_position")
+                .unwrap_or_else(|_| "bottom".to_string()),
             tts_enabled: row.try_get("tts_enabled").unwrap_or(false),
-            tts_rate: row.try_get::<f32, _>("tts_rate")
+            tts_rate: row
+                .try_get::<f32, _>("tts_rate")
                 .or_else(|_| row.try_get::<f64, _>("tts_rate").map(|v| v as f32))
                 .unwrap_or(1.0),
-            tts_voice: row.try_get("tts_voice").unwrap_or_else(|_| "default".to_string()),
+            tts_voice: row
+                .try_get("tts_voice")
+                .unwrap_or_else(|_| "default".to_string()),
             created_at: dt(row, "created_at")?,
             updated_at: dt(row, "updated_at")?,
         })
@@ -1043,8 +1076,12 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for MarketplacePlugin {
             signing_key_id: row.try_get("signing_key_id").unwrap_or(None),
             category: row.try_get("category")?,
             tags: json(row, "tags")?,
-            downloads: row.try_get::<i64, _>("downloads").or_else(|_| row.try_get::<i32, _>("downloads").map(|v| v as i64))?,
-            avg_rating: row.try_get::<f32, _>("avg_rating").or_else(|_| row.try_get::<f64, _>("avg_rating").map(|v| v as f32))?,
+            downloads: row
+                .try_get::<i64, _>("downloads")
+                .or_else(|_| row.try_get::<i32, _>("downloads").map(i64::from))?,
+            avg_rating: row
+                .try_get::<f32, _>("avg_rating")
+                .or_else(|_| row.try_get::<f64, _>("avg_rating").map(|v| v as f32))?,
             rating_count: row.try_get("rating_count")?,
             is_verified: row.try_get("is_verified").unwrap_or(false),
             is_published: row.try_get("is_published").unwrap_or(true),
@@ -1136,7 +1173,7 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for MarketplaceMonetization {
             payment_link: row.try_get("payment_link").unwrap_or(None),
             purchase_count: row
                 .try_get::<i64, _>("purchase_count")
-                .or_else(|_| row.try_get::<i32, _>("purchase_count").map(|v| v as i64))?,
+                .or_else(|_| row.try_get::<i32, _>("purchase_count").map(i64::from))?,
             created_at: dt(row, "created_at")?,
             updated_at: dt(row, "updated_at")?,
         })
@@ -1244,11 +1281,20 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for VoiceQualityLog {
             user_id: uuid(row, "user_id")?,
             sfu_node_id: opt_uuid(row, "sfu_node_id")?,
             bitrate: row.try_get("bitrate")?,
-            packet_loss: row.try_get::<f64, _>("packet_loss").map(|v| v as f32).unwrap_or(0.0),
-            jitter_ms: row.try_get::<f64, _>("jitter_ms").map(|v| v as f32).unwrap_or(0.0),
+            packet_loss: row
+                .try_get::<f64, _>("packet_loss")
+                .map(|v| v as f32)
+                .unwrap_or(0.0),
+            jitter_ms: row
+                .try_get::<f64, _>("jitter_ms")
+                .map(|v| v as f32)
+                .unwrap_or(0.0),
             latency_ms: row.try_get("latency_ms")?,
             fec_enabled: row.try_get("fec_enabled").unwrap_or(false),
-            quality_score: row.try_get::<f64, _>("quality_score").map(|v| v as f32).unwrap_or(1.0),
+            quality_score: row
+                .try_get::<f64, _>("quality_score")
+                .map(|v| v as f32)
+                .unwrap_or(1.0),
             created_at: dt(row, "created_at")?,
         })
     }
@@ -1283,7 +1329,10 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for SlowModeOverride {
             channel_id: uuid(row, "channel_id")?,
             role_id: opt_uuid(row, "role_id")?,
             cooldown_secs: row.try_get("cooldown_secs")?,
-            escalation_mult: row.try_get::<f64, _>("escalation_mult").map(|v| v as f32).unwrap_or(1.0),
+            escalation_mult: row
+                .try_get::<f64, _>("escalation_mult")
+                .map(|v| v as f32)
+                .unwrap_or(1.0),
             created_at: dt(row, "created_at")?,
         })
     }
@@ -1297,7 +1346,10 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for ScalingMetric {
             id: uuid(row, "id")?,
             instance_id: row.try_get("instance_id")?,
             metric_name: row.try_get("metric_name")?,
-            metric_value: row.try_get::<f64, _>("metric_value").map(|v| v as f32).unwrap_or(0.0),
+            metric_value: row
+                .try_get::<f64, _>("metric_value")
+                .map(|v| v as f32)
+                .unwrap_or(0.0),
             unit: row.try_get("unit")?,
             tags: json(row, "tags")?,
             recorded_at: dt(row, "recorded_at")?,
@@ -1402,7 +1454,10 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for ToxicityScore {
             id: uuid(row, "id")?,
             message_id: uuid(row, "message_id")?,
             server_id: uuid(row, "server_id")?,
-            score: row.try_get::<f64, _>("score").map(|v| v as f32).unwrap_or(0.0),
+            score: row
+                .try_get::<f64, _>("score")
+                .map(|v| v as f32)
+                .unwrap_or(0.0),
             categories: json(row, "categories")?,
             model_name: row.try_get("model_name")?,
             flagged: row.try_get("flagged").unwrap_or(false),
@@ -1439,11 +1494,20 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for VoiceTranscript {
             channel_id: uuid(row, "channel_id")?,
             session_id: opt_uuid(row, "session_id")?,
             speaker_id: opt_uuid(row, "speaker_id")?,
-            segment_start: row.try_get::<f64, _>("segment_start").map(|v| v as f32).unwrap_or(0.0),
-            segment_end: row.try_get::<f64, _>("segment_end").map(|v| v as f32).unwrap_or(0.0),
+            segment_start: row
+                .try_get::<f64, _>("segment_start")
+                .map(|v| v as f32)
+                .unwrap_or(0.0),
+            segment_end: row
+                .try_get::<f64, _>("segment_end")
+                .map(|v| v as f32)
+                .unwrap_or(0.0),
             text: row.try_get("text")?,
             language: row.try_get("language")?,
-            confidence: row.try_get::<f64, _>("confidence").map(|v| v as f32).unwrap_or(0.0),
+            confidence: row
+                .try_get::<f64, _>("confidence")
+                .map(|v| v as f32)
+                .unwrap_or(0.0),
             created_at: dt(row, "created_at")?,
         })
     }
@@ -1459,7 +1523,10 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for VoiceCommand {
             channel_id: uuid(row, "channel_id")?,
             command_text: row.try_get("command_text")?,
             action: row.try_get("action")?,
-            confidence: row.try_get::<f64, _>("confidence").map(|v| v as f32).unwrap_or(0.0),
+            confidence: row
+                .try_get::<f64, _>("confidence")
+                .map(|v| v as f32)
+                .unwrap_or(0.0),
             executed: row.try_get("executed").unwrap_or(false),
             created_at: dt(row, "created_at")?,
         })
@@ -1612,9 +1679,18 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for SpatialAudioConfig {
             id: uuid(row, "id")?,
             channel_id: uuid(row, "channel_id")?,
             preset: row.try_get("preset")?,
-            room_width: row.try_get::<f64, _>("room_width").map(|v| v as f32).unwrap_or(10.0),
-            room_depth: row.try_get::<f64, _>("room_depth").map(|v| v as f32).unwrap_or(10.0),
-            room_height: row.try_get::<f64, _>("room_height").map(|v| v as f32).unwrap_or(3.0),
+            room_width: row
+                .try_get::<f64, _>("room_width")
+                .map(|v| v as f32)
+                .unwrap_or(10.0),
+            room_depth: row
+                .try_get::<f64, _>("room_depth")
+                .map(|v| v as f32)
+                .unwrap_or(10.0),
+            room_height: row
+                .try_get::<f64, _>("room_height")
+                .map(|v| v as f32)
+                .unwrap_or(3.0),
             positions: json(row, "positions")?,
             hrtf_enabled: row.try_get("hrtf_enabled").unwrap_or(true),
             ambisonics_order: row.try_get("ambisonics_order")?,
@@ -1655,7 +1731,10 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for ServerRecommendation {
             id: uuid(row, "id")?,
             user_id: uuid(row, "user_id")?,
             server_id: uuid(row, "server_id")?,
-            score: row.try_get::<f64, _>("score").map(|v| v as f32).unwrap_or(0.0),
+            score: row
+                .try_get::<f64, _>("score")
+                .map(|v| v as f32)
+                .unwrap_or(0.0),
             reason: row.try_get("reason")?,
             dismissed: row.try_get("dismissed").unwrap_or(false),
             joined: row.try_get("joined").unwrap_or(false),
@@ -1878,7 +1957,10 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for GovernancePoll {
             description: row.try_get("description").ok(),
             poll_type: row.try_get("poll_type")?,
             options: json(row, "options")?,
-            min_participation: row.try_get::<f64, _>("min_participation").map(|v| v as f32).unwrap_or(0.0),
+            min_participation: row
+                .try_get::<f64, _>("min_participation")
+                .map(|v| v as f32)
+                .unwrap_or(0.0),
             allow_multiple: row.try_get("allow_multiple").unwrap_or(false),
             anonymous: row.try_get("anonymous").unwrap_or(true),
             status: row.try_get("status")?,

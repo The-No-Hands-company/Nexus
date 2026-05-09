@@ -8,10 +8,10 @@
 //! DELETE /drawings/:id                    — Delete drawing
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, Query, State},
     middleware,
     routing::{get, post},
-    Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_common::snowflake;
@@ -20,7 +20,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -31,9 +31,13 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/channels/{channel_id}/whiteboards", get(list_whiteboards))
         .route(
             "/drawings/{id}",
-            get(get_drawing).patch(update_drawing).delete(delete_drawing),
+            get(get_drawing)
+                .patch(update_drawing)
+                .delete(delete_drawing),
         )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ── Request / Response ────────────────────────────────────────────────────────
@@ -68,10 +72,10 @@ async fn create_drawing(
     Path(channel_id): Path<Uuid>,
     Json(body): Json<CreateDrawingRequest>,
 ) -> NexusResult<Json<nexus_common::models::multimedia::Drawing>> {
-    let width = body.width.unwrap_or(800).max(1).min(4096);
-    let height = body.height.unwrap_or(600).max(1).min(4096);
-    let drawing_data_str = serde_json::to_string(&body.drawing_data)
-        .map_err(|_| NexusError::Validation {
+    let width = body.width.unwrap_or(800).clamp(1, 4096);
+    let height = body.height.unwrap_or(600).clamp(1, 4096);
+    let drawing_data_str =
+        serde_json::to_string(&body.drawing_data).map_err(|_| NexusError::Validation {
             message: "Invalid drawing data".into(),
         })?;
 
@@ -134,8 +138,8 @@ async fn update_drawing(
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateDrawingRequest>,
 ) -> NexusResult<Json<nexus_common::models::multimedia::Drawing>> {
-    let drawing_data_str = serde_json::to_string(&body.drawing_data)
-        .map_err(|_| NexusError::Validation {
+    let drawing_data_str =
+        serde_json::to_string(&body.drawing_data).map_err(|_| NexusError::Validation {
             message: "Invalid drawing data".into(),
         })?;
 

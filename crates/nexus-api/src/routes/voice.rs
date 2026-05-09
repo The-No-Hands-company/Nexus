@@ -13,10 +13,10 @@
 //! - GET  /voice/stats                         — Voice server statistics
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, State},
     middleware,
     routing::{get, patch, post},
-    Json, Router,
 };
 use chrono::Utc;
 use nexus_common::{
@@ -29,37 +29,30 @@ use serde::Serialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 /// Voice routes.
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         // Voice channel state
-        .route(
-            "/voice/channels/{channel_id}",
-            get(get_voice_channel_state),
-        )
+        .route("/voice/channels/{channel_id}", get(get_voice_channel_state))
         // Join pre-flight (validates permissions, returns voice server info)
         .route(
             "/voice/channels/{channel_id}/join",
             post(voice_join_preflight),
         )
         // Leave voice channel via REST
-        .route(
-            "/voice/channels/{channel_id}/leave",
-            post(voice_leave),
-        )
+        .route("/voice/channels/{channel_id}/leave", post(voice_leave))
         // Update own voice state
         .route("/voice/state", patch(update_voice_state))
         // Server mute/deaf (moderation)
-        .route(
-            "/voice/channels/{channel_id}/mute",
-            post(server_mute),
-        )
+        .route("/voice/channels/{channel_id}/mute", post(server_mute))
         // Voice stats
         .route("/voice/stats", get(voice_stats))
         // All voice routes require authentication
-        .layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 /// Response for voice channel state.
@@ -93,7 +86,9 @@ async fn get_voice_channel_state(
     let _channel = nexus_db::repository::channels::find_by_id(&state.db.pool, channel_id)
         .await
         .map_err(NexusError::Database)?
-        .ok_or_else(|| NexusError::NotFound { resource: "Channel".into() })?;
+        .ok_or_else(|| NexusError::NotFound {
+            resource: "Channel".into(),
+        })?;
 
     // Get voice states for this channel
     let voice_states = state.voice_state.get_channel_members(channel_id).await;
@@ -120,7 +115,9 @@ async fn voice_join_preflight(
     let channel = nexus_db::repository::channels::find_by_id(&state.db.pool, channel_id)
         .await
         .map_err(NexusError::Database)?
-        .ok_or_else(|| NexusError::NotFound { resource: "Channel".into() })?;
+        .ok_or_else(|| NexusError::NotFound {
+            resource: "Channel".into(),
+        })?;
 
     // Check it's a voice-capable channel
     match channel.channel_type {
@@ -135,8 +132,8 @@ async fn voice_join_preflight(
     }
 
     // Check user limit (0 = unlimited)
-    if let Some(limit) = channel.user_limit {
-        if limit > 0 {
+    if let Some(limit) = channel.user_limit
+        && limit > 0 {
             let current_count = state.voice_state.get_channel_count(channel_id).await;
             if current_count >= limit as usize {
                 metrics::counter!("nexus_voice_requests_total", "route" => "join_preflight", "outcome" => "full").increment(1);
@@ -145,7 +142,6 @@ async fn voice_join_preflight(
                 });
             }
         }
-    }
 
     // If it's a server channel, check membership and timeout status
     if let Some(server_id) = channel.server_id {
@@ -156,14 +152,13 @@ async fn voice_join_preflight(
                 .ok_or(NexusError::Forbidden)?;
 
         // Timeout enforcement: timed-out members cannot join voice
-        if let Some(disabled_until) = member.communication_disabled_until {
-            if disabled_until > Utc::now() {
+        if let Some(disabled_until) = member.communication_disabled_until
+            && disabled_until > Utc::now() {
                 metrics::counter!("nexus_voice_requests_total", "route" => "join_preflight", "outcome" => "timeout_blocked").increment(1);
                 return Err(NexusError::Validation {
                     message: "You are currently timed out in this server".into(),
                 });
             }
-        }
     }
 
     let config = nexus_common::config::get();
@@ -199,7 +194,9 @@ async fn voice_leave(
         .voice_state
         .get_user_state(auth.user_id)
         .await
-        .ok_or_else(|| NexusError::Validation { message: "Not in a voice channel".into() })?;
+        .ok_or_else(|| NexusError::Validation {
+            message: "Not in a voice channel".into(),
+        })?;
 
     if voice_state.channel_id != channel_id {
         metrics::counter!("nexus_voice_requests_total", "route" => "leave", "outcome" => "wrong_channel").increment(1);
@@ -240,7 +237,9 @@ async fn update_voice_state(
         .voice_state
         .update_self_state(auth.user_id, &update)
         .await
-        .ok_or_else(|| NexusError::Validation { message: "Not in a voice channel".into() })?;
+        .ok_or_else(|| NexusError::Validation {
+            message: "Not in a voice channel".into(),
+        })?;
 
     // Broadcast state change
     let _ = state.gateway_tx.send(GatewayEvent {
@@ -267,17 +266,21 @@ async fn server_mute(
     let channel = nexus_db::repository::channels::find_by_id(&state.db.pool, channel_id)
         .await
         .map_err(NexusError::Database)?
-        .ok_or_else(|| NexusError::NotFound { resource: "Channel".into() })?;
+        .ok_or_else(|| NexusError::NotFound {
+            resource: "Channel".into(),
+        })?;
 
-    let server_id = channel
-        .server_id
-        .ok_or_else(|| NexusError::Validation { message: "Not a server channel".into() })?;
+    let server_id = channel.server_id.ok_or_else(|| NexusError::Validation {
+        message: "Not a server channel".into(),
+    })?;
 
     // Check the moderator has the MUTE_MEMBERS permission.
     let server = nexus_db::repository::servers::find_by_id(&state.db.pool, server_id)
         .await
         .map_err(NexusError::Database)?
-        .ok_or_else(|| NexusError::NotFound { resource: "Server".into() })?;
+        .ok_or_else(|| NexusError::NotFound {
+            resource: "Server".into(),
+        })?;
 
     // Server owner always passes; otherwise evaluate role permissions.
     if server.owner_id != auth.user_id {
@@ -287,23 +290,17 @@ async fn server_mute(
                 .map_err(NexusError::Database)?
                 .ok_or(NexusError::Forbidden)?;
 
-        let all_roles =
-            nexus_db::repository::roles::list_server_roles(&state.db.pool, server_id)
-                .await
-                .map_err(NexusError::Database)?;
+        let all_roles = nexus_db::repository::roles::list_server_roles(&state.db.pool, server_id)
+            .await
+            .map_err(NexusError::Database)?;
 
-        let effective = all_roles.iter().fold(
-            Permissions::empty(),
-            |acc, role| {
-                if role.is_default || member.roles.contains(&role.id) {
-                    acc | Permissions::from_bits_truncate(
-                        role.permissions,
-                    )
-                } else {
-                    acc
-                }
-            },
-        );
+        let effective = all_roles.iter().fold(Permissions::empty(), |acc, role| {
+            if role.is_default || member.roles.contains(&role.id) {
+                acc | Permissions::from_bits_truncate(role.permissions)
+            } else {
+                acc
+            }
+        });
 
         if !effective.has(Permissions::MUTE_MEMBERS) {
             metrics::counter!(
@@ -323,7 +320,9 @@ async fn server_mute(
         .voice_state
         .get_user_state(action.target_user_id)
         .await
-        .ok_or_else(|| NexusError::Validation { message: "Target user not in voice".into() })?;
+        .ok_or_else(|| NexusError::Validation {
+            message: "Target user not in voice".into(),
+        })?;
 
     if target_state.channel_id != channel_id {
         metrics::counter!("nexus_voice_requests_total", "route" => "server_mute", "outcome" => "target_wrong_channel").increment(1);
@@ -337,7 +336,9 @@ async fn server_mute(
         .voice_state
         .apply_mod_action(&action)
         .await
-        .ok_or_else(|| NexusError::Internal(anyhow::anyhow!("Voice state not found after apply")))?;
+        .ok_or_else(|| {
+            NexusError::Internal(anyhow::anyhow!("Voice state not found after apply"))
+        })?;
 
     // Broadcast state change
     let _ = state.gateway_tx.send(GatewayEvent {

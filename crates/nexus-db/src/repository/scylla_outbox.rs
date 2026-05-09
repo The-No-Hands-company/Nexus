@@ -35,10 +35,7 @@ pub async fn enqueue_upsert_message(
     Ok(())
 }
 
-pub async fn enqueue_delete_message(
-    pool: &AnyPool,
-    message_id: Uuid,
-) -> Result<(), sqlx::Error> {
+pub async fn enqueue_delete_message(pool: &AnyPool, message_id: Uuid) -> Result<(), sqlx::Error> {
     sqlx::query(
         "INSERT INTO scylla_message_outbox \
             (operation, message_id, payload, status, attempt_count, created_at, updated_at) \
@@ -51,10 +48,7 @@ pub async fn enqueue_delete_message(
     Ok(())
 }
 
-pub async fn claim_pending_jobs(
-    pool: &AnyPool,
-    limit: i64,
-) -> Result<Vec<OutboxJob>, sqlx::Error> {
+pub async fn claim_pending_jobs(pool: &AnyPool, limit: i64) -> Result<Vec<OutboxJob>, sqlx::Error> {
     let rows = sqlx::query_as::<_, (i64, String, String, Option<String>, i32)>(
         "WITH claimed AS ( \
             SELECT id \
@@ -81,8 +75,7 @@ pub async fn claim_pending_jobs(
         .into_iter()
         .filter_map(|(id, operation, message_id, payload, attempts)| {
             let mid = message_id.parse::<Uuid>().ok()?;
-            let payload = payload
-                .and_then(|p| serde_json::from_str::<serde_json::Value>(&p).ok());
+            let payload = payload.and_then(|p| serde_json::from_str::<serde_json::Value>(&p).ok());
             Some(OutboxJob {
                 id,
                 operation,
@@ -108,11 +101,7 @@ pub async fn mark_job_completed(pool: &AnyPool, id: i64) -> Result<(), sqlx::Err
     Ok(())
 }
 
-pub async fn mark_job_failed(
-    pool: &AnyPool,
-    id: i64,
-    error: &str,
-) -> Result<(), sqlx::Error> {
+pub async fn mark_job_failed(pool: &AnyPool, id: i64, error: &str) -> Result<(), sqlx::Error> {
     sqlx::query(
         "UPDATE scylla_message_outbox \
          SET status = CASE WHEN attempt_count >= 10 THEN 'failed' ELSE 'pending' END, \

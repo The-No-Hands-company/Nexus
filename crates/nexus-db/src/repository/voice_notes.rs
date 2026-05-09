@@ -60,10 +60,7 @@ pub async fn list_voice_notes(
         .await
 }
 
-pub async fn find_voice_note(
-    pool: &AnyPool,
-    id: Uuid,
-) -> Result<Option<VoiceNote>, sqlx::Error> {
+pub async fn find_voice_note(pool: &AnyPool, id: Uuid) -> Result<Option<VoiceNote>, sqlx::Error> {
     let q = format!("SELECT {VOICE_NOTE_COLS} FROM voice_notes WHERE id = $1");
     sqlx::query_as::<_, VoiceNote>(&q)
         .bind(id.to_string())
@@ -76,9 +73,8 @@ pub async fn set_voice_note_transcript(
     id: Uuid,
     transcript: &str,
 ) -> Result<VoiceNote, sqlx::Error> {
-    let q = format!(
-        "UPDATE voice_notes SET transcript = $2 WHERE id = $1 RETURNING {VOICE_NOTE_COLS}"
-    );
+    let q =
+        format!("UPDATE voice_notes SET transcript = $2 WHERE id = $1 RETURNING {VOICE_NOTE_COLS}");
     sqlx::query_as::<_, VoiceNote>(&q)
         .bind(id.to_string())
         .bind(transcript)
@@ -164,10 +160,7 @@ pub async fn list_video_notes(
         .await
 }
 
-pub async fn find_video_note(
-    pool: &AnyPool,
-    id: Uuid,
-) -> Result<Option<VideoNote>, sqlx::Error> {
+pub async fn find_video_note(pool: &AnyPool, id: Uuid) -> Result<Option<VideoNote>, sqlx::Error> {
     let q = format!("SELECT {VIDEO_NOTE_COLS} FROM video_notes WHERE id = $1");
     sqlx::query_as::<_, VideoNote>(&q)
         .bind(id.to_string())
@@ -180,9 +173,8 @@ pub async fn set_video_note_transcript(
     id: Uuid,
     transcript: &str,
 ) -> Result<VideoNote, sqlx::Error> {
-    let q = format!(
-        "UPDATE video_notes SET transcript = $2 WHERE id = $1 RETURNING {VIDEO_NOTE_COLS}"
-    );
+    let q =
+        format!("UPDATE video_notes SET transcript = $2 WHERE id = $1 RETURNING {VIDEO_NOTE_COLS}");
     sqlx::query_as::<_, VideoNote>(&q)
         .bind(id.to_string())
         .bind(transcript)

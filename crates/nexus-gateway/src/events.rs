@@ -84,12 +84,18 @@ mod tests {
 
     #[test]
     fn message_reaction_add_displays_correctly() {
-        assert_eq!(EventType::MessageReactionAdd.to_string(), "MESSAGE_REACTION_ADD");
+        assert_eq!(
+            EventType::MessageReactionAdd.to_string(),
+            "MESSAGE_REACTION_ADD"
+        );
     }
 
     #[test]
     fn voice_state_update_displays_correctly() {
-        assert_eq!(EventType::VoiceStateUpdate.to_string(), "VOICE_STATE_UPDATE");
+        assert_eq!(
+            EventType::VoiceStateUpdate.to_string(),
+            "VOICE_STATE_UPDATE"
+        );
     }
 
     #[test]
@@ -100,27 +106,23 @@ mod tests {
     #[test]
     fn all_variants_produce_screaming_snake_case() {
         let variants = vec![
-            (EventType::MessageCreate,       "MESSAGE_CREATE"),
-            (EventType::MessageUpdate,       "MESSAGE_UPDATE"),
-            (EventType::MessageDelete,       "MESSAGE_DELETE"),
-            (EventType::MessageBulkDelete,   "MESSAGE_BULK_DELETE"),
-            (EventType::MessageReactionAdd,  "MESSAGE_REACTION_ADD"),
+            (EventType::MessageCreate, "MESSAGE_CREATE"),
+            (EventType::MessageUpdate, "MESSAGE_UPDATE"),
+            (EventType::MessageDelete, "MESSAGE_DELETE"),
+            (EventType::MessageBulkDelete, "MESSAGE_BULK_DELETE"),
+            (EventType::MessageReactionAdd, "MESSAGE_REACTION_ADD"),
             (EventType::MessageReactionRemove, "MESSAGE_REACTION_REMOVE"),
-            (EventType::ChannelCreate,       "CHANNEL_CREATE"),
-            (EventType::ChannelUpdate,       "CHANNEL_UPDATE"),
-            (EventType::ChannelDelete,       "CHANNEL_DELETE"),
-            (EventType::PresenceUpdate,      "PRESENCE_UPDATE"),
-            (EventType::TypingStart,         "TYPING_START"),
-            (EventType::VoiceStateUpdate,    "VOICE_STATE_UPDATE"),
-            (EventType::VoiceServerUpdate,   "VOICE_SERVER_UPDATE"),
-            (EventType::UserUpdate,          "USER_UPDATE"),
+            (EventType::ChannelCreate, "CHANNEL_CREATE"),
+            (EventType::ChannelUpdate, "CHANNEL_UPDATE"),
+            (EventType::ChannelDelete, "CHANNEL_DELETE"),
+            (EventType::PresenceUpdate, "PRESENCE_UPDATE"),
+            (EventType::TypingStart, "TYPING_START"),
+            (EventType::VoiceStateUpdate, "VOICE_STATE_UPDATE"),
+            (EventType::VoiceServerUpdate, "VOICE_SERVER_UPDATE"),
+            (EventType::UserUpdate, "USER_UPDATE"),
         ];
         for (variant, expected) in variants {
-            assert_eq!(
-                variant.to_string(),
-                expected,
-                "wrong display for variant"
-            );
+            assert_eq!(variant.to_string(), expected, "wrong display for variant");
         }
     }
 

@@ -6,10 +6,10 @@
 //!                                  but here we provide the MeiliSearch-backed version)
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, Query, State},
     middleware,
     routing::get,
-    Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_db::repository::{channels, members};
@@ -18,14 +18,22 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
+use crate::{
+    AppState,
+    middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip},
+};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/search/messages", get(search_messages_global))
         .route("/servers/{server_id}/search", get(search_server_messages))
-        .route("/channels/{channel_id}/search/meili", get(search_channel_messages))
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route(
+            "/channels/{channel_id}/search/meili",
+            get(search_channel_messages),
+        )
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ============================================================
@@ -175,7 +183,8 @@ async fn search_messages_global(
         .map(|h| serde_json::to_value(h).unwrap_or_default())
         .collect();
 
-    metrics::counter!("nexus_search_requests_total", "scope" => "global", "outcome" => "ok").increment(1);
+    metrics::counter!("nexus_search_requests_total", "scope" => "global", "outcome" => "ok")
+        .increment(1);
 
     Ok(Json(SearchResult {
         query: params.q,
@@ -201,13 +210,17 @@ async fn search_server_messages(
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:search:user:{}", auth.user_id),
-        20, 60,
-    ).await?;
+        20,
+        60,
+    )
+    .await?;
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:search:ip:{ip}"),
-        40, 60,
-    ).await?;
+        40,
+        60,
+    )
+    .await?;
     if params.q.len() > 500 || params.q.trim().is_empty() {
         return Err(nexus_common::error::NexusError::Validation {
             message: "Search query must be 1-500 characters".into(),
@@ -241,7 +254,7 @@ async fn search_server_messages(
             offset,
         )
         .await
-        .map_err(|e| NexusError::Internal(e))?;
+        .map_err(NexusError::Internal)?;
 
     let hits: Vec<serde_json::Value> = results
         .hits
@@ -249,7 +262,8 @@ async fn search_server_messages(
         .map(|h| serde_json::to_value(h).unwrap_or_default())
         .collect();
 
-    metrics::counter!("nexus_search_requests_total", "scope" => "server", "outcome" => "ok").increment(1);
+    metrics::counter!("nexus_search_requests_total", "scope" => "server", "outcome" => "ok")
+        .increment(1);
 
     Ok(Json(SearchResult {
         query: params.q,
@@ -340,7 +354,7 @@ async fn search_channel_messages(
             offset,
         )
         .await
-        .map_err(|e| NexusError::Internal(e))?;
+        .map_err(NexusError::Internal)?;
 
     let hits: Vec<serde_json::Value> = results
         .hits
@@ -348,7 +362,8 @@ async fn search_channel_messages(
         .map(|h| serde_json::to_value(h).unwrap_or_default())
         .collect();
 
-    metrics::counter!("nexus_search_requests_total", "scope" => "channel", "outcome" => "ok").increment(1);
+    metrics::counter!("nexus_search_requests_total", "scope" => "channel", "outcome" => "ok")
+        .increment(1);
 
     Ok(Json(SearchResult {
         query: params.q,
@@ -358,4 +373,3 @@ async fn search_channel_messages(
         hits,
     }))
 }
-

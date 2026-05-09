@@ -20,23 +20,23 @@
 //! | PUT    | `/_matrix/app/v1/transactions/{txnId}` | Matrix AS bridge inbound transactions |
 
 use axum::{
+    Json, Router,
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{get, put},
-    Json, Router,
 };
-use nexus_common::gateway_event::{event_types, GatewayEvent};
+use nexus_common::gateway_event::{GatewayEvent, event_types};
 use nexus_db::repository::users;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sqlx::Row as _;
-use tracing::{debug, info, warn};
 use std::sync::Arc;
+use tracing::{debug, info, warn};
 
 use crate::{
-    middleware::{check_rate_limit_with_fallback, extract_client_ip},
     AppState,
+    middleware::{check_rate_limit_with_fallback, extract_client_ip},
 };
 
 // ─── Router ───────────────────────────────────────────────────────────────────
@@ -52,7 +52,10 @@ pub fn federation_router() -> Router<Arc<AppState>> {
         // Well-known delegation
         .route("/.well-known/nexus/server", get(well_known_server))
         // Federation S2S endpoints
-        .route("/_nexus/federation/v1/send/{txn_id}", put(receive_transaction))
+        .route(
+            "/_nexus/federation/v1/send/{txn_id}",
+            put(receive_transaction),
+        )
         .route("/_nexus/federation/v1/event/{event_id}", get(get_event))
         .route("/_nexus/federation/v1/state/{room_id}", get(get_room_state))
         .route(
@@ -67,10 +70,19 @@ pub fn federation_router() -> Router<Arc<AppState>> {
         // v0.8/08-03: User profile endpoint (MXID resolution)
         .route("/_nexus/federation/v1/user/{user_id}", get(user_profile))
         // v0.9: Cross-server friend requests
-        .route("/_nexus/federation/v1/friend_request", put(receive_friend_request))
-        .route("/_nexus/federation/v1/friend_request/respond", put(receive_friend_request_response))
+        .route(
+            "/_nexus/federation/v1/friend_request",
+            put(receive_friend_request),
+        )
+        .route(
+            "/_nexus/federation/v1/friend_request/respond",
+            put(receive_friend_request_response),
+        )
         // Matrix Application Service bridge (inbound)
-        .route("/_matrix/app/v1/transactions/{txn_id}", put(matrix_as_transaction))
+        .route(
+            "/_matrix/app/v1/transactions/{txn_id}",
+            put(matrix_as_transaction),
+        )
 }
 
 // ─── Key document ─────────────────────────────────────────────────────────────
@@ -96,11 +108,9 @@ async fn server_key_document(State(state): State<Arc<AppState>>) -> impl IntoRes
 /// look at the `m.server` field.
 async fn well_known_server(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     // Prefer explicit env overrides, otherwise use the configured server_name.
-    let server_name =
-        std::env::var("NEXUS_FEDERATION_SERVER").unwrap_or_else(|_| {
-            std::env::var("NEXUS_SERVER_NAME")
-                .unwrap_or_else(|_| state.server_name.clone())
-        });
+    let server_name = std::env::var("NEXUS_FEDERATION_SERVER").unwrap_or_else(|_| {
+        std::env::var("NEXUS_SERVER_NAME").unwrap_or_else(|_| state.server_name.clone())
+    });
 
     // If server_name has no explicit port, append the API port so remote
     // servers can discover us correctly (especially on LAN / non-standard ports).
@@ -117,14 +127,15 @@ async fn well_known_server(State(state): State<Arc<AppState>>) -> impl IntoRespo
 
     // Load optional identity from instance_settings.
     let identity: serde_json::Value = sqlx::query(
-        "SELECT value::text AS value_text FROM instance_settings WHERE key = 'federation_identity'")
-        .fetch_optional(&state.db.pool)
-        .await
-        .ok()
-        .flatten()
-        .and_then(|r| r.try_get::<String, _>("value_text").ok())
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .unwrap_or_else(|| json!({}));
+        "SELECT value::text AS value_text FROM instance_settings WHERE key = 'federation_identity'",
+    )
+    .fetch_optional(&state.db.pool)
+    .await
+    .ok()
+    .flatten()
+    .and_then(|r| r.try_get::<String, _>("value_text").ok())
+    .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+    .unwrap_or_else(|| json!({}));
 
     // Count local users (best-effort).
     let user_count: i64 = sqlx::query("SELECT COUNT(*) AS count FROM users")
@@ -135,13 +146,13 @@ async fn well_known_server(State(state): State<Arc<AppState>>) -> impl IntoRespo
         .unwrap_or(0);
 
     // Count active peers.
-    let peer_count: i64 = sqlx::query(
-        "SELECT COUNT(*) AS count FROM federated_servers WHERE is_blocked = false")
-        .fetch_one(&state.db.pool)
-        .await
-        .ok()
-        .and_then(|r| r.try_get::<i64, _>("count").ok())
-        .unwrap_or(0);
+    let peer_count: i64 =
+        sqlx::query("SELECT COUNT(*) AS count FROM federated_servers WHERE is_blocked = false")
+            .fetch_one(&state.db.pool)
+            .await
+            .ok()
+            .and_then(|r| r.try_get::<i64, _>("count").ok())
+            .unwrap_or(0);
 
     let version = concat!("Nexus ", env!("CARGO_PKG_VERSION"));
 
@@ -179,13 +190,20 @@ async fn receive_transaction(
         format!("rl:fed:txn:ip:{ip}"),
         100,
         60,
-    ).await {
-        return (StatusCode::TOO_MANY_REQUESTS, Json(json!({ "error": e.to_string() }))).into_response();
+    )
+    .await
+    {
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(json!({ "error": e.to_string() })),
+        )
+            .into_response();
     }
-    
+
     // ── 1. Authenticate — full Ed25519 HTTP-request signature check ───────────
     let txn_uri = format!("/_nexus/federation/v1/send/{}", txn_id);
-    let origin = match verify_inbound_request(&state, &headers, "PUT", &txn_uri, Some(&body)).await {
+    let origin = match verify_inbound_request(&state, &headers, "PUT", &txn_uri, Some(&body)).await
+    {
         Ok(o) => o,
         Err((status, e)) => {
             warn!("Rejected federated transaction {}: {}", txn_id, e);
@@ -207,7 +225,10 @@ async fn receive_transaction(
     .await
     {
         Ok(Some(_)) => {
-            debug!("Txn {} from {} already processed — replying idempotently", txn_id, origin);
+            debug!(
+                "Txn {} from {} already processed — replying idempotently",
+                txn_id, origin
+            );
             return (StatusCode::OK, Json(json!({}))).into_response();
         }
         Ok(None) => {}
@@ -245,7 +266,16 @@ async fn receive_transaction(
     let mut accepted = 0i32;
 
     for pdu in &pdus {
-        match process_pdu(&state.db.pool, &origin, &txn_id, &verify_keys, &state.server_name, pdu).await {
+        match process_pdu(
+            &state.db.pool,
+            &origin,
+            &txn_id,
+            &verify_keys,
+            &state.server_name,
+            pdu,
+        )
+        .await
+        {
             Ok(true) => accepted += 1,
             Ok(false) => debug!("PDU from {} was a duplicate (already stored)", origin),
             Err(e) => warn!("Rejected PDU from {}: {}", origin, e),
@@ -277,9 +307,9 @@ async fn receive_transaction(
     // ── 7. Real-time dispatch to local members of federated rooms ─────────────
     // For each message-type PDU that arrived, notify any local users who have
     // joined the originating room so their clients update in real time.
-        // First pass: collect all unique room IDs from message PDUs
-        let mut message_rooms: std::collections::HashSet<String> = std::collections::HashSet::new();
-        for pdu in &pdus {
+    // First pass: collect all unique room IDs from message PDUs
+    let mut message_rooms: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for pdu in &pdus {
         let event_type = pdu.get("type").and_then(Value::as_str).unwrap_or("");
         if !matches!(event_type, "nexus.message.create" | "m.room.message") {
             continue;
@@ -288,52 +318,66 @@ async fn receive_transaction(
             Some(r) => r.to_owned(),
             None => continue,
         };
-            message_rooms.insert(room_id);
-        }
+        message_rooms.insert(room_id);
+    }
 
-        // Batch load all room members in one query (eliminates N queries)
-        let mut room_members: std::collections::HashMap<String, Vec<uuid::Uuid>> = std::collections::HashMap::new();
-        if !message_rooms.is_empty() {
-            let room_ids: Vec<&str> = message_rooms.iter().map(|s| s.as_str()).collect();
-            let mut qb = sqlx::QueryBuilder::new(
-                "SELECT room_id, user_id FROM federated_room_members WHERE room_id IN (",
-            );
-            {
-                let mut separated = qb.separated(", ");
-                for room_id in &room_ids {
-                    separated.push_bind(*room_id);
-                }
+    // Batch load all room members in one query (eliminates N queries)
+    let mut room_members: std::collections::HashMap<String, Vec<uuid::Uuid>> =
+        std::collections::HashMap::new();
+    if !message_rooms.is_empty() {
+        let room_ids: Vec<&str> = message_rooms.iter().map(|s| s.as_str()).collect();
+        let mut qb = sqlx::QueryBuilder::new(
+            "SELECT room_id, user_id FROM federated_room_members WHERE room_id IN (",
+        );
+        {
+            let mut separated = qb.separated(", ");
+            for room_id in &room_ids {
+                separated.push_bind(*room_id);
             }
-            qb.push(")");
+        }
+        qb.push(")");
 
-            if let Ok(rows) = qb.build().fetch_all(&state.db.pool).await {
-                for row in rows {
-                    use sqlx::Row as _;
-                    if let (Ok(rid), Ok(uid_str)) = (row.try_get::<String, _>("room_id"), row.try_get::<String, _>("user_id")) {
-                        if let Ok(uid) = uuid::Uuid::parse_str(&uid_str) {
-                            room_members.entry(rid).or_insert_with(Vec::new).push(uid);
-                        }
+        if let Ok(rows) = qb.build().fetch_all(&state.db.pool).await {
+            for row in rows {
+                use sqlx::Row as _;
+                if let (Ok(rid), Ok(uid_str)) = (
+                    row.try_get::<String, _>("room_id"),
+                    row.try_get::<String, _>("user_id"),
+                )
+                    && let Ok(uid) = uuid::Uuid::parse_str(&uid_str) {
+                        room_members.entry(rid).or_default().push(uid);
                     }
-                }
             }
         }
+    }
 
-        // Second pass: dispatch events using pre-loaded members
-        for pdu in &pdus {
-            let event_type = pdu.get("type").and_then(Value::as_str).unwrap_or("");
-            if !matches!(event_type, "nexus.message.create" | "m.room.message") {
-                continue;
-            }
-            let room_id = match pdu.get("room_id").and_then(Value::as_str) {
-                Some(r) => r.to_owned(),
-                None => continue,
-            };
-        let sender = pdu.get("sender").and_then(Value::as_str).unwrap_or("unknown").to_owned();
+    // Second pass: dispatch events using pre-loaded members
+    for pdu in &pdus {
+        let event_type = pdu.get("type").and_then(Value::as_str).unwrap_or("");
+        if !matches!(event_type, "nexus.message.create" | "m.room.message") {
+            continue;
+        }
+        let room_id = match pdu.get("room_id").and_then(Value::as_str) {
+            Some(r) => r.to_owned(),
+            None => continue,
+        };
+        let sender = pdu
+            .get("sender")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_owned();
         let content = pdu.get("content").cloned().unwrap_or_else(|| json!({}));
-        let event_id = pdu.get("event_id").and_then(Value::as_str).unwrap_or("").to_owned();
-        let ts = pdu.get("origin_server_ts").and_then(Value::as_i64).unwrap_or(0);
+        let event_id = pdu
+            .get("event_id")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_owned();
+        let ts = pdu
+            .get("origin_server_ts")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
 
-            let member_ids = room_members.get(&room_id).cloned().unwrap_or_default();
+        let member_ids = room_members.get(&room_id).cloned().unwrap_or_default();
         for member_id in member_ids {
             let _ = state.gateway_tx.send(GatewayEvent {
                 event_type: "FEDERATED_MESSAGE_CREATE".to_owned(),
@@ -380,9 +424,15 @@ async fn process_pdu(
         .get("room_id")
         .and_then(Value::as_str)
         .ok_or_else(|| anyhow::anyhow!("PDU missing room_id"))?;
-    let event_type = pdu.get("type").and_then(Value::as_str).unwrap_or("nexus.unknown");
+    let event_type = pdu
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("nexus.unknown");
     let sender = pdu.get("sender").and_then(Value::as_str).unwrap_or(origin);
-    let origin_server_ts = pdu.get("origin_server_ts").and_then(Value::as_i64).unwrap_or(0);
+    let origin_server_ts = pdu
+        .get("origin_server_ts")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
     let content = pdu
         .get("content")
         .cloned()
@@ -426,11 +476,10 @@ async fn process_pdu(
     let new_event = result.rows_affected() > 0;
 
     // Upsert the sender's profile into federated_users (skip for local users).
-    if new_event {
-        if let Err(e) = upsert_federated_user(pool, local_server_name, sender, pdu).await {
+    if new_event
+        && let Err(e) = upsert_federated_user(pool, local_server_name, sender, pdu).await {
             debug!("Could not upsert federated user {}: {}", sender, e);
         }
-    }
 
     Ok(new_event)
 }
@@ -480,22 +529,18 @@ async fn load_server_verify_keys(
     pool: &sqlx::AnyPool,
     server_name: &str,
 ) -> serde_json::Map<String, Value> {
-    let row = sqlx::query(
-        "SELECT verify_keys FROM federated_servers WHERE server_name = $1",
-    )
-    .bind(server_name)
-    .fetch_optional(pool)
-    .await
-    .ok()
-    .flatten();
+    let row = sqlx::query("SELECT verify_keys FROM federated_servers WHERE server_name = $1")
+        .bind(server_name)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten();
 
-    if let Some(row) = row {
-        if let Ok(s) = row.try_get::<String, _>("verify_keys") {
-            if let Ok(Value::Object(m)) = serde_json::from_str::<Value>(&s) {
+    if let Some(row) = row
+        && let Ok(s) = row.try_get::<String, _>("verify_keys")
+            && let Ok(Value::Object(m)) = serde_json::from_str::<Value>(&s) {
                 return m;
             }
-        }
-    }
     Default::default()
 }
 
@@ -535,12 +580,18 @@ async fn get_event(
             });
             (StatusCode::OK, Json(json!({ "pdu": pdu }))).into_response()
         }
-        Ok(None) => {
-            (StatusCode::NOT_FOUND, Json(json!({ "error": "Event not found" }))).into_response()
-        }
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "Event not found" })),
+        )
+            .into_response(),
         Err(e) => {
             warn!("Error fetching event {}: {}", event_id, e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "DB error" }))).into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "DB error" })),
+            )
+                .into_response()
         }
     }
 }
@@ -633,7 +684,11 @@ async fn get_room_state(
         })
         .collect();
 
-    (StatusCode::OK, Json(json!({ "pdus": pdus, "auth_chain": [] }))).into_response()
+    (
+        StatusCode::OK,
+        Json(json!({ "pdus": pdus, "auth_chain": [] })),
+    )
+        .into_response()
 }
 
 // ─── Join protocol ────────────────────────────────────────────────────────────
@@ -647,31 +702,41 @@ async fn make_join(
     headers: HeaderMap,
     Path((room_id, user_id)): Path<(String, String)>,
 ) -> impl IntoResponse {
-        let origin = match extract_federation_origin(&headers) {
-            Ok(o) => o,
-            Err(e) => return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response(),
-        };
+    let origin = match extract_federation_origin(&headers) {
+        Ok(o) => o,
+        Err(e) => return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response(),
+    };
 
-        let pool = &state.db.pool;
+    let pool = &state.db.pool;
 
-        // Check if room exists and validate join_rule
-        let room_row = sqlx::query("SELECT join_rule FROM federated_rooms WHERE room_id = $1")
-            .bind(&room_id)
-            .fetch_optional(pool)
-            .await
-            .unwrap_or(None);
+    // Check if room exists and validate join_rule
+    let room_row = sqlx::query("SELECT join_rule FROM federated_rooms WHERE room_id = $1")
+        .bind(&room_id)
+        .fetch_optional(pool)
+        .await
+        .unwrap_or(None);
 
-        if let Some(row) = room_row {
-            let join_rule = row.try_get::<String, _>("join_rule").unwrap_or_else(|_| "public".to_string());
-            if join_rule != "public" {
-                tracing::warn!(origin = %origin, room_id = %room_id, user_id = %user_id, join_rule = %join_rule, "Denied join: not public");
-                return (StatusCode::FORBIDDEN, Json(json!({"error": format!("Room has join_rule: {}", join_rule)}))).into_response();
-            }
-        } else {
-            return (StatusCode::NOT_FOUND, Json(json!({"error": "Room not found"}))).into_response();
+    if let Some(row) = room_row {
+        let join_rule = row
+            .try_get::<String, _>("join_rule")
+            .unwrap_or_else(|_| "public".to_string());
+        if join_rule != "public" {
+            tracing::warn!(origin = %origin, room_id = %room_id, user_id = %user_id, join_rule = %join_rule, "Denied join: not public");
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({"error": format!("Room has join_rule: {}", join_rule)})),
+            )
+                .into_response();
         }
+    } else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({"error": "Room not found"})),
+        )
+            .into_response();
+    }
 
-        let server_name = &state.server_name;
+    let server_name = &state.server_name;
 
     let template = json!({
         "room_version": "nexus.v1",
@@ -704,7 +769,10 @@ async fn send_join(
         Err(e) => return (StatusCode::UNAUTHORIZED, Json(json!({ "error": e }))).into_response(),
     };
 
-    info!("Processing send_join for room {} event {} from {}", room_id, event_id, origin);
+    info!(
+        "Processing send_join for room {} event {} from {}",
+        room_id, event_id, origin
+    );
 
     let pool = &state.db.pool;
 
@@ -713,10 +781,17 @@ async fn send_join(
     if !verify_keys.is_empty() {
         if let Err(e) = verify_pdu_signature(&event, &origin, &verify_keys) {
             warn!("send_join sig verify failed from {}: {}", origin, e);
-            return (StatusCode::FORBIDDEN, Json(json!({ "error": "invalid signature" }))).into_response();
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({ "error": "invalid signature" })),
+            )
+                .into_response();
         }
     } else {
-        debug!("No cached keys for {} — accepting send_join without sig verify", origin);
+        debug!(
+            "No cached keys for {} — accepting send_join without sig verify",
+            origin
+        );
     }
 
     // Upsert room.
@@ -739,9 +814,20 @@ async fn send_join(
     .await;
 
     // Persist join event.
-    let event_type = event.get("type").and_then(Value::as_str).unwrap_or("nexus.member.join").to_owned();
-    let sender = event.get("sender").and_then(Value::as_str).unwrap_or("").to_owned();
-    let ts = event.get("origin_server_ts").and_then(Value::as_i64).unwrap_or(0);
+    let event_type = event
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or("nexus.member.join")
+        .to_owned();
+    let sender = event
+        .get("sender")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_owned();
+    let ts = event
+        .get("origin_server_ts")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
     let content = event.get("content").cloned().unwrap_or(json!({}));
     let sigs = event.get("signatures").cloned().unwrap_or(json!({}));
     let _ = sqlx::query(
@@ -796,7 +882,11 @@ async fn send_join(
         })
         .collect();
 
-    (StatusCode::OK, Json(json!({ "state": state_pdus, "auth_chain": [] }))).into_response()
+    (
+        StatusCode::OK,
+        Json(json!({ "state": state_pdus, "auth_chain": [] })),
+    )
+        .into_response()
 }
 
 // ─── Backfill ─────────────────────────────────────────────────────────────────
@@ -884,12 +974,15 @@ async fn matrix_as_transaction(
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
     // Validate homeserver token.
-    let expected_token =
-        std::env::var("NEXUS_MATRIX_HS_TOKEN").unwrap_or_default();
+    let expected_token = std::env::var("NEXUS_MATRIX_HS_TOKEN").unwrap_or_default();
     let provided = params.get("access_token").map(String::as_str).unwrap_or("");
 
     if !expected_token.is_empty() && provided != expected_token {
-        return (StatusCode::FORBIDDEN, Json(json!({ "error": "Invalid homeserver token" }))).into_response();
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": "Invalid homeserver token" })),
+        )
+            .into_response();
     }
 
     // Parse body as a Matrix AS transaction.
@@ -897,11 +990,19 @@ async fn matrix_as_transaction(
         Ok(t) => t,
         Err(e) => {
             warn!("matrix_as_transaction {}: parse error: {}", txn_id, e);
-            return (StatusCode::BAD_REQUEST, Json(json!({ "error": "invalid transaction body" }))).into_response();
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "invalid transaction body" })),
+            )
+                .into_response();
         }
     };
 
-    info!("Matrix AS transaction {}: {} events", txn_id, txn.events.len());
+    info!(
+        "Matrix AS transaction {}: {} events",
+        txn_id,
+        txn.events.len()
+    );
 
     // Create bridge from env and translate events.
     let homeserver_url = std::env::var("NEXUS_MATRIX_HS_URL").unwrap_or_default();
@@ -944,16 +1045,29 @@ async fn matrix_as_transaction(
                     };
                     let _ = state.gateway_tx.send(gw);
                 }
-                nexus_federation::BridgedEvent::MemberJoin { matrix_room_id, mxid, display_name } => {
-                    debug!("Matrix member join: {} ({:?}) in {}", mxid, display_name, matrix_room_id);
+                nexus_federation::BridgedEvent::MemberJoin {
+                    matrix_room_id,
+                    mxid,
+                    display_name,
+                } => {
+                    debug!(
+                        "Matrix member join: {} ({:?}) in {}",
+                        mxid, display_name, matrix_room_id
+                    );
                 }
-                nexus_federation::BridgedEvent::MemberLeave { matrix_room_id, mxid } => {
+                nexus_federation::BridgedEvent::MemberLeave {
+                    matrix_room_id,
+                    mxid,
+                } => {
                     debug!("Matrix member leave: {} in {}", mxid, matrix_room_id);
                 }
             }
         }
     } else {
-        debug!("NEXUS_MATRIX_HS_URL not set — skipping bridge processing for {}", txn_id);
+        debug!(
+            "NEXUS_MATRIX_HS_URL not set — skipping bridge processing for {}",
+            txn_id
+        );
     }
 
     (StatusCode::OK, Json(json!({}))).into_response()
@@ -987,13 +1101,16 @@ async fn user_profile(
                         StatusCode::NOT_FOUND,
                         Json(json!({ "error": "User not on this server" })),
                     )
-                    .into_response();
+                        .into_response();
                 }
                 lp
             }
             None => {
-                return (StatusCode::BAD_REQUEST, Json(json!({ "error": "Invalid MXID" })))
-                    .into_response()
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({ "error": "Invalid MXID" })),
+                )
+                    .into_response();
             }
         }
     } else {
@@ -1014,14 +1131,20 @@ async fn user_profile(
                     "bio":          user.bio,
                 })),
             )
-            .into_response()
+                .into_response()
         }
-        Ok(None) => {
-            (StatusCode::NOT_FOUND, Json(json!({ "error": "User not found" }))).into_response()
-        }
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(json!({ "error": "User not found" })),
+        )
+            .into_response(),
         Err(e) => {
             warn!("DB error resolving user {}: {}", localpart, e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "DB error" }))).into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "DB error" })),
+            )
+                .into_response()
         }
     }
 }
@@ -1062,14 +1185,13 @@ async fn upsert_federated_user(
     };
 
     // Look up (or insert) the origin server to get its UUID.
-    let server_id: Option<uuid::Uuid> = sqlx::query(
-        "SELECT id FROM federated_servers WHERE server_name = $1",
-    )
-    .bind(&server)
-    .fetch_optional(pool)
-    .await?
-    .and_then(|r| r.try_get::<String, _>("id").ok())
-    .and_then(|s| uuid::Uuid::parse_str(&s).ok());
+    let server_id: Option<uuid::Uuid> =
+        sqlx::query("SELECT id FROM federated_servers WHERE server_name = $1")
+            .bind(&server)
+            .fetch_optional(pool)
+            .await?
+            .and_then(|r| r.try_get::<String, _>("id").ok())
+            .and_then(|s| uuid::Uuid::parse_str(&s).ok());
 
     let server_id = match server_id {
         Some(id) => id,
@@ -1083,7 +1205,8 @@ async fn upsert_federated_user(
             .bind(&server)
             .fetch_one(pool)
             .await?;
-            uuid::Uuid::parse_str(&row.try_get::<String, _>("id")?).map_err(|e| sqlx::Error::Decode(Box::new(e) as _))?
+            uuid::Uuid::parse_str(&row.try_get::<String, _>("id")?)
+                .map_err(|e| sqlx::Error::Decode(Box::new(e) as _))?
         }
     };
 
@@ -1149,10 +1272,17 @@ async fn receive_friend_request(
     // Serialize body back to Value for signature verification before consuming it.
     let body_value = match serde_json::to_value(&body) {
         Ok(v) => v,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "internal error" }))).into_response(),
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "internal error" })),
+            )
+                .into_response();
+        }
     };
 
-    let origin = match verify_inbound_request(&state, &headers, "PUT", URI, Some(&body_value)).await {
+    let origin = match verify_inbound_request(&state, &headers, "PUT", URI, Some(&body_value)).await
+    {
         Ok(o) => o,
         Err((status, msg)) => {
             warn!("Rejected federated friend request: {}", msg);
@@ -1166,30 +1296,44 @@ async fn receive_friend_request(
     );
 
     // Find the local target user (must be a real local account, not a shadow).
-    let target = match nexus_db::repository::users::find_by_username(
-        &state.db.pool,
-        &body.target_username,
-    )
-    .await
-    {
-        Ok(Some(u)) if !u.is_remote => u,
-        Ok(Some(_)) => {
-            return (StatusCode::NOT_FOUND, Json(json!({ "error": "user not found" }))).into_response();
-        }
-        Ok(None) => {
-            return (StatusCode::NOT_FOUND, Json(json!({ "error": "user not found" }))).into_response();
-        }
-        Err(e) => {
-            warn!("DB error looking up target user: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "internal error" }))).into_response();
-        }
-    };
+    let target =
+        match nexus_db::repository::users::find_by_username(&state.db.pool, &body.target_username)
+            .await
+        {
+            Ok(Some(u)) if !u.is_remote => u,
+            Ok(Some(_)) => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({ "error": "user not found" })),
+                )
+                    .into_response();
+            }
+            Ok(None) => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({ "error": "user not found" })),
+                )
+                    .into_response();
+            }
+            Err(e) => {
+                warn!("DB error looking up target user: {}", e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "internal error" })),
+                )
+                    .into_response();
+            }
+        };
 
     // Parse the requester UUID.
     let requester_id = match uuid::Uuid::parse_str(&body.requester_id) {
         Ok(id) => id,
         Err(_) => {
-            return (StatusCode::BAD_REQUEST, Json(json!({ "error": "invalid requester_id" }))).into_response();
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "invalid requester_id" })),
+            )
+                .into_response();
         }
     };
 
@@ -1206,8 +1350,15 @@ async fn receive_friend_request(
     {
         Ok(u) => u,
         Err(e) => {
-            warn!("Failed to upsert remote user {}@{}: {}", body.requester_username, origin, e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "internal error" }))).into_response();
+            warn!(
+                "Failed to upsert remote user {}@{}: {}",
+                body.requester_username, origin, e
+            );
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "internal error" })),
+            )
+                .into_response();
         }
     };
 
@@ -1220,7 +1371,11 @@ async fn receive_friend_request(
     .await
     {
         Ok(Some(_)) => {
-            return (StatusCode::CONFLICT, Json(json!({ "error": "relationship already exists" }))).into_response();
+            return (
+                StatusCode::CONFLICT,
+                Json(json!({ "error": "relationship already exists" })),
+            )
+                .into_response();
         }
         Ok(None) => {}
         Err(e) => warn!("DB error checking existing relationship: {}", e),
@@ -1266,7 +1421,11 @@ async fn receive_friend_request(
         }
         Err(e) => {
             warn!("Failed to create federated relationship: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "internal error" }))).into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "internal error" })),
+            )
+                .into_response()
         }
     }
 }
@@ -1288,10 +1447,17 @@ async fn receive_friend_request_response(
 
     let body_value = match serde_json::to_value(&body) {
         Ok(v) => v,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "internal error" }))).into_response(),
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "internal error" })),
+            )
+                .into_response();
+        }
     };
 
-    let origin = match verify_inbound_request(&state, &headers, "PUT", URI, Some(&body_value)).await {
+    let origin = match verify_inbound_request(&state, &headers, "PUT", URI, Some(&body_value)).await
+    {
         Ok(o) => o,
         Err((status, msg)) => {
             warn!("Rejected federated friend response: {}", msg);
@@ -1309,20 +1475,28 @@ async fn receive_friend_request_response(
             StatusCode::BAD_REQUEST,
             Json(json!({ "error": "action must be 'accepted' or 'denied'" })),
         )
-        .into_response();
+            .into_response();
     }
 
     // Parse UUIDs.
     let requester_id = match uuid::Uuid::parse_str(&body.requester_id) {
         Ok(id) => id,
         Err(_) => {
-            return (StatusCode::BAD_REQUEST, Json(json!({ "error": "invalid requester_id" }))).into_response();
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "invalid requester_id" })),
+            )
+                .into_response();
         }
     };
     let responder_id = match uuid::Uuid::parse_str(&body.responder_id) {
         Ok(id) => id,
         Err(_) => {
-            return (StatusCode::BAD_REQUEST, Json(json!({ "error": "invalid responder_id" }))).into_response();
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(json!({ "error": "invalid responder_id" })),
+            )
+                .into_response();
         }
     };
 
@@ -1348,11 +1522,19 @@ async fn receive_friend_request_response(
     {
         Ok(Some(r)) => r,
         Ok(None) => {
-            return (StatusCode::NOT_FOUND, Json(json!({ "error": "relationship not found" }))).into_response();
+            return (
+                StatusCode::NOT_FOUND,
+                Json(json!({ "error": "relationship not found" })),
+            )
+                .into_response();
         }
         Err(e) => {
             warn!("DB error looking up relationship: {}", e);
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "internal error" }))).into_response();
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "error": "internal error" })),
+            )
+                .into_response();
         }
     };
 
@@ -1360,11 +1542,19 @@ async fn receive_friend_request_response(
 
     match body.action.as_str() {
         "accepted" => {
-            if let Err(e) =
-                nexus_db::repository::relationships::update_status(&state.db.pool, rel.id, "accepted").await
+            if let Err(e) = nexus_db::repository::relationships::update_status(
+                &state.db.pool,
+                rel.id,
+                "accepted",
+            )
+            .await
             {
                 warn!("Failed to accept federated friendship: {}", e);
-                return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({ "error": "internal error" }))).into_response();
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({ "error": "internal error" })),
+                )
+                    .into_response();
             }
             info!(
                 "Federated friendship accepted: {} ↔ {}@{}",
@@ -1437,7 +1627,10 @@ fn extract_federation_origin(headers: &HeaderMap) -> Result<String, String> {
 
     for part in auth.split(',') {
         let part = part.trim();
-        if let Some(origin) = part.strip_prefix("origin=\"").and_then(|s| s.strip_suffix('"')) {
+        if let Some(origin) = part
+            .strip_prefix("origin=\"")
+            .and_then(|s| s.strip_suffix('"'))
+        {
             return Ok(origin.to_owned());
         }
     }
@@ -1451,7 +1644,10 @@ fn extract_key_id_from_auth(auth: &str) -> Result<String, String> {
         .ok_or("Authorization scheme must be 'NexusFederation'")?;
     for part in inner.split(',') {
         let part = part.trim();
-        if let Some(key_id) = part.strip_prefix("key=\"").and_then(|s| s.strip_suffix('"')) {
+        if let Some(key_id) = part
+            .strip_prefix("key=\"")
+            .and_then(|s| s.strip_suffix('"'))
+        {
             return Ok(key_id.to_owned());
         }
     }
@@ -1475,14 +1671,18 @@ async fn verify_inbound_request(
     let auth_header = headers
         .get("authorization")
         .and_then(|v| v.to_str().ok())
-        .ok_or_else(|| (StatusCode::UNAUTHORIZED, "Missing Authorization header".to_owned()))?
+        .ok_or_else(|| {
+            (
+                StatusCode::UNAUTHORIZED,
+                "Missing Authorization header".to_owned(),
+            )
+        })?
         .to_owned();
 
-    let origin = extract_federation_origin(headers)
-        .map_err(|e| (StatusCode::UNAUTHORIZED, e))?;
+    let origin = extract_federation_origin(headers).map_err(|e| (StatusCode::UNAUTHORIZED, e))?;
 
-    let key_id = extract_key_id_from_auth(&auth_header)
-        .map_err(|e| (StatusCode::UNAUTHORIZED, e))?;
+    let key_id =
+        extract_key_id_from_auth(&auth_header).map_err(|e| (StatusCode::UNAUTHORIZED, e))?;
 
     // Load cached verify keys for this origin.
     let mut verify_keys = load_server_verify_keys(&state.db.pool, &origin).await;
@@ -1539,5 +1739,10 @@ async fn verify_inbound_request(
         body,
         &pubkey_b64,
     )
-    .map_err(|e| (StatusCode::UNAUTHORIZED, format!("Signature verification failed: {}", e)))
+    .map_err(|e| {
+        (
+            StatusCode::UNAUTHORIZED,
+            format!("Signature verification failed: {}", e),
+        )
+    })
 }

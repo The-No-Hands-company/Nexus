@@ -67,13 +67,8 @@ pub async fn list_templates(
         .await
 }
 
-pub async fn get_template(
-    pool: &AnyPool,
-    id: Uuid,
-) -> Result<Option<ServerTemplate>, sqlx::Error> {
-    let q = format!(
-        "SELECT {SERVER_TEMPLATE_COLS} FROM server_templates WHERE id = $1"
-    );
+pub async fn get_template(pool: &AnyPool, id: Uuid) -> Result<Option<ServerTemplate>, sqlx::Error> {
+    let q = format!("SELECT {SERVER_TEMPLATE_COLS} FROM server_templates WHERE id = $1");
     sqlx::query_as::<_, ServerTemplate>(&q)
         .bind(id.to_string())
         .fetch_optional(pool)

@@ -5,7 +5,7 @@
 //! immediately forgotten by the server (same pattern as password reset tokens).
 
 use chrono::{DateTime, Duration, Utc};
-use rand::{RngCore};
+use rand::RngCore;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -92,21 +92,16 @@ pub async fn consume_token(
         .execute(pool)
         .await?;
 
-    let user_id: Uuid = user_id_str
-        .parse()
-        .map_err(|_| sqlx::Error::ColumnDecode {
-            index: "user_id".to_string(),
-            source: Box::new(std::fmt::Error),
-        })?;
+    let user_id: Uuid = user_id_str.parse().map_err(|_| sqlx::Error::ColumnDecode {
+        index: "user_id".to_string(),
+        source: Box::new(std::fmt::Error),
+    })?;
 
     Ok(Some(user_id))
 }
 
 /// Check whether a pending (unexpired) token exists for the user.
-pub async fn has_pending_token(
-    pool: &sqlx::AnyPool,
-    user_id: Uuid,
-) -> Result<bool, sqlx::Error> {
+pub async fn has_pending_token(pool: &sqlx::AnyPool, user_id: Uuid) -> Result<bool, sqlx::Error> {
     let row: (i64,) = sqlx::query_as(
         "SELECT COUNT(*) FROM email_verification_tokens \
          WHERE user_id = $1::uuid AND expires_at > NOW()",

@@ -67,16 +67,11 @@ pub async fn delete_by_endpoint(
 }
 
 /// Delete all subscriptions for a user (e.g. account deletion, logout-all).
-pub async fn delete_all_for_user(
-    pool: &sqlx::AnyPool,
-    user_id: Uuid,
-) -> Result<u64, sqlx::Error> {
-    let result = sqlx::query(
-        "DELETE FROM push_subscriptions WHERE user_id = $1::uuid",
-    )
-    .bind(user_id.to_string())
-    .execute(pool)
-    .await?;
+pub async fn delete_all_for_user(pool: &sqlx::AnyPool, user_id: Uuid) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query("DELETE FROM push_subscriptions WHERE user_id = $1::uuid")
+        .bind(user_id.to_string())
+        .execute(pool)
+        .await?;
 
     Ok(result.rows_affected())
 }
@@ -101,31 +96,21 @@ pub async fn list_for_user(
 }
 
 /// Mark a subscription as successfully delivered to (updates last_used_at).
-pub async fn touch(
-    pool: &sqlx::AnyPool,
-    endpoint: &str,
-) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "UPDATE push_subscriptions SET last_used_at = NOW() WHERE endpoint = $1",
-    )
-    .bind(endpoint)
-    .execute(pool)
-    .await?;
+pub async fn touch(pool: &sqlx::AnyPool, endpoint: &str) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE push_subscriptions SET last_used_at = NOW() WHERE endpoint = $1")
+        .bind(endpoint)
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
 /// Remove subscriptions whose endpoints have returned a 410 Gone response
 /// (the browser has unsubscribed server-side).
-pub async fn delete_gone(
-    pool: &sqlx::AnyPool,
-    endpoints: &[String],
-) -> Result<u64, sqlx::Error> {
+pub async fn delete_gone(pool: &sqlx::AnyPool, endpoints: &[String]) -> Result<u64, sqlx::Error> {
     if endpoints.is_empty() {
         return Ok(0);
     }
-    let mut qb = sqlx::QueryBuilder::new(
-        "DELETE FROM push_subscriptions WHERE endpoint IN (",
-    );
+    let mut qb = sqlx::QueryBuilder::new("DELETE FROM push_subscriptions WHERE endpoint IN (");
     let mut sep = qb.separated(", ");
     for ep in endpoints {
         sep.push_bind(ep);

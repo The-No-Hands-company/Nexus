@@ -6,26 +6,27 @@ use validator::Validate;
 
 use crate::error::NexusError;
 
-/// Validate a request body, returning a NexusError::Validation on failure.
+/// Validate a request body, returning a `NexusError::Validation` on failure.
+///
+/// # Errors
+/// Returns `NexusError::Validation` when the input fails validator checks.
 pub fn validate_request<T: Validate>(body: &T) -> Result<(), NexusError> {
     body.validate().map_err(|e| NexusError::Validation {
-        message: format_validation_errors(e),
+        message: format_validation_errors(&e),
     })
 }
 
 /// Format validation errors into a human-readable string.
-fn format_validation_errors(errors: validator::ValidationErrors) -> String {
+fn format_validation_errors(errors: &validator::ValidationErrors) -> String {
     errors
         .field_errors()
         .iter()
         .flat_map(|(field, errs)| {
             errs.iter().map(move |e| {
-                let msg = e
-                    .message
-                    .as_ref()
-                    .map(|m| m.to_string())
-                    .unwrap_or_else(|| format!("Invalid value for '{field}'"));
-                msg
+                e.message.as_ref().map_or_else(
+                    || format!("Invalid value for '{field}'"),
+                    std::string::ToString::to_string,
+                )
             })
         })
         .collect::<Vec<_>>()
@@ -33,6 +34,10 @@ fn format_validation_errors(errors: validator::ValidationErrors) -> String {
 }
 
 /// Validate that a string is a safe channel/server name (no special chars that break routing).
+///
+/// # Errors
+/// Returns `NexusError::Validation` when the provided name is empty/whitespace
+/// or contains unsupported characters.
 pub fn validate_name(name: &str) -> Result<(), NexusError> {
     if name.trim().is_empty() {
         return Err(NexusError::Validation {
@@ -53,6 +58,24 @@ pub fn validate_name(name: &str) -> Result<(), NexusError> {
     }
 
     Ok(())
+}
+
+/// Extract user UUIDs mentioned via the `<@uuid>` syntax from message content.
+///
+/// Returns a deduplicated `Vec<Uuid>` — used by message creation, webhook
+/// execution, and any other path that stores and broadcasts mention data.
+#[must_use]
+pub fn parse_mentions_from_content(content: &str) -> Vec<uuid::Uuid> {
+    let mut mentions: Vec<uuid::Uuid> = Vec::new();
+    for token in content.split_whitespace() {
+        if let Some(id_str) = token.strip_prefix("<@").and_then(|s| s.strip_suffix('>'))
+            && let Ok(id) = id_str.parse::<uuid::Uuid>()
+            && !mentions.contains(&id)
+        {
+            mentions.push(id);
+        }
+    }
+    mentions
 }
 
 #[cfg(test)]
@@ -113,13 +136,17 @@ mod tests {
 
     #[test]
     fn validate_request_passes_for_valid_data() {
-        let req = Dummy { name: "hello".into() };
+        let req = Dummy {
+            name: "hello".into(),
+        };
         assert!(validate_request(&req).is_ok());
     }
 
     #[test]
     fn validate_request_fails_and_formats_error() {
-        let req = Dummy { name: "this is way too long for the limit".into() };
+        let req = Dummy {
+            name: "this is way too long for the limit".into(),
+        };
         let err = validate_request(&req).unwrap_err();
         // Error should be a Validation variant with a non-empty message
         match err {
@@ -129,22 +156,4 @@ mod tests {
             other => panic!("expected Validation error, got {other:?}"),
         }
     }
-}
-
-/// Extract user UUIDs mentioned via the `<@uuid>` syntax from message content.
-///
-/// Returns a deduplicated `Vec<Uuid>` — used by message creation, webhook
-/// execution, and any other path that stores and broadcasts mention data.
-pub fn parse_mentions_from_content(content: &str) -> Vec<uuid::Uuid> {
-    let mut mentions: Vec<uuid::Uuid> = Vec::new();
-    for token in content.split_whitespace() {
-        if let Some(id_str) = token.strip_prefix("<@").and_then(|s| s.strip_suffix('>')) {
-            if let Ok(id) = id_str.parse::<uuid::Uuid>() {
-                if !mentions.contains(&id) {
-                    mentions.push(id);
-                }
-            }
-        }
-    }
-    mentions
 }

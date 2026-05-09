@@ -250,15 +250,21 @@ mod tests {
             user_flags::INSTANCE_ADMIN,
         ];
         for flag in flags {
-            assert!(flag > 0 && (flag & (flag - 1)) == 0,
-                "flag {flag:#x} is not a power of two");
+            assert!(
+                flag > 0 && (flag & (flag - 1)) == 0,
+                "flag {flag:#x} is not a power of two"
+            );
         }
     }
 
     #[test]
     fn suspended_and_disabled_are_combinable_with_or() {
         let flags = user_flags::SUSPENDED | user_flags::DISABLED;
-        assert_ne!(flags & user_flags::SUSPENDED, 0, "SUSPENDED bit must be set");
+        assert_ne!(
+            flags & user_flags::SUSPENDED,
+            0,
+            "SUSPENDED bit must be set"
+        );
         assert_ne!(flags & user_flags::DISABLED, 0, "DISABLED bit must be set");
         assert_eq!(flags & user_flags::STAFF, 0, "STAFF bit must NOT be set");
     }
@@ -272,14 +278,13 @@ mod tests {
         let disabled: i64 = user_flags::DISABLED;
         let both: i64 = user_flags::SUSPENDED | user_flags::DISABLED;
 
-        let is_allowed = |f: i64| {
-            (f & user_flags::SUSPENDED) == 0 && (f & user_flags::DISABLED) == 0
-        };
+        let is_allowed =
+            |f: i64| (f & user_flags::SUSPENDED) == 0 && (f & user_flags::DISABLED) == 0;
 
-        assert!(is_allowed(clean),     "clean account must be allowed");
+        assert!(is_allowed(clean), "clean account must be allowed");
         assert!(!is_allowed(suspended), "suspended account must be blocked");
-        assert!(!is_allowed(disabled),  "disabled account must be blocked");
-        assert!(!is_allowed(both),      "suspended+disabled must be blocked");
+        assert!(!is_allowed(disabled), "disabled account must be blocked");
+        assert!(!is_allowed(both), "suspended+disabled must be blocked");
     }
 
     // ── CreateUserRequest validation ──────────────────────────────────────────
@@ -300,8 +305,14 @@ mod tests {
 
     #[test]
     fn username_too_short_fails() {
-        let req = CreateUserRequest { username: "ab".to_string(), ..valid_request() };
-        assert!(validate_request(&req).is_err(), "username < 3 chars must fail");
+        let req = CreateUserRequest {
+            username: "ab".to_string(),
+            ..valid_request()
+        };
+        assert!(
+            validate_request(&req).is_err(),
+            "username < 3 chars must fail"
+        );
     }
 
     #[test]
@@ -310,35 +321,62 @@ mod tests {
             username: "a".repeat(33),
             ..valid_request()
         };
-        assert!(validate_request(&req).is_err(), "username > 32 chars must fail");
+        assert!(
+            validate_request(&req).is_err(),
+            "username > 32 chars must fail"
+        );
     }
 
     #[test]
     fn username_with_invalid_chars_fails() {
         for bad in &["alice!", "alice@", "alice space", "alice.dot", "alice#"] {
-            let req = CreateUserRequest { username: bad.to_string(), ..valid_request() };
-            assert!(validate_request(&req).is_err(), "{bad} must fail username regex");
+            let req = CreateUserRequest {
+                username: bad.to_string(),
+                ..valid_request()
+            };
+            assert!(
+                validate_request(&req).is_err(),
+                "{bad} must fail username regex"
+            );
         }
     }
 
     #[test]
     fn username_with_valid_chars_passes() {
         for good in &["alice", "Alice42", "alice_42", "alice-42", "SCREAMING"] {
-            let req = CreateUserRequest { username: good.to_string(), ..valid_request() };
-            assert!(validate_request(&req).is_ok(), "{good} must pass username regex");
+            let req = CreateUserRequest {
+                username: good.to_string(),
+                ..valid_request()
+            };
+            assert!(
+                validate_request(&req).is_ok(),
+                "{good} must pass username regex"
+            );
         }
     }
 
     #[test]
     fn password_too_short_fails() {
-        let req = CreateUserRequest { password: "short".to_string(), ..valid_request() };
-        assert!(validate_request(&req).is_err(), "password < 8 chars must fail");
+        let req = CreateUserRequest {
+            password: "short".to_string(),
+            ..valid_request()
+        };
+        assert!(
+            validate_request(&req).is_err(),
+            "password < 8 chars must fail"
+        );
     }
 
     #[test]
     fn password_too_long_fails() {
-        let req = CreateUserRequest { password: "x".repeat(129), ..valid_request() };
-        assert!(validate_request(&req).is_err(), "password > 128 chars must fail");
+        let req = CreateUserRequest {
+            password: "x".repeat(129),
+            ..valid_request()
+        };
+        assert!(
+            validate_request(&req).is_err(),
+            "password > 128 chars must fail"
+        );
     }
 
     #[test]

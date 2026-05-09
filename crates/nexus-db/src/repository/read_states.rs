@@ -95,12 +95,10 @@ pub async fn get_all_read_states(
     pool: &sqlx::AnyPool,
     user_id: Uuid,
 ) -> Result<Vec<ReadStateRow>, sqlx::Error> {
-    sqlx::query_as::<_, ReadStateRow>(
-        "SELECT * FROM read_states WHERE user_id = $1",
-    )
-    .bind(user_id.to_string())
-    .fetch_all(pool)
-    .await
+    sqlx::query_as::<_, ReadStateRow>("SELECT * FROM read_states WHERE user_id = $1")
+        .bind(user_id.to_string())
+        .fetch_all(pool)
+        .await
 }
 
 /// Get unread channel IDs for a user (channels where last_read_message_id < channel.last_message_id).

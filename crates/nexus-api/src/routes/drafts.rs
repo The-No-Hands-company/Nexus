@@ -9,10 +9,10 @@
 //! DELETE /channels/:id/draft   — Clear draft
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, State},
     middleware,
     routing::get,
-    Json, Router,
 };
 use chrono::{DateTime, Utc};
 use nexus_common::error::{NexusError, NexusResult};
@@ -21,7 +21,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 // ============================================================
 // Router
@@ -33,7 +33,9 @@ pub fn router() -> Router<Arc<AppState>> {
             "/channels/{channel_id}/draft",
             get(get_draft).put(upsert_draft).delete(delete_draft),
         )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ============================================================
@@ -89,9 +91,18 @@ impl TryFrom<DraftRow> for Draft {
     type Error = NexusError;
     fn try_from(r: DraftRow) -> Result<Self, Self::Error> {
         Ok(Self {
-            id: r.id.parse::<Uuid>().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
-            user_id: r.user_id.parse::<Uuid>().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
-            channel_id: r.channel_id.parse::<Uuid>().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
+            id: r
+                .id
+                .parse::<Uuid>()
+                .map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
+            user_id: r
+                .user_id
+                .parse::<Uuid>()
+                .map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
+            channel_id: r
+                .channel_id
+                .parse::<Uuid>()
+                .map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
             content: r.content,
             attachments: serde_json::from_str::<Vec<serde_json::Value>>(&r.attachments)
                 .unwrap_or_default(),
@@ -167,7 +178,9 @@ async fn get_draft(
 
     match row {
         Some(r) => Ok(Json(Draft::try_from(r)?)),
-        None => Err(NexusError::NotFound { resource: "Draft".into() }),
+        None => Err(NexusError::NotFound {
+            resource: "Draft".into(),
+        }),
     }
 }
 
@@ -179,14 +192,12 @@ async fn delete_draft(
     Extension(ctx): Extension<AuthContext>,
     Path(channel_id): Path<Uuid>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    sqlx::query(
-        "DELETE FROM message_drafts WHERE user_id = $1 AND channel_id = $2",
-    )
-    .bind(ctx.user_id.to_string())
-    .bind(channel_id.to_string())
-    .execute(&state.db.pool)
-    .await
-    .map_err(|e| NexusError::Internal(e.into()))?;
+    sqlx::query("DELETE FROM message_drafts WHERE user_id = $1 AND channel_id = $2")
+        .bind(ctx.user_id.to_string())
+        .bind(channel_id.to_string())
+        .execute(&state.db.pool)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
 
     // Idempotent — no error if draft didn't exist
     Ok(Json(serde_json::json!({ "ok": true })))

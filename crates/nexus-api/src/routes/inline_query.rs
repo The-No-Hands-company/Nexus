@@ -6,10 +6,10 @@
 //! DELETE /bots/@me/inline-triggers/{tid}       — bot removes a trigger
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, Query, State},
     middleware,
     routing::{delete, get, post},
-    Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
 use serde::{Deserialize, Serialize};
@@ -17,14 +17,11 @@ use sqlx::Row;
 use std::{sync::Arc, time::Duration};
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
-        .route(
-            "/channels/{channel_id}/inline-query",
-            get(inline_query),
-        )
+        .route("/channels/{channel_id}/inline-query", get(inline_query))
         .route(
             "/channels/{channel_id}/bots/inline-triggers",
             get(list_channel_triggers),
@@ -34,7 +31,9 @@ pub fn router() -> Router<Arc<AppState>> {
             "/bots/@me/inline-triggers/{trigger_id}",
             delete(remove_trigger),
         )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -102,14 +101,16 @@ async fn inline_query(
     .fetch_optional(&state.db.pool)
     .await
     .map_err(NexusError::Database)?
-    .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
+    .ok_or(NexusError::NotFound {
+        resource: "Channel".into(),
+    })?;
 
     let server_id_str: Option<String> = channel_row
         .try_get::<Option<String>, _>("server_id")
         .unwrap_or(None);
 
-    if let Some(sid_str) = server_id_str {
-        if let Ok(server_id) = sid_str.parse::<Uuid>() {
+    if let Some(sid_str) = server_id_str
+        && let Ok(server_id) = sid_str.parse::<Uuid>() {
             sqlx::query(
                 "SELECT id FROM server_members WHERE user_id = $1::uuid AND server_id = $2::uuid",
             )
@@ -120,7 +121,6 @@ async fn inline_query(
             .map_err(NexusError::Database)?
             .ok_or(NexusError::Forbidden)?;
         }
-    }
 
     let query_text = params.query.trim().to_owned();
     if query_text.is_empty() {
@@ -139,8 +139,11 @@ async fn inline_query(
         .map_err(NexusError::Database)?;
 
         if let Some(r) = row {
-            let bid: Uuid = r.try_get::<String, _>("bot_id").unwrap_or_default()
-                .parse().unwrap_or(bot_id);
+            let bid: Uuid = r
+                .try_get::<String, _>("bot_id")
+                .unwrap_or_default()
+                .parse()
+                .unwrap_or(bot_id);
             let cb: String = r.try_get("callback_url").unwrap_or_default();
             vec![(bid, cb)]
         } else {
@@ -148,7 +151,11 @@ async fn inline_query(
         }
     } else {
         // Match by prefix: e.g. "@gif cats" → prefix "@gif"
-        let prefix = query_text.split_whitespace().next().unwrap_or("").to_string();
+        let prefix = query_text
+            .split_whitespace()
+            .next()
+            .unwrap_or("")
+            .to_string();
         let rows = sqlx::query(
             "SELECT DISTINCT ON (bot_id) bot_id::text AS bot_id, callback_url FROM bot_inline_triggers WHERE prefix = $1",
         )
@@ -159,7 +166,11 @@ async fn inline_query(
 
         rows.iter()
             .filter_map(|r| {
-                let bid: Uuid = r.try_get::<String, _>("bot_id").unwrap_or_default().parse().ok()?;
+                let bid: Uuid = r
+                    .try_get::<String, _>("bot_id")
+                    .unwrap_or_default()
+                    .parse()
+                    .ok()?;
                 let cb: String = r.try_get("callback_url").ok()?;
                 Some((bid, cb))
             })
@@ -186,7 +197,10 @@ async fn inline_query(
         {
             Ok(resp) if resp.status().is_success() => {
                 match resp.json::<Vec<InlineSuggestion>>().await {
-                    Ok(suggestions) => results.push(InlineQueryResponse { bot_id, suggestions }),
+                    Ok(suggestions) => results.push(InlineQueryResponse {
+                        bot_id,
+                        suggestions,
+                    }),
                     Err(e) => {
                         tracing::warn!("Bot {bot_id} returned invalid inline suggestions: {e}");
                     }
@@ -219,14 +233,16 @@ async fn list_channel_triggers(
     .fetch_optional(&state.db.pool)
     .await
     .map_err(NexusError::Database)?
-    .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
+    .ok_or(NexusError::NotFound {
+        resource: "Channel".into(),
+    })?;
 
     let server_id_str: Option<String> = channel_row
         .try_get::<Option<String>, _>("server_id")
         .unwrap_or(None);
 
-    if let Some(sid_str) = server_id_str {
-        if let Ok(server_id) = sid_str.parse::<Uuid>() {
+    if let Some(sid_str) = server_id_str
+        && let Ok(server_id) = sid_str.parse::<Uuid>() {
             sqlx::query(
                 "SELECT id FROM server_members WHERE user_id = $1::uuid AND server_id = $2::uuid",
             )
@@ -237,7 +253,6 @@ async fn list_channel_triggers(
             .map_err(NexusError::Database)?
             .ok_or(NexusError::Forbidden)?;
         }
-    }
 
     // Join bot_inline_triggers → users (bots are users with is_bot=true)
     let rows = sqlx::query(
@@ -255,8 +270,16 @@ async fn list_channel_triggers(
     let triggers: Vec<BotTrigger> = rows
         .iter()
         .filter_map(|r| {
-            let id: Uuid = r.try_get::<String, _>("id").unwrap_or_default().parse().ok()?;
-            let bot_id: Uuid = r.try_get::<String, _>("bot_id").unwrap_or_default().parse().ok()?;
+            let id: Uuid = r
+                .try_get::<String, _>("id")
+                .unwrap_or_default()
+                .parse()
+                .ok()?;
+            let bot_id: Uuid = r
+                .try_get::<String, _>("bot_id")
+                .unwrap_or_default()
+                .parse()
+                .ok()?;
             Some(BotTrigger {
                 id,
                 bot_id,
@@ -278,16 +301,13 @@ async fn register_trigger(
     Json(body): Json<RegisterTriggerRequest>,
 ) -> NexusResult<Json<serde_json::Value>> {
     // Verify caller is actually a bot
-    let bot_row = sqlx::query(
-        "SELECT is_bot FROM users WHERE id = $1::uuid",
-    )
-    .bind(auth.user_id.to_string())
-    .fetch_optional(&state.db.pool)
-    .await
-    .map_err(NexusError::Database)?;
+    let bot_row = sqlx::query("SELECT is_bot FROM users WHERE id = $1::uuid")
+        .bind(auth.user_id.to_string())
+        .fetch_optional(&state.db.pool)
+        .await
+        .map_err(NexusError::Database)?;
 
-    let is_bot = bot_row
-        .and_then(|r| r.try_get::<Option<bool>, _>("is_bot").ok().flatten());
+    let is_bot = bot_row.and_then(|r| r.try_get::<Option<bool>, _>("is_bot").ok().flatten());
 
     match is_bot {
         Some(true) => {}
@@ -295,16 +315,24 @@ async fn register_trigger(
     }
 
     if body.prefix.trim().is_empty() || body.prefix.len() > 32 {
-        return Err(NexusError::Validation { message: "prefix must be 1–32 characters".into() });
+        return Err(NexusError::Validation {
+            message: "prefix must be 1–32 characters".into(),
+        });
     }
     if body.description.len() > 200 {
-        return Err(NexusError::Validation { message: "description too long".into() });
+        return Err(NexusError::Validation {
+            message: "description too long".into(),
+        });
     }
     if body.callback_url.len() > 512 {
-        return Err(NexusError::Validation { message: "callback_url too long".into() });
+        return Err(NexusError::Validation {
+            message: "callback_url too long".into(),
+        });
     }
     if !body.callback_url.starts_with("https://") {
-        return Err(NexusError::Validation { message: "callback_url must use HTTPS".into() });
+        return Err(NexusError::Validation {
+            message: "callback_url must use HTTPS".into(),
+        });
     }
 
     let trigger_id = nexus_common::snowflake::generate_id();
@@ -323,7 +351,9 @@ async fn register_trigger(
     .await
     .map_err(NexusError::Database)?;
 
-    Ok(Json(serde_json::json!({ "id": trigger_id, "prefix": body.prefix.trim() })))
+    Ok(Json(
+        serde_json::json!({ "id": trigger_id, "prefix": body.prefix.trim() }),
+    ))
 }
 
 /// DELETE /api/v1/bots/@me/inline-triggers/:trigger_id — bot removes one trigger
@@ -332,17 +362,18 @@ async fn remove_trigger(
     State(state): State<Arc<AppState>>,
     Path(trigger_id): Path<Uuid>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    let res = sqlx::query(
-        "DELETE FROM bot_inline_triggers WHERE id = $1::uuid AND bot_id = $2::uuid",
-    )
-    .bind(trigger_id.to_string())
-    .bind(auth.user_id.to_string())
-    .execute(&state.db.pool)
-    .await
-    .map_err(NexusError::Database)?;
+    let res =
+        sqlx::query("DELETE FROM bot_inline_triggers WHERE id = $1::uuid AND bot_id = $2::uuid")
+            .bind(trigger_id.to_string())
+            .bind(auth.user_id.to_string())
+            .execute(&state.db.pool)
+            .await
+            .map_err(NexusError::Database)?;
 
     if res.rows_affected() == 0 {
-        return Err(NexusError::NotFound { resource: "Trigger".into() });
+        return Err(NexusError::NotFound {
+            resource: "Trigger".into(),
+        });
     }
     Ok(Json(serde_json::json!({ "ok": true })))
 }

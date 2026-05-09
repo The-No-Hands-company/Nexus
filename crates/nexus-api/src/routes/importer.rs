@@ -6,24 +6,24 @@
 //! POST   /servers/{server_id}/bulk-invite         — Send bulk email invitations
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, State},
     http::HeaderMap,
     middleware,
     routing::{get, post},
-    Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
+use nexus_common::models::Member;
 use nexus_common::models::ecosystem::{BulkInvitation, ImportJob};
 use nexus_common::permissions::Permissions;
 use nexus_db::repository::{bulk_invitations, import_jobs, members, roles, servers};
-use nexus_common::models::Member;
 use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{
-    middleware::{check_rate_limit_with_fallback, extract_client_ip, AuthContext},
     AppState,
+    middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip},
 };
 
 // ── Router ────────────────────────────────────────────────────────────────────
@@ -34,15 +34,11 @@ pub fn router() -> Router<Arc<AppState>> {
             "/servers/{server_id}/imports",
             post(create_import).get(list_imports),
         )
-        .route(
-            "/servers/{server_id}/imports/{import_id}",
-            get(get_import),
-        )
-        .route(
-            "/servers/{server_id}/bulk-invite",
-            post(create_bulk_invite),
-        )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route("/servers/{server_id}/imports/{import_id}", get(get_import))
+        .route("/servers/{server_id}/bulk-invite", post(create_bulk_invite))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ── Request Bodies ────────────────────────────────────────────────────────────
@@ -89,7 +85,8 @@ async fn create_import(
         let has_plugin_key = metadata_has_plugin_hint(body.metadata.as_ref());
         if !has_plugin_key {
             return Err(NexusError::Validation {
-                message: "custom_plugin imports require metadata.plugin_id or metadata.plugin_slug".into(),
+                message: "custom_plugin imports require metadata.plugin_id or metadata.plugin_slug"
+                    .into(),
             });
         }
     }
@@ -109,8 +106,8 @@ async fn create_import(
         });
     }
 
-    let metadata_bytes = serde_json::to_vec(&metadata)
-        .map_err(|e| NexusError::Internal(e.into()))?;
+    let metadata_bytes =
+        serde_json::to_vec(&metadata).map_err(|e| NexusError::Internal(e.into()))?;
     if metadata_bytes.len() > 2 * 1024 * 1024 {
         return Err(NexusError::Validation {
             message: "metadata payload exceeds 2MB limit".into(),
@@ -222,8 +219,8 @@ async fn create_bulk_invite(
 
     let id = Uuid::new_v4();
     let invite_code = format!("bulk-{}", Uuid::new_v4().simple());
-    let emails_json = serde_json::to_value(&body.emails)
-        .map_err(|e| NexusError::Internal(e.into()))?;
+    let emails_json =
+        serde_json::to_value(&body.emails).map_err(|e| NexusError::Internal(e.into()))?;
     let total = body.emails.len() as i32;
 
     let inv = bulk_invitations::create_bulk_invitation(

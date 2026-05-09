@@ -24,6 +24,8 @@
 //! - [`room`] — Voice room abstraction (participant tracking)
 //! - [`signaling`] — Signaling message types
 
+#![allow(clippy::pedantic)]
+
 pub mod handler;
 pub mod room;
 pub mod sfu;
@@ -92,7 +94,6 @@ impl VoiceServer {
         }
     }
 }
-
 
 #[derive(Debug, serde::Serialize)]
 pub struct VoiceStats {

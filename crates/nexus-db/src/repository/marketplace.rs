@@ -66,9 +66,7 @@ pub async fn get_plugin(
     pool: &AnyPool,
     id: Uuid,
 ) -> Result<Option<MarketplacePlugin>, sqlx::Error> {
-    let q = format!(
-        "SELECT {MARKETPLACE_PLUGIN_COLS} FROM marketplace_plugins WHERE id = $1"
-    );
+    let q = format!("SELECT {MARKETPLACE_PLUGIN_COLS} FROM marketplace_plugins WHERE id = $1");
     sqlx::query_as::<_, MarketplacePlugin>(&q)
         .bind(id.to_string())
         .fetch_optional(pool)
@@ -87,7 +85,9 @@ pub async fn search_plugins(
     let mut bind_idx = 1;
 
     if query.is_some() {
-        conditions.push(format!("(name ILIKE '%' || ${bind_idx} || '%' OR description ILIKE '%' || ${bind_idx} || '%')"));
+        conditions.push(format!(
+            "(name ILIKE '%' || ${bind_idx} || '%' OR description ILIKE '%' || ${bind_idx} || '%')"
+        ));
         bind_idx += 1;
     }
     if category.is_some() {
@@ -185,13 +185,11 @@ pub async fn delete_review(
     plugin_id: Uuid,
     user_id: Uuid,
 ) -> Result<bool, sqlx::Error> {
-    let res = sqlx::query(
-        "DELETE FROM plugin_reviews WHERE plugin_id = $1 AND user_id = $2"
-    )
-    .bind(plugin_id.to_string())
-    .bind(user_id.to_string())
-    .execute(pool)
-    .await?;
+    let res = sqlx::query("DELETE FROM plugin_reviews WHERE plugin_id = $1 AND user_id = $2")
+        .bind(plugin_id.to_string())
+        .bind(user_id.to_string())
+        .execute(pool)
+        .await?;
     Ok(res.rows_affected() > 0)
 }
 
@@ -227,13 +225,11 @@ pub async fn uninstall_plugin(
     plugin_id: Uuid,
     server_id: Uuid,
 ) -> Result<bool, sqlx::Error> {
-    let res = sqlx::query(
-        "DELETE FROM plugin_installs WHERE plugin_id = $1 AND server_id = $2"
-    )
-    .bind(plugin_id.to_string())
-    .bind(server_id.to_string())
-    .execute(pool)
-    .await?;
+    let res = sqlx::query("DELETE FROM plugin_installs WHERE plugin_id = $1 AND server_id = $2")
+        .bind(plugin_id.to_string())
+        .bind(server_id.to_string())
+        .execute(pool)
+        .await?;
     Ok(res.rows_affected() > 0)
 }
 
@@ -276,13 +272,10 @@ use nexus_common::models::ecosystem::{
     CreatorVetting, MarketplaceMonetization, ReviewStatus, TrustTier,
 };
 
-pub async fn submit_for_review(
-    pool: &AnyPool,
-    plugin_id: Uuid,
-) -> Result<(), sqlx::Error> {
+pub async fn submit_for_review(pool: &AnyPool, plugin_id: Uuid) -> Result<(), sqlx::Error> {
     sqlx::query(
         "UPDATE marketplace_plugins SET review_status = 'submitted', updated_at = now() \
-         WHERE id = $1"
+         WHERE id = $1",
     )
     .bind(plugin_id.to_string())
     .execute(pool)
@@ -305,7 +298,7 @@ pub async fn update_review_status(
          rejected_reason = CASE WHEN $1 = 'rejected' THEN $4 ELSE rejected_reason END, \
          quarantine_reason = CASE WHEN $1 = 'quarantined' THEN $4 ELSE quarantine_reason END, \
          updated_at = now() \
-         WHERE id = $5"
+         WHERE id = $5",
     )
     .bind(&status_str)
     .bind(reviewer_id.to_string())
@@ -323,13 +316,11 @@ pub async fn update_trust_tier(
     tier: TrustTier,
 ) -> Result<(), sqlx::Error> {
     let tier_str = tier.to_string();
-    sqlx::query(
-        "UPDATE marketplace_plugins SET trust_tier = $1, updated_at = now() WHERE id = $2"
-    )
-    .bind(&tier_str)
-    .bind(plugin_id.to_string())
-    .execute(pool)
-    .await?;
+    sqlx::query("UPDATE marketplace_plugins SET trust_tier = $1, updated_at = now() WHERE id = $2")
+        .bind(&tier_str)
+        .bind(plugin_id.to_string())
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
@@ -339,7 +330,7 @@ pub async fn set_provenance_verified(
     verified: bool,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "UPDATE marketplace_plugins SET provenance_verified = $1, updated_at = now() WHERE id = $2"
+        "UPDATE marketplace_plugins SET provenance_verified = $1, updated_at = now() WHERE id = $2",
     )
     .bind(verified)
     .bind(plugin_id.to_string())
@@ -356,7 +347,7 @@ pub async fn mark_security_scan(
     sqlx::query(
         "UPDATE marketplace_plugins SET \
          security_scan_result = $1, last_scanned_at = now(), updated_at = now() \
-         WHERE id = $2"
+         WHERE id = $2",
     )
     .bind(serde_json::to_string(scan_result).unwrap_or_default())
     .bind(plugin_id.to_string())
@@ -373,7 +364,7 @@ pub async fn get_review_queue(
     sqlx::query_as::<_, (String, String)>(
         "SELECT id, name FROM marketplace_plugins \
          WHERE review_status IN ('submitted', 'scanning', 'review') \
-         ORDER BY created_at DESC LIMIT $1 OFFSET $2"
+         ORDER BY created_at DESC LIMIT $1 OFFSET $2",
     )
     .bind(limit)
     .bind(offset)
@@ -423,7 +414,7 @@ pub async fn request_takedown(
     sqlx::query(
         "INSERT INTO marketplace_takedowns \
          (id, plugin_id, reported_by, reason, description, evidence_urls, quarantine_status) \
-         VALUES ($1, $2, $3, $4, $5, $6, 'pending')"
+         VALUES ($1, $2, $3, $4, $5, $6, 'pending')",
     )
     .bind(takedown_id.to_string())
     .bind(plugin_id.to_string())
@@ -444,7 +435,7 @@ pub async fn review_takedown(
     notes: Option<&str>,
 ) -> Result<(), sqlx::Error> {
     let plugin_result = sqlx::query_scalar::<_, String>(
-        "SELECT plugin_id FROM marketplace_takedowns WHERE id = $1"
+        "SELECT plugin_id FROM marketplace_takedowns WHERE id = $1",
     )
     .bind(takedown_id.to_string())
     .fetch_optional(pool)
@@ -454,7 +445,7 @@ pub async fn review_takedown(
         sqlx::query(
             "UPDATE marketplace_takedowns SET \
              quarantine_status = $1, reviewer_id = $2, review_notes = $3, reviewed_at = now() \
-             WHERE id = $4"
+             WHERE id = $4",
         )
         .bind(status)
         .bind(reviewer_id.to_string())
@@ -469,7 +460,7 @@ pub async fn review_takedown(
                 "UPDATE marketplace_plugins SET \
                  review_status = 'takedown', is_published = FALSE, \
                  takedown_reason = $1, takedown_requested_by = $2, takedown_requested_at = now() \
-                 WHERE id = $3"
+                 WHERE id = $3",
             )
             .bind("Takedown reviewed and approved")
             .bind(reviewer_id.to_string())
@@ -481,12 +472,9 @@ pub async fn review_takedown(
     Ok(())
 }
 
-pub async fn reinstate_plugin(
-    pool: &AnyPool,
-    takedown_id: Uuid,
-) -> Result<(), sqlx::Error> {
+pub async fn reinstate_plugin(pool: &AnyPool, takedown_id: Uuid) -> Result<(), sqlx::Error> {
     let plugin_result = sqlx::query_scalar::<_, String>(
-        "SELECT plugin_id FROM marketplace_takedowns WHERE id = $1"
+        "SELECT plugin_id FROM marketplace_takedowns WHERE id = $1",
     )
     .bind(takedown_id.to_string())
     .fetch_optional(pool)
@@ -496,7 +484,7 @@ pub async fn reinstate_plugin(
         sqlx::query(
             "UPDATE marketplace_takedowns SET \
              quarantine_status = 'reinstated', reinstated_at = now() \
-             WHERE id = $1"
+             WHERE id = $1",
         )
         .bind(takedown_id.to_string())
         .execute(pool)
@@ -507,7 +495,7 @@ pub async fn reinstate_plugin(
              review_status = 'approved', is_published = TRUE, \
              takedown_reason = NULL, takedown_requested_by = NULL, takedown_requested_at = NULL, \
              updated_at = now() \
-             WHERE id = $1"
+             WHERE id = $1",
         )
         .bind(&plugin_id_str)
         .execute(pool)
@@ -527,7 +515,7 @@ pub async fn get_creator_vetting(
          signing_key_fingerprint, signing_key_type, rights_attestation, \
          two_factor_enabled, ip_whitelist, \
          status, approved_by, approved_at, rejection_reason, created_at, updated_at \
-         FROM creator_vetting WHERE user_id = $1"
+         FROM creator_vetting WHERE user_id = $1",
     )
     .bind(user_id.to_string())
     .fetch_optional(pool)
@@ -545,7 +533,7 @@ pub async fn create_creator_vetting(
          RETURNING id, user_id, identity_level, domain, domain_verified, \
          signing_key_fingerprint, signing_key_type, rights_attestation, \
          two_factor_enabled, ip_whitelist, \
-         status, approved_by, approved_at, rejection_reason, created_at, updated_at"
+         status, approved_by, approved_at, rejection_reason, created_at, updated_at",
     )
     .bind(id.to_string())
     .bind(user_id.to_string())
@@ -561,7 +549,7 @@ pub async fn update_creator_identity_level(
     level: &str,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "UPDATE creator_vetting SET identity_level = $1, updated_at = now() WHERE user_id = $2"
+        "UPDATE creator_vetting SET identity_level = $1, updated_at = now() WHERE user_id = $2",
     )
     .bind(level)
     .bind(user_id.to_string())
@@ -578,7 +566,7 @@ pub async fn upsert_creator_attestation(
     sqlx::query(
         "UPDATE creator_vetting SET \
          rights_attestation = $1, status = 'pending', rejection_reason = NULL, updated_at = now() \
-         WHERE user_id = $2"
+         WHERE user_id = $2",
     )
     .bind(rights_attestation)
     .bind(user_id.to_string())
@@ -599,7 +587,7 @@ pub async fn update_creator_verification_materials(
          domain = $1, domain_verified = FALSE, \
          signing_key_fingerprint = $2, signing_key_type = $3, \
          status = 'pending', rejection_reason = NULL, updated_at = now() \
-         WHERE user_id = $4"
+         WHERE user_id = $4",
     )
     .bind(domain)
     .bind(signing_key_fingerprint)
@@ -618,21 +606,19 @@ pub async fn approve_creator_vetting(
     sqlx::query(
         "UPDATE creator_vetting SET \
          status = 'approved', approved_by = $1, approved_at = now(), updated_at = now() \
-         WHERE user_id = $2"
+         WHERE user_id = $2",
     )
     .bind(reviewer_id.to_string())
     .bind(user_id.to_string())
     .execute(pool)
     .await?;
-    
+
     // Grant MARKETPLACE_CREATOR flag to user
-    sqlx::query(
-        "UPDATE users SET flags = flags | $1 WHERE id = $2"
-    )
-    .bind(nexus_common::models::user_flags::MARKETPLACE_CREATOR)
-    .bind(user_id.to_string())
-    .execute(pool)
-    .await?;
+    sqlx::query("UPDATE users SET flags = flags | $1 WHERE id = $2")
+        .bind(nexus_common::models::user_flags::MARKETPLACE_CREATOR)
+        .bind(user_id.to_string())
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
@@ -644,7 +630,7 @@ pub async fn reject_creator_vetting(
     sqlx::query(
         "UPDATE creator_vetting SET \
          status = 'rejected', rejection_reason = $1, updated_at = now() \
-         WHERE user_id = $2"
+         WHERE user_id = $2",
     )
     .bind(reason)
     .bind(user_id.to_string())
@@ -662,7 +648,7 @@ pub async fn get_creator_vetting_queue(
     // Returns (id, user_id, identity_level)
     sqlx::query_as::<_, (String, String, String)>(
         "SELECT id, user_id, identity_level FROM creator_vetting \
-         WHERE status = $1 ORDER BY created_at ASC LIMIT $2 OFFSET $3"
+         WHERE status = $1 ORDER BY created_at ASC LIMIT $2 OFFSET $3",
     )
     .bind(status)
     .bind(limit)
@@ -680,13 +666,13 @@ pub async fn create_monetization_record(
     creator_id: Uuid,
 ) -> Result<MarketplaceMonetization, sqlx::Error> {
     use nexus_common::models::ecosystem::MarketplaceMonetization;
-    
+
     sqlx::query_as::<_, MarketplaceMonetization>(
         "INSERT INTO marketplace_monetization \
          (id, plugin_id, creator_id, is_monetized, currency) \
          VALUES ($1, $2, $3, $4, $5) \
          RETURNING id, plugin_id, creator_id, is_monetized, price_cents, currency, \
-         payment_link, purchase_count, created_at, updated_at"
+         payment_link, purchase_count, created_at, updated_at",
     )
     .bind(id.to_string())
     .bind(plugin_id.to_string())
@@ -704,7 +690,7 @@ pub async fn get_monetization_by_plugin(
     sqlx::query_as::<_, MarketplaceMonetization>(
         "SELECT id, plugin_id, creator_id, is_monetized, price_cents, currency, \
          payment_link, purchase_count, created_at, updated_at \
-         FROM marketplace_monetization WHERE plugin_id = $1"
+         FROM marketplace_monetization WHERE plugin_id = $1",
     )
     .bind(plugin_id.to_string())
     .fetch_optional(pool)
@@ -721,7 +707,7 @@ pub async fn update_monetization_price(
     sqlx::query(
         "UPDATE marketplace_monetization SET \
          price_cents = $1, is_monetized = $2, payment_link = $3, updated_at = now() \
-         WHERE plugin_id = $4"
+         WHERE plugin_id = $4",
     )
     .bind(price_cents)
     .bind(is_monetized)
@@ -734,14 +720,11 @@ pub async fn update_monetization_price(
 
 /// Increment the install/purchase count for a paid plugin.
 /// TNHC does not process or record financial transactions.
-pub async fn increment_purchase_count(
-    pool: &AnyPool,
-    plugin_id: Uuid,
-) -> Result<(), sqlx::Error> {
+pub async fn increment_purchase_count(pool: &AnyPool, plugin_id: Uuid) -> Result<(), sqlx::Error> {
     sqlx::query(
         "UPDATE marketplace_monetization SET \
          purchase_count = purchase_count + 1, updated_at = now() \
-         WHERE plugin_id = $1"
+         WHERE plugin_id = $1",
     )
     .bind(plugin_id.to_string())
     .execute(pool)

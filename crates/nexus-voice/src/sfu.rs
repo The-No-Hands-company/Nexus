@@ -42,7 +42,7 @@ use str0m::media::{MediaData, MediaKind, Mid};
 use str0m::net::{DatagramRecv, Receive as NetReceive};
 use str0m::{Candidate, Event, Input, Output, Rtc, RtcError};
 use tokio::net::UdpSocket;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 use uuid::Uuid;
 
 /// Unique identifier for a peer connection within the SFU.
@@ -83,10 +83,7 @@ pub enum SfuCommand {
     /// Remove a peer (disconnected or left).
     RemovePeer { peer_id: PeerId },
     /// Relay an ICE candidate from signaling.
-    IceCandidate {
-        peer_id: PeerId,
-        candidate: String,
-    },
+    IceCandidate { peer_id: PeerId, candidate: String },
     /// Update a peer's media state (mute track, add screen share, etc.).
     UpdateMedia {
         peer_id: PeerId,
@@ -228,8 +225,7 @@ async fn run_sfu_room(
 ) {
     // Single channel for all peers' UDP packets.
     // Each per-peer recv task sends (peer_id, raw_bytes, src_addr) here.
-    let (shared_tx, mut shared_rx) =
-        mpsc::channel::<(PeerId, Vec<u8>, SocketAddr)>(4096);
+    let (shared_tx, mut shared_rx) = mpsc::channel::<(PeerId, Vec<u8>, SocketAddr)>(4096);
 
     let mut peers: HashMap<PeerId, ActivePeer> = HashMap::new();
     // forward_table[(source_peer, source_mid)] = list of dest peer ids
@@ -474,16 +470,16 @@ async fn forward_media(
                 None => continue,
             };
 
-            if let Some(writer) = dest.rtc.writer(fwd_mid) {
-                if let Err(e) = writer.write(media.pt, media.network_time, media.time, media.data.clone())
-                {
-                    tracing::warn!(
-                        dest_peer = %dest_peer_id,
-                        fwd_mid = ?fwd_mid,
-                        error = %e,
-                        "Failed to forward media"
-                    );
-                }
+            if let Some(writer) = dest.rtc.writer(fwd_mid)
+                && let Err(e) =
+                    writer.write(media.pt, media.network_time, media.time, media.data.clone())
+            {
+                tracing::warn!(
+                    dest_peer = %dest_peer_id,
+                    fwd_mid = ?fwd_mid,
+                    error = %e,
+                    "Failed to forward media"
+                );
             }
         }
     }
@@ -572,16 +568,13 @@ async fn create_peer(
     tracing::debug!(peer = %peer_id, addr = %local_addr, "UDP socket bound");
 
     let start = Instant::now();
-    let mut rtc = Rtc::builder()
-        .set_ice_lite(true)
-        .build(start);
+    let mut rtc = Rtc::builder().set_ice_lite(true).build(start);
 
     let candidate = Candidate::host(local_addr, str0m::net::Protocol::Udp)
         .map_err(|e| SfuError::Sdp(e.to_string()))?;
     rtc.add_local_candidate(candidate);
 
-    let offer = SdpOffer::from_sdp_string(offer_sdp)
-        .map_err(|e| SfuError::Sdp(e.to_string()))?;
+    let offer = SdpOffer::from_sdp_string(offer_sdp).map_err(|e| SfuError::Sdp(e.to_string()))?;
 
     let answer = rtc
         .sdp_api()

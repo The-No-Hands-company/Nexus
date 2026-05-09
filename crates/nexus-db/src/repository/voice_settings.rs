@@ -8,8 +8,7 @@ use crate::select_cols::VOICE_MUSIC_QUEUE_COLS;
 
 // ── Voice Settings ────────────────────────────────────────────────────────────
 
-const VS_COLS: &str =
-    "user_id::text AS user_id, spatial_audio, noise_gate_enabled, \
+const VS_COLS: &str = "user_id::text AS user_id, spatial_audio, noise_gate_enabled, \
      noise_gate_threshold, echo_cancel_level, auto_gain, \
      updated_at::text AS updated_at";
 
@@ -146,15 +145,11 @@ pub async fn skip_current(
         .await
 }
 
-pub async fn clear_queue(
-    pool: &AnyPool,
-    channel_id: Uuid,
-) -> Result<u64, sqlx::Error> {
-    let res = sqlx::query(
-        "DELETE FROM voice_music_queue WHERE channel_id = $1 AND status = 'queued'",
-    )
-    .bind(channel_id.to_string())
-    .execute(pool)
-    .await?;
+pub async fn clear_queue(pool: &AnyPool, channel_id: Uuid) -> Result<u64, sqlx::Error> {
+    let res =
+        sqlx::query("DELETE FROM voice_music_queue WHERE channel_id = $1 AND status = 'queued'")
+            .bind(channel_id.to_string())
+            .execute(pool)
+            .await?;
     Ok(res.rows_affected())
 }

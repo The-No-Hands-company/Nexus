@@ -7,22 +7,22 @@
 //! DELETE /servers/:id/emojis/:emoji_id  — Delete emoji
 
 use axum::{
+    Json, Router,
     extract::{Extension, Multipart, Path, State},
     middleware,
     routing::get,
-    Json, Router,
 };
+use nexus_common::gateway_event::GatewayEvent;
 use nexus_common::{
     error::{NexusError, NexusResult},
     models::rich::{ServerEmoji, UpdateEmojiRequest},
     validation::validate_request,
 };
 use nexus_db::repository::emoji;
-use nexus_common::gateway_event::GatewayEvent;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 /// Maximum emoji size: 256 KiB
 const MAX_EMOJI_BYTES: usize = 256 * 1024;
@@ -40,7 +40,9 @@ pub fn router() -> Router<Arc<AppState>> {
             "/servers/{server_id}/emojis/{emoji_id}",
             get(get_emoji).patch(update_emoji).delete(delete_emoji),
         )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ============================================================
@@ -121,7 +123,7 @@ async fn create_emoji(
         .storage
         .put_object(&storage_key, data, &content_type)
         .await
-        .map_err(|e| NexusError::Internal(e))?;
+        .map_err(NexusError::Internal)?;
 
     let url = state
         .storage
@@ -205,8 +207,7 @@ async fn update_emoji(
         message: "name is required".into(),
     })?;
 
-    let row = emoji::update_emoji(&state.db.pool, emoji_id, server_id, &name)
-        .await?;
+    let row = emoji::update_emoji(&state.db.pool, emoji_id, server_id, &name).await?;
 
     let se: ServerEmoji = row.into();
 

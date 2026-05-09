@@ -6,10 +6,10 @@
 //! `bot_auth_middleware` in `middleware.rs`.
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, State},
     middleware,
     routing::{delete, get, post},
-    Json, Router,
 };
 use nexus_common::{
     error::{NexusError, NexusResult},
@@ -17,23 +17,28 @@ use nexus_common::{
     snowflake,
 };
 use nexus_db::repository::bots;
-use rand::distr::Alphanumeric;
 use rand::Rng;
+use rand::distr::Alphanumeric;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
+use crate::{
+    AppState,
+    middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip},
+};
 
 /// Bot application routes.
 pub fn router() -> Router<Arc<AppState>> {
     // Public routes — no auth required
-    let public = Router::new()
-        .route("/bots/{bot_id}", get(get_public_bot_info));
+    let public = Router::new().route("/bots/{bot_id}", get(get_public_bot_info));
 
     // Authenticated routes — require user or bot auth
     let authenticated = Router::new()
         // Developer portal
-        .route("/applications", post(create_application).get(list_applications))
+        .route(
+            "/applications",
+            post(create_application).get(list_applications),
+        )
         .route(
             "/applications/{app_id}",
             get(get_application)
@@ -50,7 +55,9 @@ pub fn router() -> Router<Arc<AppState>> {
             "/servers/{server_id}/integrations/{bot_id}",
             delete(uninstall_bot),
         )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware));
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ));
 
     Router::new().merge(public).merge(authenticated)
 }
@@ -111,7 +118,9 @@ async fn get_application(
 ) -> NexusResult<Json<BotApplication>> {
     let bot = bots::get_bot(&state.db.pool, app_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "application".to_string() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "application".to_string(),
+        })?;
 
     if bot.owner_id != auth.user_id {
         return Err(NexusError::Forbidden);
@@ -133,13 +142,12 @@ async fn create_application(
             message: "Bot name must be 1-32 characters".into(),
         });
     }
-    if let Some(ref desc) = body.description {
-        if desc.len() > 120 {
+    if let Some(ref desc) = body.description
+        && desc.len() > 120 {
             return Err(NexusError::Validation {
                 message: "Bot description must be 120 characters or fewer".into(),
             });
         }
-    }
 
     // Rate limiting: 5 bot apps per hour per user
     let ip = extract_client_ip(&headers);
@@ -148,13 +156,15 @@ async fn create_application(
         format!("rl:bot:create:{}", auth.user_id),
         5,
         3600,
-    ).await?;
+    )
+    .await?;
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:bot:create:ip:{ip}"),
         10,
         3600,
-    ).await?;
+    )
+    .await?;
     let app_id = snowflake::generate_id();
     let raw_token = generate_bot_token();
     let token_hash = hash_token(&raw_token);
@@ -175,7 +185,12 @@ async fn create_application(
     .await?;
 
     // Token is only returned once on creation
-    Ok(Json((bot, BotToken { token: format!("Bot {raw_token}") })))
+    Ok(Json((
+        bot,
+        BotToken {
+            token: format!("Bot {raw_token}"),
+        },
+    )))
 }
 
 /// PATCH /api/v1/applications/{app_id} — Update a bot application.
@@ -188,7 +203,9 @@ async fn update_application(
     // Verify ownership
     let existing = bots::get_bot(&state.db.pool, app_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "application".to_string() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "application".to_string(),
+        })?;
     if existing.owner_id != auth.user_id {
         return Err(NexusError::Forbidden);
     }
@@ -204,7 +221,9 @@ async fn update_application(
         body.interactions_endpoint_url.as_deref(),
     )
     .await?
-    .ok_or(NexusError::NotFound { resource: "application".to_string() })?;
+    .ok_or(NexusError::NotFound {
+        resource: "application".to_string(),
+    })?;
 
     Ok(Json(updated))
 }
@@ -221,11 +240,14 @@ async fn delete_application(
         format!("rl:bot:delete:{}", auth.user_id),
         10,
         60,
-    ).await?;
+    )
+    .await?;
 
     let existing = bots::get_bot(&state.db.pool, app_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "application".to_string() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "application".to_string(),
+        })?;
     if existing.owner_id != auth.user_id {
         return Err(NexusError::Forbidden);
     }
@@ -246,11 +268,14 @@ async fn reset_token(
         format!("rl:bot:token_reset:{}", auth.user_id),
         3,
         3600,
-    ).await?;
+    )
+    .await?;
 
     let existing = bots::get_bot(&state.db.pool, app_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "application".to_string() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "application".to_string(),
+        })?;
     if existing.owner_id != auth.user_id {
         return Err(NexusError::Forbidden);
     }
@@ -259,7 +284,9 @@ async fn reset_token(
     let token_hash = hash_token(&raw_token);
     bots::update_bot_token(&state.db.pool, app_id, &token_hash).await?;
 
-    Ok(Json(BotToken { token: format!("Bot {raw_token}") }))
+    Ok(Json(BotToken {
+        token: format!("Bot {raw_token}"),
+    }))
 }
 
 // ============================================================================
@@ -298,17 +325,21 @@ async fn install_bot(
         format!("rl:bot:install:{}", auth.user_id),
         10,
         3600,
-    ).await?;
+    )
+    .await?;
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:bot:install:ip:{ip}"),
         20,
         3600,
-    ).await?;
+    )
+    .await?;
     // Verify bot exists
     let _bot = bots::get_bot(&state.db.pool, body.bot_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "bot".to_string() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "bot".to_string(),
+        })?;
 
     let scopes = body.scopes.unwrap_or_else(|| vec!["bot".to_string()]);
     let permissions = body.permissions.unwrap_or(0);
@@ -359,10 +390,14 @@ async fn get_public_bot_info(
 ) -> NexusResult<Json<PublicBotInfo>> {
     let bot = bots::get_bot(&state.db.pool, bot_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "bot".to_string() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "bot".to_string(),
+        })?;
 
     if !bot.is_public {
-        return Err(NexusError::NotFound { resource: "bot".to_string() });
+        return Err(NexusError::NotFound {
+            resource: "bot".to_string(),
+        });
     }
 
     Ok(Json(PublicBotInfo {

@@ -13,11 +13,11 @@
 //! read without modification.  This lets existing deployments opt in by simply
 //! setting the variable and running a one-time migration.
 
-use aes_gcm::{
-    aead::{Aead, KeyInit, OsRng},
-    Aes256Gcm, Nonce,
-};
 use aes_gcm::aead::rand_core::RngCore;
+use aes_gcm::{
+    Aes256Gcm, Nonce,
+    aead::{Aead, KeyInit, OsRng},
+};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use std::sync::OnceLock;
@@ -57,8 +57,7 @@ pub fn encrypt(email: &str) -> String {
         return email.to_string();
     };
 
-    let cipher = Aes256Gcm::new_from_slice(&raw_key)
-        .expect("key is exactly 32 bytes");
+    let cipher = Aes256Gcm::new_from_slice(&raw_key).expect("key is exactly 32 bytes");
 
     let mut nonce_bytes = [0u8; NONCE_LEN];
     OsRng.fill_bytes(&mut nonce_bytes);
@@ -72,10 +71,10 @@ pub fn encrypt(email: &str) -> String {
     payload.extend_from_slice(&nonce_bytes);
     payload.extend_from_slice(&ciphertext);
 
-    format!("{ENC_PREFIX}{}", base64::Engine::encode(
-        &base64::engine::general_purpose::STANDARD,
-        &payload,
-    ))
+    format!(
+        "{ENC_PREFIX}{}",
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &payload,)
+    )
 }
 
 /// Decrypt a stored email value.
@@ -94,10 +93,7 @@ pub fn decrypt(stored: &str) -> Option<String> {
     }
 
     let b64 = &stored[ENC_PREFIX.len()..];
-    let payload = base64::Engine::decode(
-        &base64::engine::general_purpose::STANDARD,
-        b64,
-    ).ok()?;
+    let payload = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, b64).ok()?;
 
     if payload.len() < NONCE_LEN + 16 {
         tracing::warn!("email_crypto: ciphertext too short");
@@ -107,8 +103,7 @@ pub fn decrypt(stored: &str) -> Option<String> {
     let (nonce_bytes, ciphertext) = payload.split_at(NONCE_LEN);
     let nonce = Nonce::from_slice(nonce_bytes);
 
-    let cipher = Aes256Gcm::new_from_slice(&raw_key)
-        .expect("key is exactly 32 bytes");
+    let cipher = Aes256Gcm::new_from_slice(&raw_key).expect("key is exactly 32 bytes");
 
     let plaintext = cipher.decrypt(nonce, ciphertext).ok()?;
     String::from_utf8(plaintext).ok()
@@ -123,8 +118,8 @@ pub fn decrypt(stored: &str) -> Option<String> {
 /// lookups go directly against the plaintext `email` column).
 pub fn lookup_hash(email: &str) -> Option<String> {
     let raw_key = key()?;
-    let mut mac: Hmac<Sha256> = hmac::Mac::new_from_slice(&raw_key)
-        .expect("HMAC accepts any key length");
+    let mut mac: Hmac<Sha256> =
+        hmac::Mac::new_from_slice(&raw_key).expect("HMAC accepts any key length");
     mac.update(email.to_lowercase().as_bytes());
     Some(hex::encode(mac.finalize().into_bytes()))
 }
@@ -158,8 +153,11 @@ mod tests {
 
     /// Encrypt and decrypt using key bytes directly (bypassing the OnceLock env path).
     fn encrypt_with_key(email: &str, key: [u8; 32]) -> String {
-        use aes_gcm::{aead::{Aead, KeyInit, OsRng}, Aes256Gcm, Nonce};
         use aes_gcm::aead::rand_core::RngCore;
+        use aes_gcm::{
+            Aes256Gcm, Nonce,
+            aead::{Aead, KeyInit, OsRng},
+        };
 
         let cipher = Aes256Gcm::new_from_slice(&key).unwrap();
         let mut nonce_bytes = [0u8; 12];
@@ -169,21 +167,26 @@ mod tests {
         let mut payload = Vec::with_capacity(12 + ciphertext.len());
         payload.extend_from_slice(&nonce_bytes);
         payload.extend_from_slice(&ciphertext);
-        format!("enc:{}", base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD, &payload
-        ))
+        format!(
+            "enc:{}",
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &payload)
+        )
     }
 
     fn decrypt_with_key(stored: &str, key: [u8; 32]) -> Option<String> {
-        use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm, Nonce};
+        use aes_gcm::{
+            Aes256Gcm, Nonce,
+            aead::{Aead, KeyInit},
+        };
         if !stored.starts_with("enc:") {
             return Some(stored.to_string());
         }
-        let payload = base64::Engine::decode(
-            &base64::engine::general_purpose::STANDARD,
-            &stored[4..],
-        ).ok()?;
-        if payload.len() < 28 { return None; }
+        let payload =
+            base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &stored[4..])
+                .ok()?;
+        if payload.len() < 28 {
+            return None;
+        }
         let (nonce_bytes, ciphertext) = payload.split_at(12);
         let nonce = Nonce::from_slice(nonce_bytes);
         let cipher = Aes256Gcm::new_from_slice(&key).unwrap();
@@ -238,9 +241,10 @@ mod tests {
     fn decrypt_returns_none_for_too_short_payload() {
         with_key(|key| {
             // Payload shorter than nonce (12 bytes) + tag (16 bytes) = 28 bytes minimum
-            let short = format!("enc:{}", base64::Engine::encode(
-                &base64::engine::general_purpose::STANDARD, b"tooshort"
-            ));
+            let short = format!(
+                "enc:{}",
+                base64::Engine::encode(&base64::engine::general_purpose::STANDARD, b"tooshort")
+            );
             let result = decrypt_with_key(&short, key);
             assert!(result.is_none());
         });

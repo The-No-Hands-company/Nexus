@@ -141,11 +141,11 @@ impl ScyllaSink {
         let mid = message_id.to_string();
 
         // Fast path: if payload has channel/time, delete directly.
-        if let Some(value) = payload {
-            if let Ok(doc) = serde_json::from_value::<MessageDocument>(value.clone()) {
-                self.delete_by_doc(&doc).await?;
-                return Ok(());
-            }
+        if let Some(value) = payload
+            && let Ok(doc) = serde_json::from_value::<MessageDocument>(value.clone())
+        {
+            self.delete_by_doc(&doc).await?;
+            return Ok(());
         }
 
         // Fallback: lookup via messages_by_id then delete from channel table.
@@ -163,7 +163,10 @@ impl ScyllaSink {
             .into_rows_result()
             .context("Scylla select rows decode failed")?;
 
-        for row in rows.rows::<(String, i64)>().context("Scylla typed row decode failed")? {
+        for row in rows
+            .rows::<(String, i64)>()
+            .context("Scylla typed row decode failed")?
+        {
             let (channel_id, created_at_epoch) = row.context("Scylla row read failed")?;
             self.session
                 .query_unpaged(

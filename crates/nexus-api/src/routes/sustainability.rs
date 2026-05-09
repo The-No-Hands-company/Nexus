@@ -4,28 +4,31 @@
 //! contributor badges, security audits, tutorial progress, migration guides.
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, Query, State},
     middleware,
     routing::{get, post},
-    Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
-use nexus_common::models::sustainability::*;
-use nexus_db::repository::{sustainability, members};
 use nexus_common::models::Member;
+use nexus_common::models::sustainability::*;
+use nexus_db::repository::{members, sustainability};
 use serde::Deserialize;
 use sqlx;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 // ── Router ─────────────────────────────────────────────────────────────────
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         // Protocol versions
-        .route("/admin/protocol-versions", get(list_protocol_versions).post(upsert_protocol_version))
+        .route(
+            "/admin/protocol-versions",
+            get(list_protocol_versions).post(upsert_protocol_version),
+        )
         // Governance polls
         .route(
             "/servers/{server_id}/governance/polls",
@@ -50,8 +53,14 @@ pub fn router() -> Router<Arc<AppState>> {
             post(award_contributor_badge),
         )
         // Security audits (admin)
-        .route("/admin/security-audits", get(list_security_audits).post(create_security_audit))
-        .route("/admin/vulnerability-records", get(list_vulnerability_records_handler).post(create_vulnerability_record))
+        .route(
+            "/admin/security-audits",
+            get(list_security_audits).post(create_security_audit),
+        )
+        .route(
+            "/admin/vulnerability-records",
+            get(list_vulnerability_records_handler).post(create_vulnerability_record),
+        )
         // Tutorial progress
         .route(
             "/users/@me/tutorial-progress",
@@ -59,16 +68,22 @@ pub fn router() -> Router<Arc<AppState>> {
         )
         // Migration guides
         .route("/migration-guides", get(list_migration_guides))
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ── Request / Query ────────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
-struct LimitQuery { limit: Option<i64> }
+struct LimitQuery {
+    limit: Option<i64>,
+}
 
 #[derive(Debug, Deserialize)]
-struct ProtocolQuery { protocol: String }
+struct ProtocolQuery {
+    protocol: String,
+}
 
 #[derive(Debug, Deserialize)]
 struct UpsertProtocolVersionReq {
@@ -141,7 +156,8 @@ async fn list_protocol_versions(
     Query(q): Query<ProtocolQuery>,
 ) -> NexusResult<Json<Vec<ProtocolVersion>>> {
     let rows = sustainability::list_protocol_versions(&state.db.pool, &q.protocol)
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(rows))
 }
 
@@ -151,11 +167,16 @@ async fn upsert_protocol_version(
     Json(body): Json<UpsertProtocolVersionReq>,
 ) -> NexusResult<Json<ProtocolVersion>> {
     let row = sustainability::upsert_protocol_version(
-        &state.db.pool, Uuid::new_v4(), &body.protocol, &body.version,
+        &state.db.pool,
+        Uuid::new_v4(),
+        &body.protocol,
+        &body.version,
         &body.status.unwrap_or_else(|| "stable".into()),
         &body.capabilities.unwrap_or(serde_json::json!({})),
         body.migration_guide.as_deref(),
-    ).await.map_err(|e| NexusError::Internal(e.into()))?;
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(row))
 }
 
@@ -165,11 +186,15 @@ async fn list_governance_polls(
     Path(server_id): Path<Uuid>,
 ) -> NexusResult<Json<Vec<GovernancePoll>>> {
     let _m: Option<Member> = members::find_member(&state.db.pool, ctx.user_id, server_id)
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
-    if _m.is_none() { return Err(NexusError::Forbidden); }
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    if _m.is_none() {
+        return Err(NexusError::Forbidden);
+    }
 
     let rows = sustainability::list_governance_polls(&state.db.pool, server_id)
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(rows))
 }
 
@@ -180,18 +205,28 @@ async fn create_governance_poll(
     Json(body): Json<CreateGovernancePollReq>,
 ) -> NexusResult<Json<GovernancePoll>> {
     let _m: Option<Member> = members::find_member(&state.db.pool, ctx.user_id, server_id)
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
-    if _m.is_none() { return Err(NexusError::Forbidden); }
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    if _m.is_none() {
+        return Err(NexusError::Forbidden);
+    }
 
     let row = sustainability::create_governance_poll(
-        &state.db.pool, Uuid::new_v4(), server_id, &body.title,
+        &state.db.pool,
+        Uuid::new_v4(),
+        server_id,
+        &body.title,
         body.description.as_deref(),
         &body.poll_type.unwrap_or_else(|| "simple".into()),
-        &body.options, body.min_participation.unwrap_or(0.0),
+        &body.options,
+        body.min_participation.unwrap_or(0.0),
         body.allow_multiple.unwrap_or(false),
         body.anonymous.unwrap_or(false),
-        ctx.user_id, body.closes_at.as_deref(),
-    ).await.map_err(|e| NexusError::Internal(e.into()))?;
+        ctx.user_id,
+        body.closes_at.as_deref(),
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(row))
 }
 
@@ -202,11 +237,15 @@ async fn cast_vote(
     Json(body): Json<CastVoteReq>,
 ) -> NexusResult<Json<PollVote>> {
     let _m: Option<Member> = members::find_member(&state.db.pool, ctx.user_id, server_id)
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
-    if _m.is_none() { return Err(NexusError::Forbidden); }
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    if _m.is_none() {
+        return Err(NexusError::Forbidden);
+    }
 
     let row = sustainability::cast_vote(&state.db.pool, poll_id, ctx.user_id, body.option_index)
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(row))
 }
 
@@ -216,11 +255,15 @@ async fn list_governance_proposals(
     Path(server_id): Path<Uuid>,
 ) -> NexusResult<Json<Vec<GovernanceProposal>>> {
     let _m: Option<Member> = members::find_member(&state.db.pool, ctx.user_id, server_id)
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
-    if _m.is_none() { return Err(NexusError::Forbidden); }
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    if _m.is_none() {
+        return Err(NexusError::Forbidden);
+    }
 
     let rows = sustainability::list_governance_proposals(&state.db.pool, server_id)
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(rows))
 }
 
@@ -231,13 +274,23 @@ async fn create_governance_proposal(
     Json(body): Json<CreateGovernanceProposalReq>,
 ) -> NexusResult<Json<GovernanceProposal>> {
     let _m: Option<Member> = members::find_member(&state.db.pool, ctx.user_id, server_id)
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
-    if _m.is_none() { return Err(NexusError::Forbidden); }
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
+    if _m.is_none() {
+        return Err(NexusError::Forbidden);
+    }
 
     let row = sustainability::create_governance_proposal(
-        &state.db.pool, Uuid::new_v4(), server_id, &body.title,
-        &body.body, ctx.user_id, body.discussion_channel,
-    ).await.map_err(|e| NexusError::Internal(e.into()))?;
+        &state.db.pool,
+        Uuid::new_v4(),
+        server_id,
+        &body.title,
+        &body.body,
+        ctx.user_id,
+        body.discussion_channel,
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(row))
 }
 
@@ -247,7 +300,8 @@ async fn list_contributor_badges(
     Path(user_id): Path<Uuid>,
 ) -> NexusResult<Json<Vec<ContributorBadge>>> {
     let rows = sustainability::list_contributor_badges(&state.db.pool, user_id)
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(rows))
 }
 
@@ -258,10 +312,15 @@ async fn award_contributor_badge(
     Json(body): Json<AwardContributorBadgeReq>,
 ) -> NexusResult<Json<ContributorBadge>> {
     let row = sustainability::award_contributor_badge(
-        &state.db.pool, Uuid::new_v4(), user_id, &body.badge_type,
+        &state.db.pool,
+        Uuid::new_v4(),
+        user_id,
+        &body.badge_type,
         body.source.as_deref(),
         &body.metadata.unwrap_or(serde_json::json!({})),
-    ).await.map_err(|e| NexusError::Internal(e.into()))?;
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(row))
 }
 
@@ -271,7 +330,8 @@ async fn list_security_audits(
     Query(q): Query<LimitQuery>,
 ) -> NexusResult<Json<Vec<SecurityAudit>>> {
     let rows = sustainability::list_security_audits(&state.db.pool, q.limit.unwrap_or(50))
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(rows))
 }
 
@@ -281,8 +341,13 @@ async fn create_security_audit(
     Json(body): Json<CreateSecurityAuditReq>,
 ) -> NexusResult<Json<SecurityAudit>> {
     let row = sustainability::create_security_audit(
-        &state.db.pool, Uuid::new_v4(), &body.audit_type, body.auditor.as_deref(),
-    ).await.map_err(|e| NexusError::Internal(e.into()))?;
+        &state.db.pool,
+        Uuid::new_v4(),
+        &body.audit_type,
+        body.auditor.as_deref(),
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(row))
 }
 
@@ -310,10 +375,17 @@ async fn create_vulnerability_record(
     Json(body): Json<CreateVulnerabilityReq>,
 ) -> NexusResult<Json<VulnerabilityRecord>> {
     let row = sustainability::create_vulnerability_record(
-        &state.db.pool, Uuid::new_v4(), body.audit_id,
-        body.cve_id.as_deref(), &body.package_name,
-        &body.severity, &body.description, body.remediation.as_deref(),
-    ).await.map_err(|e| NexusError::Internal(e.into()))?;
+        &state.db.pool,
+        Uuid::new_v4(),
+        body.audit_id,
+        body.cve_id.as_deref(),
+        &body.package_name,
+        &body.severity,
+        &body.description,
+        body.remediation.as_deref(),
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(row))
 }
 
@@ -339,9 +411,14 @@ async fn upsert_tutorial_progress(
     Json(body): Json<UpsertTutorialProgressReq>,
 ) -> NexusResult<Json<TutorialProgress>> {
     let row = sustainability::upsert_tutorial_progress(
-        &state.db.pool, ctx.user_id, &body.tutorial_id,
-        &body.completed_steps, body.completed.unwrap_or(false),
-    ).await.map_err(|e| NexusError::Internal(e.into()))?;
+        &state.db.pool,
+        ctx.user_id,
+        &body.tutorial_id,
+        &body.completed_steps,
+        body.completed.unwrap_or(false),
+    )
+    .await
+    .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(row))
 }
 
@@ -350,6 +427,7 @@ async fn list_migration_guides(
     Extension(_ctx): Extension<AuthContext>,
 ) -> NexusResult<Json<Vec<MigrationGuide>>> {
     let rows = sustainability::list_migration_guides(&state.db.pool)
-        .await.map_err(|e| NexusError::Internal(e.into()))?;
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
     Ok(Json(rows))
 }

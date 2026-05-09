@@ -43,9 +43,7 @@ pub async fn get_prune_rule(
     pool: &AnyPool,
     server_id: Uuid,
 ) -> Result<Option<MemberPruneRule>, sqlx::Error> {
-    let q = format!(
-        "SELECT {MEMBER_PRUNE_RULE_COLS} FROM member_prune_rules WHERE server_id = $1"
-    );
+    let q = format!("SELECT {MEMBER_PRUNE_RULE_COLS} FROM member_prune_rules WHERE server_id = $1");
     sqlx::query_as::<_, MemberPruneRule>(&q)
         .bind(server_id.to_string())
         .fetch_optional(pool)
@@ -83,9 +81,8 @@ pub async fn list_slow_mode_overrides(
     pool: &AnyPool,
     channel_id: Uuid,
 ) -> Result<Vec<SlowModeOverride>, sqlx::Error> {
-    let q = format!(
-        "SELECT {SLOW_MODE_OVERRIDE_COLS} FROM slow_mode_overrides WHERE channel_id = $1"
-    );
+    let q =
+        format!("SELECT {SLOW_MODE_OVERRIDE_COLS} FROM slow_mode_overrides WHERE channel_id = $1");
     sqlx::query_as::<_, SlowModeOverride>(&q)
         .bind(channel_id.to_string())
         .fetch_all(pool)

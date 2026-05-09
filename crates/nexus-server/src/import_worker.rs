@@ -130,14 +130,16 @@ async fn process_import_job(
         ));
     }
 
-    let fallback_channel = match resolve_or_create_import_channel(pool, job.server_id, &source).await {
-        Ok(id) => id,
-        Err(e) => {
-            return Err((format!("failed to prepare import channel: {e}"), 0, total));
-        }
-    };
+    let fallback_channel =
+        match resolve_or_create_import_channel(pool, job.server_id, source).await {
+            Ok(id) => id,
+            Err(e) => {
+                return Err((format!("failed to prepare import channel: {e}"), 0, total));
+            }
+        };
 
-    let mut channel_cache: std::collections::HashMap<String, Uuid> = std::collections::HashMap::new();
+    let mut channel_cache: std::collections::HashMap<String, Uuid> =
+        std::collections::HashMap::new();
 
     let mut imported = 0i32;
     for item in items {
@@ -158,16 +160,17 @@ async fn process_import_job(
             if let Some(cid) = channel_cache.get(name).copied() {
                 cid
             } else {
-                let cid = match resolve_or_create_import_channel_named(pool, job.server_id, name).await {
-                    Ok(id) => id,
-                    Err(e) => {
-                        return Err((
-                            format!("failed to prepare channel '{name}' for import: {e}"),
-                            imported,
-                            total,
-                        ));
-                    }
-                };
+                let cid =
+                    match resolve_or_create_import_channel_named(pool, job.server_id, name).await {
+                        Ok(id) => id,
+                        Err(e) => {
+                            return Err((
+                                format!("failed to prepare channel '{name}' for import: {e}"),
+                                imported,
+                                total,
+                            ));
+                        }
+                    };
                 channel_cache.insert(name.to_string(), cid);
                 cid
             }
@@ -250,7 +253,13 @@ async fn resolve_or_create_import_channel_named(
         .trim()
         .to_ascii_lowercase()
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect::<String>();
     while normalized.contains("--") {
         normalized = normalized.replace("--", "-");
@@ -333,16 +342,16 @@ fn extract_messages(metadata: &serde_json::Value) -> Vec<ImportedMessage> {
         }
     }
 
-    if out.is_empty() {
-        if let Some(text_dump) = metadata.get("text_dump").and_then(|v| v.as_str()) {
-            for line in text_dump.lines() {
-                let trimmed = line.trim();
-                if !trimmed.is_empty() {
-                    out.push(ImportedMessage {
-                        channel_name: None,
-                        content: trimmed.to_string(),
-                    });
-                }
+    if out.is_empty()
+        && let Some(text_dump) = metadata.get("text_dump").and_then(|v| v.as_str())
+    {
+        for line in text_dump.lines() {
+            let trimmed = line.trim();
+            if !trimmed.is_empty() {
+                out.push(ImportedMessage {
+                    channel_name: None,
+                    content: trimmed.to_string(),
+                });
             }
         }
     }
@@ -393,7 +402,10 @@ mod tests {
         });
 
         let out = extract_messages(&metadata);
-        assert_eq!(out.iter().map(|m| m.content.clone()).collect::<Vec<_>>(), vec!["hello", "world", "raw"]);
+        assert_eq!(
+            out.iter().map(|m| m.content.clone()).collect::<Vec<_>>(),
+            vec!["hello", "world", "raw"]
+        );
         assert!(out.iter().all(|m| m.channel_name.is_none()));
     }
 
@@ -412,7 +424,10 @@ mod tests {
         });
 
         let out = extract_messages(&metadata);
-        assert_eq!(out.iter().map(|m| m.content.clone()).collect::<Vec<_>>(), vec!["first", "second"]);
+        assert_eq!(
+            out.iter().map(|m| m.content.clone()).collect::<Vec<_>>(),
+            vec!["first", "second"]
+        );
         assert_eq!(out[0].channel_name.as_deref(), Some("general"));
         assert_eq!(out[1].channel_name.as_deref(), Some("general"));
     }
@@ -424,7 +439,10 @@ mod tests {
         });
 
         let out = extract_messages(&metadata);
-        assert_eq!(out.iter().map(|m| m.content.clone()).collect::<Vec<_>>(), vec!["line one", "line two"]);
+        assert_eq!(
+            out.iter().map(|m| m.content.clone()).collect::<Vec<_>>(),
+            vec!["line one", "line two"]
+        );
         assert!(out.iter().all(|m| m.channel_name.is_none()));
     }
 }

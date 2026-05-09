@@ -12,24 +12,24 @@
 //! DELETE /servers/:server_id/plugin-installs/:plugin_id — Uninstall
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, Query, State},
     middleware,
     routing::{get, patch, post},
-    Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
+use nexus_common::models::Member;
 use nexus_common::models::ecosystem::{
     MarketplaceMonetization, MarketplacePlugin, PluginInstall, PluginReview, ReviewStatus,
     TrustTier,
 };
 use nexus_common::security_scanning::{MockMalwareScanner, SecurityScanner};
 use nexus_db::repository::{marketplace, members};
-use nexus_common::models::Member;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 // ── Router ────────────────────────────────────────────────────────────────────
 
@@ -55,10 +55,7 @@ pub fn router() -> Router<Arc<AppState>> {
             "/marketplace/plugins/{plugin_id}/purchase-intent",
             post(create_purchase_intent),
         )
-        .route(
-            "/marketplace/admin/review-queue",
-            get(get_review_queue),
-        )
+        .route("/marketplace/admin/review-queue", get(get_review_queue))
         .route(
             "/marketplace/admin/plugins/{plugin_id}/approve",
             post(approve_plugin),
@@ -125,7 +122,9 @@ pub fn router() -> Router<Arc<AppState>> {
             "/servers/{server_id}/plugin-installs/{plugin_id}",
             axum::routing::patch(toggle_install).delete(uninstall_plugin),
         )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ── Request / Query Types ─────────────────────────────────────────────────────
@@ -429,7 +428,9 @@ async fn install_plugin(
     let _member: Option<Member> = members::find_member(&state.db.pool, ctx.user_id, server_id)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
-    if _member.is_none() { return Err(NexusError::Forbidden); }
+    if _member.is_none() {
+        return Err(NexusError::Forbidden);
+    }
 
     // Verify plugin exists
     let _plugin = marketplace::get_plugin(&state.db.pool, body.plugin_id)
@@ -465,7 +466,9 @@ async fn list_installs(
     let _member: Option<Member> = members::find_member(&state.db.pool, ctx.user_id, server_id)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
-    if _member.is_none() { return Err(NexusError::Forbidden); }
+    if _member.is_none() {
+        return Err(NexusError::Forbidden);
+    }
 
     let installs = marketplace::list_server_installs(&state.db.pool, server_id)
         .await
@@ -483,7 +486,9 @@ async fn toggle_install(
     let _member: Option<Member> = members::find_member(&state.db.pool, ctx.user_id, server_id)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
-    if _member.is_none() { return Err(NexusError::Forbidden); }
+    if _member.is_none() {
+        return Err(NexusError::Forbidden);
+    }
 
     let install =
         marketplace::toggle_plugin_install(&state.db.pool, plugin_id, server_id, body.enabled)
@@ -504,7 +509,9 @@ async fn uninstall_plugin(
     let _member: Option<Member> = members::find_member(&state.db.pool, ctx.user_id, server_id)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
-    if _member.is_none() { return Err(NexusError::Forbidden); }
+    if _member.is_none() {
+        return Err(NexusError::Forbidden);
+    }
 
     let deleted = marketplace::uninstall_plugin(&state.db.pool, plugin_id, server_id)
         .await
@@ -576,11 +583,11 @@ async fn get_review_queue(
     ctx.load_flags(&state.db.pool)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
-    
+
     if !ctx.can_review_plugins().await {
         return Err(NexusError::Forbidden);
     }
-    
+
     let items = marketplace::get_review_queue(&state.db.pool, limit.unwrap_or(20), 0)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
@@ -601,11 +608,11 @@ async fn approve_plugin(
     ctx.load_flags(&state.db.pool)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
-    
+
     if !ctx.can_review_plugins().await {
         return Err(NexusError::Forbidden);
     }
-    
+
     let tier = match body.trust_tier.as_deref().unwrap_or("reviewed") {
         "verified" => TrustTier::Verified,
         _ => TrustTier::Reviewed,
@@ -653,11 +660,11 @@ async fn reject_plugin(
     ctx.load_flags(&state.db.pool)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
-    
+
     if !ctx.can_review_plugins().await {
         return Err(NexusError::Forbidden);
     }
-    
+
     marketplace::update_review_status(
         &state.db.pool,
         plugin_id,
@@ -696,11 +703,11 @@ async fn quarantine_plugin(
     ctx.load_flags(&state.db.pool)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
-    
+
     if !ctx.can_handle_takedowns().await {
         return Err(NexusError::Forbidden);
     }
-    
+
     marketplace::update_review_status(
         &state.db.pool,
         plugin_id,
@@ -739,11 +746,11 @@ async fn request_takedown_admin(
     ctx.load_flags(&state.db.pool)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
-    
+
     if !ctx.can_handle_takedowns().await {
         return Err(NexusError::Forbidden);
     }
-    
+
     let takedown_id = Uuid::new_v4();
     let evidence_json = body
         .evidence_urls
@@ -778,11 +785,11 @@ async fn review_takedown(
     ctx.load_flags(&state.db.pool)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
-    
+
     if !ctx.can_handle_takedowns().await {
         return Err(NexusError::Forbidden);
     }
-    
+
     marketplace::review_takedown(
         &state.db.pool,
         takedown_id,
@@ -805,11 +812,11 @@ async fn reinstate_plugin_admin(
     ctx.load_flags(&state.db.pool)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
-    
+
     if !ctx.can_handle_takedowns().await {
         return Err(NexusError::Forbidden);
     }
-    
+
     marketplace::reinstate_plugin(&state.db.pool, takedown_id)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
@@ -943,14 +950,15 @@ async fn get_vetting_queue(
     ctx.load_flags(&state.db.pool)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
-    
+
     if !ctx.is_marketplace_admin().await {
         return Err(NexusError::Forbidden);
     }
 
-    let items = marketplace::get_creator_vetting_queue(&state.db.pool, "pending", limit.unwrap_or(20), 0)
-        .await
-        .map_err(|e| NexusError::Internal(e.into()))?;
+    let items =
+        marketplace::get_creator_vetting_queue(&state.db.pool, "pending", limit.unwrap_or(20), 0)
+            .await
+            .map_err(|e| NexusError::Internal(e.into()))?;
 
     Ok(Json(serde_json::json!({
         "queue": items,
@@ -968,7 +976,7 @@ async fn approve_creator(
     ctx.load_flags(&state.db.pool)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
-    
+
     if !ctx.is_marketplace_admin().await {
         return Err(NexusError::Forbidden);
     }
@@ -1005,7 +1013,7 @@ async fn reject_creator(
     ctx.load_flags(&state.db.pool)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
-    
+
     if !ctx.is_marketplace_admin().await {
         return Err(NexusError::Forbidden);
     }
@@ -1025,7 +1033,7 @@ async fn get_dashboard_stats(
     ctx.load_flags(&state.db.pool)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
-    
+
     if !ctx.is_marketplace_admin().await {
         return Err(NexusError::Forbidden);
     }
@@ -1039,12 +1047,11 @@ async fn get_dashboard_stats(
     .unwrap_or(0);
 
     // Query vetting queue count
-    let vetting_queue: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM creator_vetting WHERE status = 'pending'"
-    )
-    .fetch_one(&state.db.pool)
-    .await
-    .unwrap_or(0);
+    let vetting_queue: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM creator_vetting WHERE status = 'pending'")
+            .fetch_one(&state.db.pool)
+            .await
+            .unwrap_or(0);
 
     // Query today's approvals
     let todays_approvals: i64 = sqlx::query_scalar(
@@ -1064,7 +1071,7 @@ async fn get_dashboard_stats(
 
     // Query pending takedowns
     let pending_takedowns: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM marketplace_takedowns WHERE quarantine_status = 'pending'"
+        "SELECT COUNT(*) FROM marketplace_takedowns WHERE quarantine_status = 'pending'",
     )
     .fetch_one(&state.db.pool)
     .await
@@ -1122,13 +1129,12 @@ async fn upsert_creator_monetization(
         return Err(NexusError::Forbidden);
     }
 
-    if let Some(price) = body.price_cents {
-        if price < 0 {
+    if let Some(price) = body.price_cents
+        && price < 0 {
             return Err(NexusError::Validation {
                 message: "price_cents must be >= 0".into(),
             });
         }
-    }
 
     if body.price_cents.unwrap_or(0) > 0 {
         let has_payment_link = body
@@ -1158,9 +1164,14 @@ async fn upsert_creator_monetization(
         .map_err(|e| NexusError::Internal(e.into()))?
         .is_none()
     {
-        marketplace::create_monetization_record(&state.db.pool, Uuid::new_v4(), plugin_id, ctx.user_id)
-            .await
-            .map_err(|e| NexusError::Internal(e.into()))?;
+        marketplace::create_monetization_record(
+            &state.db.pool,
+            Uuid::new_v4(),
+            plugin_id,
+            ctx.user_id,
+        )
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
     }
 
     marketplace::update_monetization_price(
@@ -1239,7 +1250,7 @@ async fn trigger_security_scan(
     ctx.load_flags(&state.db.pool)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
-    
+
     if !ctx.can_review_plugins().await {
         return Err(NexusError::Forbidden);
     }
@@ -1304,7 +1315,11 @@ async fn run_security_scan_pipeline(
         Some(actor_id),
         "submitted",
         "scanning",
-        if automated { "auto_scan_started" } else { "manual_scan_started" },
+        if automated {
+            "auto_scan_started"
+        } else {
+            "manual_scan_started"
+        },
         None,
         Some(start_note),
     )
@@ -1357,7 +1372,11 @@ async fn run_security_scan_pipeline(
         Some(actor_id),
         "scanning",
         if is_critical { "quarantined" } else { "review" },
-        if is_critical { "scan_quarantined" } else { "scan_passed" },
+        if is_critical {
+            "scan_quarantined"
+        } else {
+            "scan_passed"
+        },
         reason,
         notes,
     )

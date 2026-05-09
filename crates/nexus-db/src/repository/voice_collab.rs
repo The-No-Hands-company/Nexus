@@ -130,10 +130,7 @@ pub async fn list_live_streams(
         .await
 }
 
-pub async fn end_live_stream(
-    pool: &AnyPool,
-    id: Uuid,
-) -> Result<(), sqlx::Error> {
+pub async fn end_live_stream(pool: &AnyPool, id: Uuid) -> Result<(), sqlx::Error> {
     sqlx::query("UPDATE live_streams SET status = 'ended', ended_at = now() WHERE id = $1")
         .bind(id.to_string())
         .execute(pool)
@@ -267,24 +264,16 @@ pub async fn get_spatial_audio_config(
 
 // ── 22-05: Voice Presets ──────────────────────────────────────────────────
 
-pub async fn list_voice_presets(
-    pool: &AnyPool,
-) -> Result<Vec<VoicePreset>, sqlx::Error> {
-    let q = format!(
-        "SELECT {VOICE_PRESET_COLS} FROM voice_presets ORDER BY name"
-    );
-    sqlx::query_as::<_, VoicePreset>(&q)
-        .fetch_all(pool)
-        .await
+pub async fn list_voice_presets(pool: &AnyPool) -> Result<Vec<VoicePreset>, sqlx::Error> {
+    let q = format!("SELECT {VOICE_PRESET_COLS} FROM voice_presets ORDER BY name");
+    sqlx::query_as::<_, VoicePreset>(&q).fetch_all(pool).await
 }
 
 pub async fn get_voice_preset(
     pool: &AnyPool,
     name: &str,
 ) -> Result<Option<VoicePreset>, sqlx::Error> {
-    let q = format!(
-        "SELECT {VOICE_PRESET_COLS} FROM voice_presets WHERE name = $1"
-    );
+    let q = format!("SELECT {VOICE_PRESET_COLS} FROM voice_presets WHERE name = $1");
     sqlx::query_as::<_, VoicePreset>(&q)
         .bind(name)
         .fetch_optional(pool)

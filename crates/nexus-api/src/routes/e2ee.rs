@@ -8,21 +8,26 @@
 
 use axum::http::HeaderMap;
 use axum::{
+    Json, Router,
     extract::{Extension, Path, Query, State},
     middleware,
     routing::get,
-    Json, Router,
 };
 use nexus_common::{
     error::{NexusError, NexusResult},
-    models::crypto::{E2eeChannel, EnableE2eeRequest, EncryptedMessage, SendEncryptedMessageRequest},
+    models::crypto::{
+        E2eeChannel, EnableE2eeRequest, EncryptedMessage, SendEncryptedMessageRequest,
+    },
 };
 use nexus_db::repository::keystore;
 use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
+use crate::{
+    AppState,
+    middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip},
+};
 use nexus_common::gateway_event::GatewayEvent;
 
 pub fn router() -> Router<Arc<AppState>> {
@@ -35,7 +40,9 @@ pub fn router() -> Router<Arc<AppState>> {
             "/channels/{channel_id}/e2ee",
             get(get_e2ee_config).put(enable_e2ee),
         )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 #[derive(Deserialize)]
@@ -62,7 +69,7 @@ async fn list_encrypted_messages(
         limit,
     )
     .await
-    .map_err(|e| NexusError::Internal(e))?;
+    .map_err(NexusError::Internal)?;
     Ok(Json(msgs))
 }
 
@@ -82,15 +89,17 @@ async fn send_encrypted_message(
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:e2ee:user:{}", auth.user_id),
-        20,  // 20 messages
-        60,  // per minute
-    ).await?;
+        20, // 20 messages
+        60, // per minute
+    )
+    .await?;
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:e2ee:ip:{ip}"),
-        50,  // 50 per IP
+        50, // 50 per IP
         60,
-    ).await?;
+    )
+    .await?;
 
     // Verify ciphertext_map is a JSON object
     if !body.ciphertext_map.is_object() {
@@ -99,9 +108,12 @@ async fn send_encrypted_message(
         });
     }
 
-    let recipient_map = body.ciphertext_map.as_object().ok_or(NexusError::Validation {
-        message: "ciphertext_map must be a JSON object".into(),
-    })?;
+    let recipient_map = body
+        .ciphertext_map
+        .as_object()
+        .ok_or(NexusError::Validation {
+            message: "ciphertext_map must be a JSON object".into(),
+        })?;
 
     // Require at least one recipient
     if recipient_map.is_empty() {
@@ -125,10 +137,11 @@ async fn send_encrypted_message(
     // We pick the first device registered to this user as the "sender device".
     let devices = nexus_db::repository::keystore::list_devices(&state.db.pool, auth.user_id)
         .await
-        .map_err(|e| NexusError::Internal(e))?;
+        .map_err(NexusError::Internal)?;
 
     let sender_device = devices.into_iter().next().ok_or(NexusError::Validation {
-        message: "No device registered for sender. Register a device before sending E2EE messages.".into(),
+        message: "No device registered for sender. Register a device before sending E2EE messages."
+            .into(),
     })?;
 
     // Ensure sender includes their own device in recipient map so local replay
@@ -141,35 +154,46 @@ async fn send_encrypted_message(
 
     // Validate recipient IDs + envelope shape before persisting.
     for (device_id_str, envelope) in recipient_map {
-        let recipient_device_id = Uuid::parse_str(device_id_str).map_err(|_| NexusError::Validation {
-            message: format!("Invalid recipient device UUID: {device_id_str}"),
-        })?;
+        let recipient_device_id =
+            Uuid::parse_str(device_id_str).map_err(|_| NexusError::Validation {
+                message: format!("Invalid recipient device UUID: {device_id_str}"),
+            })?;
 
         let Some(envelope_obj) = envelope.as_object() else {
             return Err(NexusError::Validation {
-                message: format!("ciphertext envelope for device {device_id_str} must be an object"),
+                message: format!(
+                    "ciphertext envelope for device {device_id_str} must be an object"
+                ),
             });
         };
 
-        let msg_type = envelope_obj
-            .get("type")
-            .and_then(|v| v.as_u64())
-            .ok_or(NexusError::Validation {
-                message: format!("ciphertext envelope for device {device_id_str} must include numeric 'type'"),
-            })?;
+        let msg_type =
+            envelope_obj
+                .get("type")
+                .and_then(|v| v.as_u64())
+                .ok_or(NexusError::Validation {
+                    message: format!(
+                        "ciphertext envelope for device {device_id_str} must include numeric 'type'"
+                    ),
+                })?;
 
         if msg_type != 1 && msg_type != 2 {
             return Err(NexusError::Validation {
-                message: format!("ciphertext envelope type for device {device_id_str} must be 1 or 2"),
+                message: format!(
+                    "ciphertext envelope type for device {device_id_str} must be 1 or 2"
+                ),
             });
         }
 
-        let body_b64 = envelope_obj
-            .get("body")
-            .and_then(|v| v.as_str())
-            .ok_or(NexusError::Validation {
-                message: format!("ciphertext envelope for device {device_id_str} must include string 'body'"),
-            })?;
+        let body_b64 =
+            envelope_obj
+                .get("body")
+                .and_then(|v| v.as_str())
+                .ok_or(NexusError::Validation {
+                    message: format!(
+                        "ciphertext envelope for device {device_id_str} must include string 'body'"
+                    ),
+                })?;
 
         if body_b64.is_empty() {
             return Err(NexusError::Validation {
@@ -185,7 +209,7 @@ async fn send_encrypted_message(
 
         let device_exists = keystore::find_device(&state.db.pool, recipient_device_id)
             .await
-            .map_err(|e| NexusError::Internal(e.into()))?
+            .map_err(NexusError::Internal)?
             .is_some();
 
         if !device_exists {
@@ -206,7 +230,7 @@ async fn send_encrypted_message(
         body.sender_ratchet_step,
     )
     .await
-    .map_err(|e| NexusError::Internal(e))?;
+    .map_err(NexusError::Internal)?;
 
     // Broadcast to gateway (clients receive the ciphertext_map and decrypt locally)
     let _ = state.gateway_tx.send(GatewayEvent {
@@ -250,10 +274,7 @@ async fn send_encrypted_message(
     if let Some(map) = body.ciphertext_map.as_object() {
         for (device_id_str, envelope) in map {
             if let Ok(recipient_device_id) = Uuid::parse_str(device_id_str) {
-                let msg_type = envelope
-                    .get("type")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(2);
+                let msg_type = envelope.get("type").and_then(|v| v.as_u64()).unwrap_or(2);
 
                 if msg_type == 2 {
                     // Validate a session exists before incrementing.
@@ -302,7 +323,7 @@ async fn get_e2ee_config(
 ) -> NexusResult<Json<Option<E2eeChannel>>> {
     let config = keystore::get_e2ee_channel(&state.db.pool, channel_id)
         .await
-        .map_err(|e| NexusError::Internal(e))?;
+        .map_err(NexusError::Internal)?;
     Ok(Json(config))
 }
 
@@ -324,9 +345,10 @@ async fn enable_e2ee(
         });
     }
 
-    let config = keystore::enable_e2ee_channel(&state.db.pool, channel_id, auth.user_id, rotation_secs)
-        .await
-        .map_err(|e| NexusError::Internal(e))?;
+    let config =
+        keystore::enable_e2ee_channel(&state.db.pool, channel_id, auth.user_id, rotation_secs)
+            .await
+            .map_err(NexusError::Internal)?;
 
     // Notify channel members that E2EE is now active
     let _ = state.gateway_tx.send(GatewayEvent {

@@ -27,11 +27,7 @@ pub struct OverlayParticipant {
 
 /// Tauri command: show the overlay window and update position if provided.
 #[tauri::command]
-pub async fn show_overlay(
-    app: AppHandle,
-    x: Option<i32>,
-    y: Option<i32>,
-) -> Result<(), String> {
+pub async fn show_overlay(app: AppHandle, x: Option<i32>, y: Option<i32>) -> Result<(), String> {
     let window = app
         .get_webview_window("overlay")
         .ok_or("Overlay window not found")?;

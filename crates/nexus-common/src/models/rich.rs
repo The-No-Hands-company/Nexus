@@ -10,7 +10,7 @@ use validator::Validate;
 // ============================================================
 
 /// A thread — a focused conversation spawned from a message.
-/// Threads are backed by a `channels` record (channel_type = 'thread')
+/// Threads are backed by a `channels` record (`channel_type = 'thread'`)
 /// plus a row in the `threads` table for thread-specific metadata.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Thread {

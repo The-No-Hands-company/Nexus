@@ -11,12 +11,12 @@
 //! GET    /servers/:id/calendar.ics                   — ICS export
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, Query, State},
     http::header,
     middleware,
     response::IntoResponse,
     routing::{get, post},
-    Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_common::snowflake;
@@ -25,7 +25,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -42,7 +42,9 @@ pub fn router() -> Router<Arc<AppState>> {
             post(rsvp).get(list_rsvps).delete(remove_rsvp),
         )
         .route("/servers/{server_id}/calendar.ics", get(export_ics))
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ── Request types ─────────────────────────────────────────────────────────────
@@ -127,7 +129,8 @@ async fn create_event(
         Some(ev.id),
         &serde_json::json!({"title": body.title, "starts_at": body.starts_at}),
         None,
-    ).await;
+    )
+    .await;
 
     Ok(Json(ev))
 }
@@ -174,9 +177,7 @@ async fn update_event(
         body.starts_at.as_deref(),
         body.ends_at.as_deref(),
         body.all_day,
-        body.rrule
-            .as_ref()
-            .map(|o| o.as_deref()),
+        body.rrule.as_ref().map(|o| o.as_deref()),
         body.color.as_deref(),
     )
     .await

@@ -57,7 +57,7 @@ pub async fn list_tasks_by_channel(
     limit: i64,
     offset: i64,
 ) -> Result<Vec<Task>, sqlx::Error> {
-    let q = if let Some(_) = status {
+    let q = if status.is_some() {
         format!(
             "SELECT {TASK_COLS} FROM tasks WHERE channel_id = $1 AND status = $2 \
              ORDER BY position, created_at LIMIT $3 OFFSET $4"

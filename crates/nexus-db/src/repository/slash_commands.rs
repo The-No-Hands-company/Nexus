@@ -7,24 +7,45 @@ use uuid::Uuid;
 use nexus_common::models::slash_command::{CommandOption, Interaction, SlashCommand};
 
 fn row_to_command(row: &sqlx::any::AnyRow) -> SlashCommand {
-    let options: Vec<CommandOption> = row.try_get::<Option<String>, _>("options").unwrap_or(None)
+    let options: Vec<CommandOption> = row
+        .try_get::<Option<String>, _>("options")
+        .unwrap_or(None)
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
     SlashCommand {
-        id: row.try_get::<String, _>("id").unwrap_or_default().parse().unwrap_or_default(),
-        application_id: row.try_get::<String, _>("application_id").unwrap_or_default().parse().unwrap_or_default(),
-        server_id: row.try_get::<Option<String>, _>("server_id").unwrap_or(None).and_then(|s| s.parse().ok()),
+        id: row
+            .try_get::<String, _>("id")
+            .unwrap_or_default()
+            .parse()
+            .unwrap_or_default(),
+        application_id: row
+            .try_get::<String, _>("application_id")
+            .unwrap_or_default()
+            .parse()
+            .unwrap_or_default(),
+        server_id: row
+            .try_get::<Option<String>, _>("server_id")
+            .unwrap_or(None)
+            .and_then(|s| s.parse().ok()),
         name: row.try_get("name").unwrap_or_default(),
-        name_localizations: row.try_get::<Option<String>, _>("name_localizations").unwrap_or(None)
+        name_localizations: row
+            .try_get::<Option<String>, _>("name_localizations")
+            .unwrap_or(None)
             .and_then(|s| serde_json::from_str(&s).ok()),
         description: row.try_get("description").unwrap_or_default(),
-        description_localizations: row.try_get::<Option<String>, _>("description_localizations").unwrap_or(None)
+        description_localizations: row
+            .try_get::<Option<String>, _>("description_localizations")
+            .unwrap_or(None)
             .and_then(|s| serde_json::from_str(&s).ok()),
         options,
         default_member_permissions: row.try_get("default_member_permissions").unwrap_or(None),
         dm_permission: row.try_get("dm_permission").unwrap_or(true),
         command_type: row.try_get("command_type").unwrap_or(1),
-        version: row.try_get::<String, _>("version").unwrap_or_default().parse().unwrap_or_default(),
+        version: row
+            .try_get::<String, _>("version")
+            .unwrap_or_default()
+            .parse()
+            .unwrap_or_default(),
         enabled: row.try_get("enabled").unwrap_or(true),
         created_at: crate::any_compat::get_datetime(row, "created_at").unwrap_or_default(),
         updated_at: crate::any_compat::get_datetime(row, "updated_at").unwrap_or_default(),
@@ -33,15 +54,40 @@ fn row_to_command(row: &sqlx::any::AnyRow) -> SlashCommand {
 
 fn row_to_interaction(row: &sqlx::any::AnyRow) -> Interaction {
     Interaction {
-        id: row.try_get::<String, _>("id").unwrap_or_default().parse().unwrap_or_default(),
-        application_id: row.try_get::<String, _>("application_id").unwrap_or_default().parse().unwrap_or_default(),
-        interaction_type: row.try_get("interaction_type").unwrap_or_else(|_| "APPLICATION_COMMAND".to_string()),
-        data: row.try_get::<Option<String>, _>("data").unwrap_or(None).and_then(|s| serde_json::from_str(&s).ok()),
-        server_id: row.try_get::<Option<String>, _>("server_id").unwrap_or(None).and_then(|s| s.parse().ok()),
-        channel_id: row.try_get::<Option<String>, _>("channel_id").unwrap_or(None).and_then(|s| s.parse().ok()),
-        user_id: row.try_get::<String, _>("user_id").unwrap_or_default().parse().unwrap_or_default(),
+        id: row
+            .try_get::<String, _>("id")
+            .unwrap_or_default()
+            .parse()
+            .unwrap_or_default(),
+        application_id: row
+            .try_get::<String, _>("application_id")
+            .unwrap_or_default()
+            .parse()
+            .unwrap_or_default(),
+        interaction_type: row
+            .try_get("interaction_type")
+            .unwrap_or_else(|_| "APPLICATION_COMMAND".to_string()),
+        data: row
+            .try_get::<Option<String>, _>("data")
+            .unwrap_or(None)
+            .and_then(|s| serde_json::from_str(&s).ok()),
+        server_id: row
+            .try_get::<Option<String>, _>("server_id")
+            .unwrap_or(None)
+            .and_then(|s| s.parse().ok()),
+        channel_id: row
+            .try_get::<Option<String>, _>("channel_id")
+            .unwrap_or(None)
+            .and_then(|s| s.parse().ok()),
+        user_id: row
+            .try_get::<String, _>("user_id")
+            .unwrap_or_default()
+            .parse()
+            .unwrap_or_default(),
         token: row.try_get("token").unwrap_or_default(),
-        status: row.try_get("status").unwrap_or_else(|_| "pending".to_string()),
+        status: row
+            .try_get("status")
+            .unwrap_or_else(|_| "pending".to_string()),
         created_at: crate::any_compat::get_datetime(row, "created_at").unwrap_or_default(),
         expires_at: crate::any_compat::get_datetime(row, "expires_at").unwrap_or_default(),
     }
@@ -59,7 +105,10 @@ pub async fn get_command(pool: &sqlx::AnyPool, command_id: Uuid) -> Result<Optio
     Ok(row.as_ref().map(row_to_command))
 }
 
-pub async fn get_global_commands(pool: &sqlx::AnyPool, application_id: Uuid) -> Result<Vec<SlashCommand>> {
+pub async fn get_global_commands(
+    pool: &sqlx::AnyPool,
+    application_id: Uuid,
+) -> Result<Vec<SlashCommand>> {
     let rows = sqlx::query(
         "SELECT * FROM slash_commands WHERE application_id = $1 AND server_id IS NULL AND enabled = true ORDER BY name",
     )
@@ -84,7 +133,10 @@ pub async fn get_server_commands(
     Ok(rows.iter().map(row_to_command).collect())
 }
 
-pub async fn get_all_server_commands(pool: &sqlx::AnyPool, server_id: Uuid) -> Result<Vec<SlashCommand>> {
+pub async fn get_all_server_commands(
+    pool: &sqlx::AnyPool,
+    server_id: Uuid,
+) -> Result<Vec<SlashCommand>> {
     let rows = sqlx::query(
         "SELECT * FROM slash_commands WHERE server_id = $1 AND enabled = true ORDER BY name",
     )
@@ -199,7 +251,10 @@ pub async fn create_interaction(
     .bind(id.to_string())
     .bind(application_id.to_string())
     .bind(interaction_type)
-    .bind(data.as_ref().map(|v| serde_json::to_string(v).unwrap_or_default()))
+    .bind(
+        data.as_ref()
+            .map(|v| serde_json::to_string(v).unwrap_or_default()),
+    )
     .bind(server_id.map(|u| u.to_string()))
     .bind(channel_id.map(|u| u.to_string()))
     .bind(user_id.to_string())
@@ -209,7 +264,10 @@ pub async fn create_interaction(
     Ok(row_to_interaction(&row))
 }
 
-pub async fn get_interaction(pool: &sqlx::AnyPool, interaction_id: Uuid) -> Result<Option<Interaction>> {
+pub async fn get_interaction(
+    pool: &sqlx::AnyPool,
+    interaction_id: Uuid,
+) -> Result<Option<Interaction>> {
     let row = sqlx::query("SELECT * FROM interactions WHERE id = $1")
         .bind(interaction_id.to_string())
         .fetch_optional(pool)
@@ -225,13 +283,11 @@ pub async fn bulk_overwrite_server_commands(
     server_id: Uuid,
     commands: &[(Uuid, String, String, serde_json::Value, i32)],
 ) -> Result<Vec<SlashCommand>> {
-    sqlx::query(
-        "DELETE FROM slash_commands WHERE application_id = $1 AND server_id = $2",
-    )
-    .bind(application_id.to_string())
-    .bind(server_id.to_string())
-    .execute(pool)
-    .await?;
+    sqlx::query("DELETE FROM slash_commands WHERE application_id = $1 AND server_id = $2")
+        .bind(application_id.to_string())
+        .bind(server_id.to_string())
+        .execute(pool)
+        .await?;
 
     let mut result = Vec::new();
     for (id, name, description, options, cmd_type) in commands {

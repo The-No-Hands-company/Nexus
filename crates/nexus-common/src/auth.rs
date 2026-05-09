@@ -4,7 +4,7 @@
 //! can use them without circular dependencies. Password hashing and token
 //! generation stay in nexus-api since they're API-specific.
 
-use jsonwebtoken::{decode, DecodingKey, Validation};
+use jsonwebtoken::{DecodingKey, Validation, decode};
 use serde::{Deserialize, Serialize};
 
 /// JWT claims embedded in access and refresh tokens.
@@ -18,7 +18,7 @@ pub struct Claims {
     pub iat: i64,
     /// Expiration (Unix timestamp)
     pub exp: i64,
-    /// Token type: "access", "refresh", or "mfa_challenge"
+    /// Token type: "access", "refresh", or `mfa_challenge`
     pub token_type: String,
     /// JWT ID — used as session identifier for revocation lookups.
     /// `#[serde(default)]` ensures tokens issued before 09.7 still decode.
@@ -35,6 +35,9 @@ pub struct Claims {
 }
 
 /// Validate and decode a JWT token.
+///
+/// # Errors
+/// Returns an error when token decoding or signature validation fails.
 pub fn validate_token(token: &str, secret: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
     let token_data = decode::<Claims>(
         token,
@@ -65,7 +68,7 @@ mod tests {
     }
 
     fn encode_claims(claims: &Claims, secret: &str) -> String {
-        use jsonwebtoken::{encode, EncodingKey, Header};
+        use jsonwebtoken::{EncodingKey, Header, encode};
         encode(
             &Header::default(),
             claims,
@@ -154,7 +157,7 @@ mod tests {
     fn serde_default_fields_decode_from_legacy_token_without_them() {
         // Tokens minted before jti/two_fa_verified/email_verified were added
         // must still decode with default values (empty string / false).
-        use jsonwebtoken::{encode, EncodingKey, Header};
+        use jsonwebtoken::{EncodingKey, Header, encode};
 
         #[derive(serde::Serialize)]
         struct LegacyClaims {
@@ -182,8 +185,8 @@ mod tests {
         .unwrap();
 
         let decoded = validate_token(&token, SECRET).unwrap();
-        assert_eq!(decoded.jti, "");           // serde default
-        assert!(!decoded.two_fa_verified);     // serde default
-        assert!(!decoded.email_verified);      // serde default
+        assert_eq!(decoded.jti, ""); // serde default
+        assert!(!decoded.two_fa_verified); // serde default
+        assert!(!decoded.email_verified); // serde default
     }
 }

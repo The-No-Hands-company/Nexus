@@ -9,7 +9,7 @@
 //! `sqlx::FromRow` manual implementations.
 
 use chrono::{DateTime, Utc};
-use sqlx::{any::AnyRow, Row};
+use sqlx::{Row, any::AnyRow};
 use uuid::Uuid;
 
 // ── Uuid ─────────────────────────────────────────────────────────────────────
@@ -34,10 +34,7 @@ pub fn get_datetime(row: &AnyRow, col: &str) -> Result<DateTime<Utc>, sqlx::Erro
     parse_datetime(&s).map_err(|e| sqlx::Error::Decode(e))
 }
 
-pub fn get_opt_datetime(
-    row: &AnyRow,
-    col: &str,
-) -> Result<Option<DateTime<Utc>>, sqlx::Error> {
+pub fn get_opt_datetime(row: &AnyRow, col: &str) -> Result<Option<DateTime<Utc>>, sqlx::Error> {
     let s: Option<String> = row.try_get(col)?;
     s.map(|v| parse_datetime(&v).map_err(|e| sqlx::Error::Decode(e)))
         .transpose()

@@ -1,8 +1,8 @@
 //! Bot application models.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
 
 /// A bot application (the "app" behind a bot user).
 #[derive(Debug, Clone, Serialize, Deserialize)]

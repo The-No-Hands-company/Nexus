@@ -5,19 +5,19 @@
 //! - messaging-first experience
 
 use axum::{
+    Json, Router,
     extract::{Extension, State},
     middleware,
     routing::get,
-    Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_common::module_gating;
 use nexus_db::repository::user_experience;
-use serde::Serialize;
 use serde::Deserialize;
+use serde::Serialize;
 use std::sync::Arc;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
@@ -25,7 +25,9 @@ pub fn router() -> Router<Arc<AppState>> {
             "/users/@me/experience-profile",
             get(get_profile).put(update_profile),
         )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -65,21 +67,19 @@ async fn update_profile(
     Extension(ctx): Extension<AuthContext>,
     Json(body): Json<UpdateExperienceRequest>,
 ) -> NexusResult<Json<ExperienceProfileResponse>> {
-    if let Some(ref mode) = body.experience_mode {
-        if !matches!(mode.as_str(), "full" | "messaging") {
+    if let Some(ref mode) = body.experience_mode
+        && !matches!(mode.as_str(), "full" | "messaging") {
             return Err(NexusError::Validation {
                 message: "experience_mode must be full or messaging".into(),
             });
         }
-    }
 
-    if let Some(ref surface) = body.default_surface {
-        if surface.trim().is_empty() || surface.len() > 64 {
+    if let Some(ref surface) = body.default_surface
+        && (surface.trim().is_empty() || surface.len() > 64) {
             return Err(NexusError::Validation {
                 message: "default_surface must be 1-64 characters".into(),
             });
         }
-    }
 
     if let Some(ref modules) = body.enabled_modules {
         let Some(arr) = modules.as_array() else {
@@ -92,7 +92,10 @@ async fn update_profile(
                 message: "enabled_modules supports at most 64 entries".into(),
             });
         }
-        if arr.iter().any(|v| v.as_str().map(|s| s.len() > 64).unwrap_or(true)) {
+        if arr
+            .iter()
+            .any(|v| v.as_str().map(|s| s.len() > 64).unwrap_or(true))
+        {
             return Err(NexusError::Validation {
                 message: "enabled_modules entries must be strings up to 64 chars".into(),
             });
@@ -136,7 +139,7 @@ async fn update_profile(
 
 fn to_response(profile: user_experience::UserExperienceProfile) -> ExperienceProfileResponse {
     let messaging_mode = profile.experience_mode == "messaging";
-    
+
     let effective_enabled_modules = if profile
         .enabled_modules
         .as_array()

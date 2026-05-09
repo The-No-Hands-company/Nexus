@@ -2,11 +2,11 @@
 
 use axum::http::HeaderMap;
 use axum::{
+    Json, Router,
     extract::{Extension, Path, State},
     http::StatusCode,
     middleware,
     routing::{get, post},
-    Json, Router,
 };
 use nexus_common::{
     error::{NexusError, NexusResult},
@@ -19,15 +19,19 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{
-    auth,
+    AppState, auth,
     middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip},
-    AppState,
 };
 
 /// User routes (all require authentication).
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/users/@me", get(get_current_user).patch(update_current_user).delete(delete_account))
+        .route(
+            "/users/@me",
+            get(get_current_user)
+                .patch(update_current_user)
+                .delete(delete_account),
+        )
         .route("/users/@me/cancel-deletion", post(cancel_account_deletion))
         .route("/users/@me/change-password", post(change_password))
         .route("/users/@me/data-export", get(data_export))
@@ -62,15 +66,13 @@ async fn update_current_user(
     validate_request(&body)?;
 
     // If changing username, check availability
-    if let Some(ref new_username) = body.username {
-        if let Some(existing) = users::find_by_username(&state.db.pool, new_username).await? {
-            if existing.id != auth.user_id {
+    if let Some(ref new_username) = body.username
+        && let Some(existing) = users::find_by_username(&state.db.pool, new_username).await?
+            && existing.id != auth.user_id {
                 return Err(NexusError::AlreadyExists {
                     resource: "Username".into(),
                 });
             }
-        }
-    }
 
     let user = users::update_user(
         &state.db.pool,
@@ -108,7 +110,9 @@ async fn get_user_profile(
 ) -> NexusResult<Json<serde_json::Value>> {
     let user = users::find_by_id(&state.db.pool, user_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "User".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "User".into(),
+        })?;
 
     // Servers in common — both requesting user and target user are members
     let common_rows = sqlx::query(
@@ -215,17 +219,21 @@ async fn delete_account(
         format!("rl:user:{}:delete_account", auth_ctx.user_id),
         3,
         3600,
-    ).await?;
+    )
+    .await?;
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:delete_account:ip:{ip}"),
         10,
         3600,
-    ).await?;
+    )
+    .await?;
 
     let user = users::find_by_id(&state.db.pool, auth_ctx.user_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "User".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "User".into(),
+        })?;
 
     // Require password confirmation to prevent accidental/hijacked deletions
     let valid = auth::verify_password(&body.password, &user.password_hash)
@@ -267,22 +275,28 @@ async fn cancel_account_deletion(
         format!("rl:user:{}:cancel_delete_account", auth_ctx.user_id),
         5,
         3600,
-    ).await?;
+    )
+    .await?;
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:cancel_delete_account:ip:{ip}"),
         15,
         3600,
-    ).await?;
+    )
+    .await?;
 
     let canceled = users::cancel_scheduled_deletion(&state.db.pool, auth_ctx.user_id).await?;
     if !canceled {
-        return Err(NexusError::NotFound { resource: "ScheduledDeletion".into() });
+        return Err(NexusError::NotFound {
+            resource: "ScheduledDeletion".into(),
+        });
     }
 
     let user = users::find_by_id(&state.db.pool, auth_ctx.user_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "User".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "User".into(),
+        })?;
 
     tracing::info!(user_id = %user.id, "Account deletion cancelled");
 
@@ -311,7 +325,9 @@ async fn data_export(
 
     let user = users::find_by_id(&state.db.pool, auth_ctx.user_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "User".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "User".into(),
+        })?;
 
     // Servers the user is a member of
     let server_rows = sqlx::query(
@@ -407,13 +423,12 @@ async fn get_note_to_self_channel(
     State(state): State<Arc<AppState>>,
 ) -> NexusResult<Json<NoteToSelfResponse>> {
     // Look up existing association
-    let existing: Option<String> = sqlx::query_scalar(
-        "SELECT channel_id::text FROM note_to_self_channels WHERE user_id = $1",
-    )
-    .bind(auth.user_id.to_string())
-    .fetch_optional(&state.db.pool)
-    .await
-    .map_err(|e| NexusError::Internal(e.into()))?;
+    let existing: Option<String> =
+        sqlx::query_scalar("SELECT channel_id::text FROM note_to_self_channels WHERE user_id = $1")
+            .bind(auth.user_id.to_string())
+            .fetch_optional(&state.db.pool)
+            .await
+            .map_err(|e| NexusError::Internal(e.into()))?;
 
     if let Some(channel_id) = existing {
         return Ok(Json(NoteToSelfResponse { channel_id }));
@@ -446,7 +461,6 @@ async fn get_note_to_self_channel(
         channel_id: note_channel_id.to_string(),
     }))
 }
-
 
 // ── Change password ───────────────────────────────────────────────────────────
 
@@ -483,13 +497,15 @@ async fn change_password(
         format!("rl:user:{}:change_password", auth.user_id),
         5,
         3600,
-    ).await?;
+    )
+    .await?;
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:change_password:ip:{ip}"),
         20,
         3600,
-    ).await?;
+    )
+    .await?;
 
     // Enforce minimum complexity on new password
     if body.new_password.len() < 8 {
@@ -510,7 +526,9 @@ async fn change_password(
 
     let user = users::find_by_id(&state.db.pool, auth.user_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "User".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "User".into(),
+        })?;
 
     // Verify current password — constant-time comparison inside verify_password
     let valid = crate::auth::verify_password(&body.current_password, &user.password_hash)
@@ -524,14 +542,12 @@ async fn change_password(
         .map_err(|e| NexusError::Internal(anyhow::anyhow!("Password hash failed: {}", e)))?;
 
     // Persist the new password hash
-    sqlx::query(
-        "UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2::uuid",
-    )
-    .bind(&new_hash)
-    .bind(user.id.to_string())
-    .execute(&state.db.pool)
-    .await
-    .map_err(|e| NexusError::Internal(e.into()))?;
+    sqlx::query("UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2::uuid")
+        .bind(&new_hash)
+        .bind(user.id.to_string())
+        .execute(&state.db.pool)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
 
     // Revoke every session except the current one — forces re-login on all
     // other devices. This is the same pattern used after a password reset.

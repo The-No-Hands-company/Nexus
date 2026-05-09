@@ -19,13 +19,13 @@
 use crate::sfu::{SfuCommand, SfuManager, SfuResponse};
 use crate::state::{VoiceState, VoiceStateManager, VoiceStateUpdate};
 use axum::{
+    Router,
     extract::{
-        ws::{Message, WebSocket},
         State, WebSocketUpgrade,
+        ws::{Message, WebSocket},
     },
     response::Response,
     routing::get,
-    Router,
 };
 use futures_util::{SinkExt, StreamExt};
 use nexus_common::gateway_event::GatewayEvent;
@@ -50,9 +50,7 @@ pub struct VoiceServerState {
 pub enum VoiceSignal {
     // === Client → Server ===
     /// Authenticate with JWT token.
-    Identify {
-        token: String,
-    },
+    Identify { token: String },
 
     /// Join a voice channel.
     Join {
@@ -61,9 +59,7 @@ pub enum VoiceSignal {
     },
 
     /// Send SDP offer to establish WebRTC connection.
-    Offer {
-        sdp: String,
-    },
+    Offer { sdp: String },
 
     /// Send ICE candidate.
     IceCandidate {
@@ -81,18 +77,14 @@ pub enum VoiceSignal {
     },
 
     /// Set speaking state (voice activity detection result).
-    Speaking {
-        speaking: bool,
-    },
+    Speaking { speaking: bool },
 
     /// Leave voice channel.
     Leave,
 
     // === Server → Client ===
     /// Authentication successful.
-    Ready {
-        session_id: String,
-    },
+    Ready { session_id: String },
 
     /// Joined voice channel — here's the current state.
     Joined {
@@ -102,9 +94,7 @@ pub enum VoiceSignal {
     },
 
     /// SDP answer from the SFU.
-    Answer {
-        sdp: String,
-    },
+    Answer { sdp: String },
 
     /// ICE candidate from the server.
     ServerIceCandidate {
@@ -114,26 +104,16 @@ pub enum VoiceSignal {
     },
 
     /// Another user's voice state changed (joined, left, mute, etc.).
-    VoiceStateUpdate {
-        state: serde_json::Value,
-    },
+    VoiceStateUpdate { state: serde_json::Value },
 
     /// Speaking state changed for a user.
-    SpeakingUpdate {
-        user_id: Uuid,
-        speaking: bool,
-    },
+    SpeakingUpdate { user_id: Uuid, speaking: bool },
 
     /// Server requests client-side WebRTC renegotiation after track changes.
-    Renegotiate {
-        reason: String,
-    },
+    Renegotiate { reason: String },
 
     /// Error occurred.
-    Error {
-        code: u32,
-        message: String,
-    },
+    Error { code: u32, message: String },
 }
 
 /// ICE server configuration sent to clients.
@@ -176,10 +156,7 @@ pub fn build_router(state: VoiceServerState) -> Router {
 }
 
 /// WebSocket upgrade handler.
-async fn ws_handler(
-    ws: WebSocketUpgrade,
-    State(state): State<Arc<VoiceServerState>>,
-) -> Response {
+async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<VoiceServerState>>) -> Response {
     ws.on_upgrade(move |socket| handle_voice_connection(socket, state))
 }
 
@@ -198,8 +175,8 @@ async fn handle_voice_connection(socket: WebSocket, state: Arc<VoiceServerState>
     // Voice clients must authenticate within 10 seconds of connecting.
     const IDENTIFY_TIMEOUT_SECS: u64 = 10;
     const MAX_VOICE_FRAME_BYTES: usize = 32 * 1024; // 32 KiB — ample for any signaling op
-    let identify_deadline = tokio::time::Instant::now()
-        + tokio::time::Duration::from_secs(IDENTIFY_TIMEOUT_SECS);
+    let identify_deadline =
+        tokio::time::Instant::now() + tokio::time::Duration::from_secs(IDENTIFY_TIMEOUT_SECS);
 
     // Receive loop
     while let Some(Ok(msg)) = receiver.next().await {
@@ -236,10 +213,7 @@ async fn handle_voice_connection(socket: WebSocket, state: Arc<VoiceServerState>
                 match signal {
                     VoiceSignal::Identify { token } => {
                         let config = nexus_common::config::get();
-                        match nexus_common::auth::validate_token(
-                            &token,
-                            &config.auth.jwt_secret,
-                        ) {
+                        match nexus_common::auth::validate_token(&token, &config.auth.jwt_secret) {
                             Ok(claims) => {
                                 let uid: Uuid = match claims.sub.parse() {
                                     Ok(id) => id,
@@ -382,17 +356,16 @@ async fn handle_voice_connection(socket: WebSocket, state: Arc<VoiceServerState>
                         sdp_mid: _,
                         sdp_m_line_index: _,
                     } => {
-                        if let Some(pid) = peer_id {
-                            if let Some(channel_id) = current_channel {
-                                let room_tx =
-                                    state.sfu.get_or_create_room(channel_id).await;
-                                let _ = room_tx
-                                    .send(SfuCommand::IceCandidate {
-                                        peer_id: pid,
-                                        candidate,
-                                    })
-                                    .await;
-                            }
+                        if let Some(pid) = peer_id
+                            && let Some(channel_id) = current_channel
+                        {
+                            let room_tx = state.sfu.get_or_create_room(channel_id).await;
+                            let _ = room_tx
+                                .send(SfuCommand::IceCandidate {
+                                    peer_id: pid,
+                                    candidate,
+                                })
+                                .await;
                         }
                     }
 
@@ -416,8 +389,7 @@ async fn handle_voice_connection(socket: WebSocket, state: Arc<VoiceServerState>
 
                                 // Inform SFU about local media toggles so room stats and
                                 // forwarding policy can adapt.
-                                if let (Some(pid), Some(channel_id)) = (peer_id, current_channel)
-                                {
+                                if let (Some(pid), Some(channel_id)) = (peer_id, current_channel) {
                                     let room_tx = state.sfu.get_or_create_room(channel_id).await;
                                     let _ = room_tx
                                         .send(SfuCommand::UpdateMedia {
@@ -444,40 +416,39 @@ async fn handle_voice_connection(socket: WebSocket, state: Arc<VoiceServerState>
                     }
 
                     VoiceSignal::Speaking { speaking } => {
-                        if let Some(uid) = user_id {
-                            if let Some(new_state) =
+                        if let Some(uid) = user_id
+                            && let Some(new_state) =
                                 state.voice_state.set_speaking(uid, speaking).await
-                            {
-                                // Broadcast speaking event to the channel
-                                if let Some(channel_id) = current_channel {
-                                    let _ = state.gateway_tx.send(GatewayEvent {
-                                        event_type: "VOICE_SPEAKING".into(),
-                                        data: serde_json::json!({
-                                            "user_id": uid,
-                                            "channel_id": channel_id,
-                                            "speaking": speaking,
-                                        }),
-                                        server_id: new_state.server_id,
-                                        channel_id: Some(channel_id),
-                                        user_id: Some(uid),
-                                    });
-                                }
+                        {
+                            // Broadcast speaking event to the channel
+                            if let Some(channel_id) = current_channel {
+                                let _ = state.gateway_tx.send(GatewayEvent {
+                                    event_type: "VOICE_SPEAKING".into(),
+                                    data: serde_json::json!({
+                                        "user_id": uid,
+                                        "channel_id": channel_id,
+                                        "speaking": speaking,
+                                    }),
+                                    server_id: new_state.server_id,
+                                    channel_id: Some(channel_id),
+                                    user_id: Some(uid),
+                                });
                             }
                         }
                     }
 
                     VoiceSignal::Leave => {
-                        if let Some(uid) = user_id {
-                            if let Some(channel_id) = current_channel.take() {
-                                leave_channel(&state, uid, channel_id, peer_id.take()).await;
+                        if let Some(uid) = user_id
+                            && let Some(channel_id) = current_channel.take()
+                        {
+                            leave_channel(&state, uid, channel_id, peer_id.take()).await;
 
-                                tracing::info!(
-                                    session = %session_id,
-                                    user = %uid,
-                                    channel = %channel_id,
-                                    "User left voice channel"
-                                );
-                            }
+                            tracing::info!(
+                                session = %session_id,
+                                user = %uid,
+                                channel = %channel_id,
+                                "User left voice channel"
+                            );
                         }
                     }
 
@@ -493,10 +464,10 @@ async fn handle_voice_connection(socket: WebSocket, state: Arc<VoiceServerState>
     }
 
     // Cleanup on disconnect
-    if let Some(uid) = user_id {
-        if let Some(channel_id) = current_channel {
-            leave_channel(&state, uid, channel_id, peer_id).await;
-        }
+    if let Some(uid) = user_id
+        && let Some(channel_id) = current_channel
+    {
+        leave_channel(&state, uid, channel_id, peer_id).await;
     }
 
     tracing::info!(session = %session_id, "Voice WebSocket disconnected");
@@ -516,9 +487,7 @@ async fn leave_channel(
     // Remove from SFU
     if let Some(pid) = peer_id {
         let room_tx = state.sfu.get_or_create_room(channel_id).await;
-        let _ = room_tx
-            .send(SfuCommand::RemovePeer { peer_id: pid })
-            .await;
+        let _ = room_tx.send(SfuCommand::RemovePeer { peer_id: pid }).await;
     }
 
     // Broadcast leave event

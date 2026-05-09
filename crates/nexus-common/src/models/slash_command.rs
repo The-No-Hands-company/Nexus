@@ -1,8 +1,8 @@
 //! Slash command & interaction models.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
 
 /// Application command type.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -120,8 +120,8 @@ pub struct CreateInteractionRequest {
 /// Respond to an interaction (called by the bot).
 #[derive(Debug, Deserialize)]
 pub struct InteractionResponse {
-    /// 1=PONG, 4=CHANNEL_MESSAGE_WITH_SOURCE, 5=DEFERRED_RESPONSE,
-    /// 6=DEFERRED_UPDATE, 7=UPDATE_MESSAGE, 8=AUTOCOMPLETE, 9=MODAL
+    /// `1=PONG`, `4=CHANNEL_MESSAGE_WITH_SOURCE`, `5=DEFERRED_RESPONSE`,
+    /// `6=DEFERRED_UPDATE`, `7=UPDATE_MESSAGE`, `8=AUTOCOMPLETE`, `9=MODAL`.
     pub response_type: i32,
     pub data: Option<serde_json::Value>,
 }

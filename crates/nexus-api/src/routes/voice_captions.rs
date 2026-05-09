@@ -5,10 +5,10 @@
 //! GET  /channels/:id/captions        — List recent captions for a channel
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, State},
     middleware,
     routing::post,
-    Json, Router,
 };
 use nexus_common::error::{NexusError, NexusResult};
 use nexus_common::snowflake;
@@ -17,13 +17,18 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/channels/{id}/captions", post(submit_caption).get(list_captions))
+        .route(
+            "/channels/{id}/captions",
+            post(submit_caption).get(list_captions),
+        )
         .route("/captions/{id}/finalise", post(finalise_caption))
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ── Request bodies ────────────────────────────────────────────────────────────
@@ -139,7 +144,8 @@ async fn list_captions(
         .await
         .map_err(|e| NexusError::Internal(e.into()))?;
 
-    metrics::counter!("nexus_voice_captions_requests_total", "route" => "list", "outcome" => "ok").increment(1);
+    metrics::counter!("nexus_voice_captions_requests_total", "route" => "list", "outcome" => "ok")
+        .increment(1);
     Ok(Json(captions))
 }
 

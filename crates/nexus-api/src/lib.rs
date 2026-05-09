@@ -2,6 +2,7 @@
 //!
 //! REST API layer for Nexus. Provides HTTP endpoints for all CRUD operations,
 //! authentication, and client-facing functionality.
+#![allow(clippy::pedantic)]
 
 pub mod auth;
 pub mod email;
@@ -12,8 +13,8 @@ pub mod routes;
 use axum::Router;
 use metrics_exporter_prometheus::PrometheusHandle;
 use nexus_common::gateway_event::GatewayEvent;
-use nexus_db::{search::SearchClient, storage::StorageClient, Database};
-use nexus_federation::{client::FederationClient, ServerKeyPair};
+use nexus_db::{Database, search::SearchClient, storage::StorageClient};
+use nexus_federation::{ServerKeyPair, client::FederationClient};
 use nexus_voice::state::VoiceStateManager;
 use std::{sync::Arc, time::Instant};
 use tokio::sync::broadcast;
@@ -90,69 +91,69 @@ pub fn build_router(state: AppState) -> Router {
         // v0.8 Federation — client-facing directory endpoints
         .merge(routes::directory::router())
         // v0.9.7 Account Security
-        .merge(routes::two_fa::router())           // authenticated 2FA management
-        .merge(routes::two_fa::public_router())    // unauthenticated MFA verify endpoint
-        .merge(routes::sessions::router())         // session listing + revocation
+        .merge(routes::two_fa::router()) // authenticated 2FA management
+        .merge(routes::two_fa::public_router()) // unauthenticated MFA verify endpoint
+        .merge(routes::sessions::router()) // session listing + revocation
         .merge(routes::email_verification::router()) // email verify + resend
-        .merge(routes::password_reset::router())   // forgot/reset password
+        .merge(routes::password_reset::router()) // forgot/reset password
         // v0.9.8 Moderation & Safety
-        .merge(routes::moderation::router())       // audit log, kick, ban, timeout, reports, word filters
+        .merge(routes::moderation::router()) // audit log, kick, ban, timeout, reports, word filters
         // v0.12 Channel Type Completion
-        .merge(routes::forum::router())            // forum posts + tags
-        .merge(routes::stages::router())           // stage instances + speaker management
+        .merge(routes::forum::router()) // forum posts + tags
+        .merge(routes::stages::router()) // stage instances + speaker management
         // v0.13 Engagement Features
-        .merge(routes::polls::router())                       // polls — create, vote, results, end
-        .merge(routes::scheduled_messages::router())          // scheduled messages CRUD
-        .merge(routes::bookmarks::router())                   // message bookmarks
-        .merge(routes::drafts::router())                      // per-channel drafts
+        .merge(routes::polls::router()) // polls — create, vote, results, end
+        .merge(routes::scheduled_messages::router()) // scheduled messages CRUD
+        .merge(routes::bookmarks::router()) // message bookmarks
+        .merge(routes::drafts::router()) // per-channel drafts
         // v0.14 Platform Differentiation
-        .merge(routes::forward::router())                         // message forwarding
-        .merge(routes::events::router())                          // server events + RSVP
-        .merge(routes::stickers::router())                        // sticker packs
-        .merge(routes::inline_query::router())                    // inline bot suggestions
+        .merge(routes::forward::router()) // message forwarding
+        .merge(routes::events::router()) // server events + RSVP
+        .merge(routes::stickers::router()) // sticker packs
+        .merge(routes::inline_query::router()) // inline bot suggestions
         // v0.15 Community Ecosystem
-        .merge(routes::badges::router())                          // user badges
-        .merge(routes::boosters::router())                        // server supporter tiers
-        .merge(routes::canvas::router())                          // canvas document channels
+        .merge(routes::badges::router()) // user badges
+        .merge(routes::boosters::router()) // server supporter tiers
+        .merge(routes::canvas::router()) // canvas document channels
         // v0.16 Discovery & Monetization
-        .merge(routes::discovery::router())                       // server discovery browsing
-        .merge(routes::monetization::router())                    // creator monetization
+        .merge(routes::discovery::router()) // server discovery browsing
+        .merge(routes::monetization::router()) // creator monetization
         // v1.5 Collaboration & Productivity
-        .merge(routes::tasks::router())                           // task boards + checklists
-        .merge(routes::calendar::router())                        // calendar events + RSVP + ICS
-        .merge(routes::file_versions::router())                   // file versioning + quotas
-        .merge(routes::ai_assists::router())                      // on-device AI preferences + digests
+        .merge(routes::tasks::router()) // task boards + checklists
+        .merge(routes::calendar::router()) // calendar events + RSVP + ICS
+        .merge(routes::file_versions::router()) // file versioning + quotas
+        .merge(routes::ai_assists::router()) // on-device AI preferences + digests
         // v1.6 Multimedia & Expression
-        .merge(routes::voice_notes::router())                     // voice & video notes
-        .merge(routes::stories::router())                         // stories & ephemeral status
-        .merge(routes::drawings::router())                        // in-chat drawing & annotation
-        .merge(routes::voice_settings::router())                  // voice settings & music queue
-        .merge(routes::media_gallery::router())                   // media gallery browsing + filters
-        .merge(routes::experience::router())                      // full vs messaging-first profile
+        .merge(routes::voice_notes::router()) // voice & video notes
+        .merge(routes::stories::router()) // stories & ephemeral status
+        .merge(routes::drawings::router()) // in-chat drawing & annotation
+        .merge(routes::voice_settings::router()) // voice settings & music queue
+        .merge(routes::media_gallery::router()) // media gallery browsing + filters
+        .merge(routes::experience::router()) // full vs messaging-first profile
         // v1.7 Accessibility & Inclusivity
-        .merge(routes::accessibility::router())                   // accessibility settings
-        .merge(routes::voice_captions::router())                  // voice channel live captions
-        .merge(routes::translations::router())                    // message translations + TTS
+        .merge(routes::accessibility::router()) // accessibility settings
+        .merge(routes::voice_captions::router()) // voice channel live captions
+        .merge(routes::translations::router()) // message translations + TTS
         // v1.8 Ecosystem & Onboarding
-        .merge(routes::importer::router())                        // data import & bulk invite
-        .merge(routes::onboarding::router())                      // onboarding wizard & templates
-        .merge(routes::admin_analytics::router())                 // admin analytics snapshots
-        .merge(routes::marketplace::router())                     // plugin marketplace
+        .merge(routes::importer::router()) // data import & bulk invite
+        .merge(routes::onboarding::router()) // onboarding wizard & templates
+        .merge(routes::admin_analytics::router()) // admin analytics snapshots
+        .merge(routes::marketplace::router()) // plugin marketplace
         // v1.9 Scalability & Performance Hardening
-        .merge(routes::scalability::router())                     // scaling configs, SFU, federation batches, voice quality
+        .merge(routes::scalability::router()) // scaling configs, SFU, federation batches, voice quality
         // v2.0 AI & Intelligence Layer
-        .merge(routes::ai_layer::router())                        // AI suggestions, toxicity, raid detection, consent
+        .merge(routes::ai_layer::router()) // AI suggestions, toxicity, raid detection, consent
         // v2.1 Voice & Real-Time Collaboration
-        .merge(routes::voice_collab::router())                    // video layouts, live streams, breakout rooms, spatial audio
+        .merge(routes::voice_collab::router()) // video layouts, live streams, breakout rooms, spatial audio
         // v2.2 User Growth & Retention
-        .merge(routes::growth::router())                          // recommendations, gamification, achievements, offline queue
+        .merge(routes::growth::router()) // recommendations, gamification, achievements, offline queue
         // v2.x Sustainability & Extensibility
-        .merge(routes::sustainability::router())                  // governance, protocol versions, security audits, tutorials
+        .merge(routes::sustainability::router()) // governance, protocol versions, security audits, tutorials
         // v0.8.5 Federation UX — admin management + cross-instance search
-        .merge(routes::federation_admin::router())                // federation admin panel API
-        .merge(routes::admin::router())                            // instance admin: users, servers, overview
-        .merge(routes::admin_users::router())                     // instance-admin user/server management
-        .merge(routes::push::router())                             // Web Push subscriptions + VAPID key
+        .merge(routes::federation_admin::router()) // federation admin panel API
+        .merge(routes::admin::router()) // instance admin: users, servers, overview
+        .merge(routes::admin_users::router()) // instance-admin user/server management
+        .merge(routes::push::router()) // Web Push subscriptions + VAPID key
         // Make Arc<AppState> available as an Axum Extension so that
         // `combined_auth_middleware` can perform DB lookups for bot tokens
         // without requiring `from_fn_with_state` on every sub-router.
@@ -186,13 +187,14 @@ pub fn build_router(state: AppState) -> Router {
                 )
                 // Emit a record on request body failures
                 .on_failure(
-                    tower_http::trace::DefaultOnFailure::new()
-                        .level(tracing::Level::ERROR),
+                    tower_http::trace::DefaultOnFailure::new().level(tracing::Level::ERROR),
                 ),
         )
         .layer(tower_http::compression::CompressionLayer::new())
         .layer(axum::middleware::from_fn(middleware::security_headers))
-        .layer(axum::middleware::from_fn(middleware::record_request_metrics))
+        .layer(axum::middleware::from_fn(
+            middleware::record_request_metrics,
+        ))
         .with_state(arc_state)
 }
 
@@ -253,6 +255,5 @@ fn build_cors_layer() -> tower_http::cors::CorsLayer {
     CorsLayer::new()
         .allow_methods(tower_http::cors::Any)
         .allow_headers(tower_http::cors::Any)
-        // No .allow_origin() call = browsers block cross-origin requests
+    // No .allow_origin() call = browsers block cross-origin requests
 }
-

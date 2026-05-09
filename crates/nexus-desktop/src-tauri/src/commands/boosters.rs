@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 use uuid::Uuid;
 
-use crate::state::AppState;
 use super::api_client;
+use crate::state::AppState;
 
 // ─── Client-side types ────────────────────────────────────────────────────────
 
@@ -54,7 +54,9 @@ pub async fn get_server_boost_tier(
     if !resp.status().is_success() {
         return Err(resp.text().await.unwrap_or_default());
     }
-    resp.json::<BoostTierInfo>().await.map_err(|e| e.to_string())
+    resp.json::<BoostTierInfo>()
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// GET /api/v1/servers/{server_id}/boosters — list active boosters.
@@ -73,7 +75,9 @@ pub async fn list_server_boosters(
     if !resp.status().is_success() {
         return Err(resp.text().await.unwrap_or_default());
     }
-    resp.json::<Vec<BoosterEntry>>().await.map_err(|e| e.to_string())
+    resp.json::<Vec<BoosterEntry>>()
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// POST /api/v1/servers/{server_id}/boost — add a boost slot.

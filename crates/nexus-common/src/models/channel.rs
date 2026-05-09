@@ -12,6 +12,7 @@ use uuid::Uuid;
 use validator::Validate;
 
 /// A channel within a server or a DM conversation.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Channel {
     pub id: Uuid,
@@ -148,4 +149,5 @@ pub struct UpdateChannelRequest {
     pub parent_id: Option<Uuid>,
 
     /// Toggle stream / topic-threaded mode on the channel (v0.14).
-    pub is_stream: Option<bool>,}
+    pub is_stream: Option<bool>,
+}

@@ -8,15 +8,15 @@
 //! DELETE /servers/{id}/events/{eid}/interested    — un-RSVP
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, Query, State},
     middleware,
     routing::{get, put},
-    Json, Router,
 };
 use chrono::{DateTime, Utc};
 use nexus_common::{
     error::{NexusError, NexusResult},
-    gateway_event::{event_types, GatewayEvent},
+    gateway_event::{GatewayEvent, event_types},
     permissions::Permissions,
     snowflake,
 };
@@ -26,11 +26,14 @@ use sqlx::Row;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/servers/{server_id}/events", get(list_events).post(create_event))
+        .route(
+            "/servers/{server_id}/events",
+            get(list_events).post(create_event),
+        )
         .route(
             "/servers/{server_id}/events/{event_id}",
             get(get_event).patch(update_event).delete(cancel_event),
@@ -39,7 +42,9 @@ pub fn router() -> Router<Arc<AppState>> {
             "/servers/{server_id}/events/{event_id}/interested",
             put(rsvp).delete(un_rsvp),
         )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // —————————————————————————————————————————————————————————————————————————————
@@ -135,7 +140,9 @@ async fn require_manage_events(
 ) -> NexusResult<()> {
     let server = servers::find_by_id(&state.db.pool, server_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Server".into(),
+        })?;
     if user_id == server.owner_id {
         return Ok(());
     }
@@ -143,21 +150,30 @@ async fn require_manage_events(
         .await?
         .ok_or(NexusError::Forbidden)?;
     let all_roles = roles::list_server_roles(&state.db.pool, server_id).await?;
-    let base = all_roles.iter().find(|r| r.is_default)
+    let base = all_roles
+        .iter()
+        .find(|r| r.is_default)
         .map(|r| Permissions::from_bits_truncate(r.permissions))
         .unwrap_or_else(Permissions::empty);
-    let effective = all_roles.iter()
+    let effective = all_roles
+        .iter()
         .filter(|r| !r.is_default && member.roles.contains(&r.id))
         .map(|r| Permissions::from_bits_truncate(r.permissions))
         .fold(base, |acc, rp| acc | rp);
     if effective.has(Permissions::MANAGE_EVENTS) || effective.has(Permissions::ADMINISTRATOR) {
         Ok(())
     } else {
-        Err(NexusError::MissingPermission { permission: "MANAGE_EVENTS".into() })
+        Err(NexusError::MissingPermission {
+            permission: "MANAGE_EVENTS".into(),
+        })
     }
 }
 
-async fn fetch_event(state: &AppState, event_id: Uuid, requester_id: Uuid) -> NexusResult<ServerEvent> {
+async fn fetch_event(
+    state: &AppState,
+    event_id: Uuid,
+    requester_id: Uuid,
+) -> NexusResult<ServerEvent> {
     let row = sqlx::query(
         r#"
         SELECT
@@ -187,33 +203,70 @@ async fn fetch_event(state: &AppState, event_id: Uuid, requester_id: Uuid) -> Ne
     .fetch_optional(&state.db.pool)
     .await
     .map_err(NexusError::Database)?
-    .ok_or(NexusError::NotFound { resource: "ServerEvent".into() })?;
+    .ok_or(NexusError::NotFound {
+        resource: "ServerEvent".into(),
+    })?;
 
     Ok(ServerEvent {
-        id: row.try_get::<String, _>("id").unwrap_or_default()
-            .parse().unwrap_or(event_id),
-        server_id: row.try_get::<String, _>("server_id").unwrap_or_default()
-            .parse().unwrap_or_default(),
-        creator_id: row.try_get::<String, _>("creator_id").unwrap_or_default()
-            .parse().unwrap_or_default(),
+        id: row
+            .try_get::<String, _>("id")
+            .unwrap_or_default()
+            .parse()
+            .unwrap_or(event_id),
+        server_id: row
+            .try_get::<String, _>("server_id")
+            .unwrap_or_default()
+            .parse()
+            .unwrap_or_default(),
+        creator_id: row
+            .try_get::<String, _>("creator_id")
+            .unwrap_or_default()
+            .parse()
+            .unwrap_or_default(),
         title: row.try_get("title").unwrap_or_default(),
-        description: row.try_get::<Option<String>, _>("description").unwrap_or(None),
-        starts_at: row.try_get::<String, _>("starts_at").ok()
-            .as_deref().and_then(parse_pg_dt).unwrap_or_else(Utc::now),
-        ends_at: row.try_get::<Option<String>, _>("ends_at").ok()
-            .flatten().as_deref().and_then(parse_pg_dt),
+        description: row
+            .try_get::<Option<String>, _>("description")
+            .unwrap_or(None),
+        starts_at: row
+            .try_get::<String, _>("starts_at")
+            .ok()
+            .as_deref()
+            .and_then(parse_pg_dt)
+            .unwrap_or_else(Utc::now),
+        ends_at: row
+            .try_get::<Option<String>, _>("ends_at")
+            .ok()
+            .flatten()
+            .as_deref()
+            .and_then(parse_pg_dt),
         location: row.try_get::<Option<String>, _>("location").unwrap_or(None),
-        channel_id: row.try_get::<Option<String>, _>("channel_id").ok()
-            .flatten().and_then(|s| s.parse().ok()),
-        cover_image: row.try_get::<Option<String>, _>("cover_image").unwrap_or(None),
+        channel_id: row
+            .try_get::<Option<String>, _>("channel_id")
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse().ok()),
+        cover_image: row
+            .try_get::<Option<String>, _>("cover_image")
+            .unwrap_or(None),
         status: row.try_get("status").unwrap_or_else(|_| "scheduled".into()),
         interested_count: row.try_get::<i64, _>("interested_count").unwrap_or(0),
-        is_interested: row.try_get::<Option<bool>, _>("is_interested")
-            .ok().flatten().unwrap_or(false),
-        created_at: row.try_get::<String, _>("created_at").ok()
-            .as_deref().and_then(parse_pg_dt).unwrap_or_else(Utc::now),
-        updated_at: row.try_get::<String, _>("updated_at").ok()
-            .as_deref().and_then(parse_pg_dt).unwrap_or_else(Utc::now),
+        is_interested: row
+            .try_get::<Option<bool>, _>("is_interested")
+            .ok()
+            .flatten()
+            .unwrap_or(false),
+        created_at: row
+            .try_get::<String, _>("created_at")
+            .ok()
+            .as_deref()
+            .and_then(parse_pg_dt)
+            .unwrap_or_else(Utc::now),
+        updated_at: row
+            .try_get::<String, _>("updated_at")
+            .ok()
+            .as_deref()
+            .and_then(parse_pg_dt)
+            .unwrap_or_else(Utc::now),
     })
 }
 
@@ -231,16 +284,21 @@ async fn create_event(
     require_manage_events(&state, auth.user_id, server_id).await?;
 
     if body.title.trim().is_empty() || body.title.len() > 100 {
-        return Err(NexusError::Validation { message: "title must be 1–100 characters".into() });
+        return Err(NexusError::Validation {
+            message: "title must be 1–100 characters".into(),
+        });
     }
     if body.starts_at < Utc::now() {
-        return Err(NexusError::Validation { message: "starts_at must be in the future".into() });
+        return Err(NexusError::Validation {
+            message: "starts_at must be in the future".into(),
+        });
     }
-    if let Some(ends_at) = body.ends_at {
-        if ends_at <= body.starts_at {
-            return Err(NexusError::Validation { message: "ends_at must be after starts_at".into() });
+    if let Some(ends_at) = body.ends_at
+        && ends_at <= body.starts_at {
+            return Err(NexusError::Validation {
+                message: "ends_at must be after starts_at".into(),
+            });
         }
-    }
 
     let event_id = snowflake::generate_id();
     let now = Utc::now();
@@ -334,34 +392,70 @@ async fn list_events(
     .await
     .map_err(NexusError::Database)?;
 
-    let events: Vec<ServerEvent> = rows.iter().map(|row| {
-        ServerEvent {
-            id: row.try_get::<String, _>("id").unwrap_or_default()
-                .parse().unwrap_or_default(),
-            server_id: row.try_get::<String, _>("server_id").unwrap_or_default()
-                .parse().unwrap_or_default(),
-            creator_id: row.try_get::<String, _>("creator_id").unwrap_or_default()
-                .parse().unwrap_or_default(),
+    let events: Vec<ServerEvent> = rows
+        .iter()
+        .map(|row| ServerEvent {
+            id: row
+                .try_get::<String, _>("id")
+                .unwrap_or_default()
+                .parse()
+                .unwrap_or_default(),
+            server_id: row
+                .try_get::<String, _>("server_id")
+                .unwrap_or_default()
+                .parse()
+                .unwrap_or_default(),
+            creator_id: row
+                .try_get::<String, _>("creator_id")
+                .unwrap_or_default()
+                .parse()
+                .unwrap_or_default(),
             title: row.try_get("title").unwrap_or_default(),
-            description: row.try_get::<Option<String>, _>("description").unwrap_or(None),
-            starts_at: row.try_get::<String, _>("starts_at").ok()
-                .as_deref().and_then(parse_pg_dt).unwrap_or_else(Utc::now),
-            ends_at: row.try_get::<Option<String>, _>("ends_at").ok()
-                .flatten().as_deref().and_then(parse_pg_dt),
+            description: row
+                .try_get::<Option<String>, _>("description")
+                .unwrap_or(None),
+            starts_at: row
+                .try_get::<String, _>("starts_at")
+                .ok()
+                .as_deref()
+                .and_then(parse_pg_dt)
+                .unwrap_or_else(Utc::now),
+            ends_at: row
+                .try_get::<Option<String>, _>("ends_at")
+                .ok()
+                .flatten()
+                .as_deref()
+                .and_then(parse_pg_dt),
             location: row.try_get::<Option<String>, _>("location").unwrap_or(None),
-            channel_id: row.try_get::<Option<String>, _>("channel_id").ok()
-                .flatten().and_then(|s| s.parse().ok()),
-            cover_image: row.try_get::<Option<String>, _>("cover_image").unwrap_or(None),
+            channel_id: row
+                .try_get::<Option<String>, _>("channel_id")
+                .ok()
+                .flatten()
+                .and_then(|s| s.parse().ok()),
+            cover_image: row
+                .try_get::<Option<String>, _>("cover_image")
+                .unwrap_or(None),
             status: row.try_get("status").unwrap_or_else(|_| "scheduled".into()),
             interested_count: row.try_get::<i64, _>("interested_count").unwrap_or(0),
-            is_interested: row.try_get::<Option<bool>, _>("is_interested")
-                .ok().flatten().unwrap_or(false),
-            created_at: row.try_get::<String, _>("created_at").ok()
-                .as_deref().and_then(parse_pg_dt).unwrap_or_else(Utc::now),
-            updated_at: row.try_get::<String, _>("updated_at").ok()
-                .as_deref().and_then(parse_pg_dt).unwrap_or_else(Utc::now),
-        }
-    }).collect();
+            is_interested: row
+                .try_get::<Option<bool>, _>("is_interested")
+                .ok()
+                .flatten()
+                .unwrap_or(false),
+            created_at: row
+                .try_get::<String, _>("created_at")
+                .ok()
+                .as_deref()
+                .and_then(parse_pg_dt)
+                .unwrap_or_else(Utc::now),
+            updated_at: row
+                .try_get::<String, _>("updated_at")
+                .ok()
+                .as_deref()
+                .and_then(parse_pg_dt)
+                .unwrap_or_else(Utc::now),
+        })
+        .collect();
 
     Ok(Json(events))
 }
@@ -491,14 +585,12 @@ async fn un_rsvp(
     State(state): State<Arc<AppState>>,
     Path((server_id, event_id)): Path<(Uuid, Uuid)>,
 ) -> NexusResult<Json<serde_json::Value>> {
-    sqlx::query(
-        "DELETE FROM server_event_rsvps WHERE event_id = $1::uuid AND user_id = $2::uuid",
-    )
-    .bind(event_id.to_string())
-    .bind(auth.user_id.to_string())
-    .execute(&state.db.pool)
-    .await
-    .map_err(NexusError::Database)?;
+    sqlx::query("DELETE FROM server_event_rsvps WHERE event_id = $1::uuid AND user_id = $2::uuid")
+        .bind(event_id.to_string())
+        .bind(auth.user_id.to_string())
+        .execute(&state.db.pool)
+        .await
+        .map_err(NexusError::Database)?;
 
     let _ = state.gateway_tx.send(GatewayEvent {
         event_type: event_types::GUILD_SCHEDULED_EVENT_USER_REMOVE.into(),

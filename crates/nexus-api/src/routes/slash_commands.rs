@@ -5,10 +5,10 @@
 //! requests. For user requests, the `AuthContext` extension is set.
 
 use axum::{
+    Json, Router,
     extract::{Extension, Path, Query, State},
     middleware,
     routing::{get, post},
-    Json, Router,
 };
 use nexus_common::{
     error::{NexusError, NexusResult},
@@ -25,7 +25,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::AuthContext, AppState};
+use crate::{AppState, middleware::AuthContext};
 
 /// Slash command routes.
 pub fn router() -> Router<Arc<AppState>> {
@@ -41,7 +41,10 @@ pub fn router() -> Router<Arc<AppState>> {
                 .patch(edit_global_command)
                 .delete(delete_global_command),
         )
-        .route("/applications/{app_id}/commands", post(create_global_command))
+        .route(
+            "/applications/{app_id}/commands",
+            post(create_global_command),
+        )
         // Server-scoped commands
         .route(
             "/applications/{app_id}/guilds/{server_id}/commands",
@@ -56,14 +59,19 @@ pub fn router() -> Router<Arc<AppState>> {
                 .delete(delete_server_command),
         )
         // Client-facing: get commands available in a server (for the slash menu)
-        .route("/servers/{server_id}/commands", get(list_available_commands))
+        .route(
+            "/servers/{server_id}/commands",
+            get(list_available_commands),
+        )
         // Interactions (client → server → bot pipeline)
         .route("/interactions", post(create_interaction))
         .route(
             "/interactions/{interaction_id}/callback",
             post(interaction_callback),
         )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ============================================================================
@@ -90,7 +98,9 @@ async fn get_global_command(
     verify_app_access(&state, app_id, auth.user_id).await?;
     let cmd = slash_commands::get_command(&state.db.pool, command_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "command".to_string() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "command".to_string(),
+        })?;
     Ok(Json(cmd))
 }
 
@@ -131,7 +141,9 @@ async fn edit_global_command(
     verify_app_access(&state, app_id, auth.user_id).await?;
     let existing = slash_commands::get_command(&state.db.pool, command_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "command".to_string() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "command".to_string(),
+        })?;
 
     let cmd = slash_commands::upsert_command(
         &state.db.pool,
@@ -180,7 +192,13 @@ async fn bulk_overwrite_global_commands(
             let id = snowflake::generate_id();
             let opts =
                 serde_json::to_value(req.options.as_deref().unwrap_or(&[])).unwrap_or_default();
-            (id, req.name.clone(), req.description.clone(), opts, req.command_type.unwrap_or(1))
+            (
+                id,
+                req.name.clone(),
+                req.description.clone(),
+                opts,
+                req.command_type.unwrap_or(1),
+            )
         })
         .collect();
 
@@ -213,7 +231,9 @@ async fn get_server_command(
     verify_app_access(&state, app_id, auth.user_id).await?;
     let cmd = slash_commands::get_command(&state.db.pool, command_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "command".to_string() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "command".to_string(),
+        })?;
     Ok(Json(cmd))
 }
 
@@ -253,7 +273,9 @@ async fn edit_server_command(
     verify_app_access(&state, app_id, auth.user_id).await?;
     let existing = slash_commands::get_command(&state.db.pool, command_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "command".to_string() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "command".to_string(),
+        })?;
     let cmd = slash_commands::upsert_command(
         &state.db.pool,
         command_id,
@@ -300,7 +322,13 @@ async fn bulk_overwrite_server_commands(
             let id = snowflake::generate_id();
             let opts =
                 serde_json::to_value(req.options.as_deref().unwrap_or(&[])).unwrap_or_default();
-            (id, req.name.clone(), req.description.clone(), opts, req.command_type.unwrap_or(1))
+            (
+                id,
+                req.name.clone(),
+                req.description.clone(),
+                opts,
+                req.command_type.unwrap_or(1),
+            )
         })
         .collect();
 
@@ -353,7 +381,9 @@ async fn create_interaction(
     let app_id = if let Some(cid) = command_id {
         slash_commands::get_command(&state.db.pool, cid)
             .await?
-            .ok_or(NexusError::NotFound { resource: "command".to_string() })?
+            .ok_or(NexusError::NotFound {
+                resource: "command".to_string(),
+            })?
             .application_id
     } else {
         return Err(NexusError::Validation {
@@ -405,8 +435,8 @@ async fn interaction_callback(
     // (update_interaction_status not yet implemented in repo — skipped)
 
     // If the response includes message data, broadcast it
-    if body.response_type == 4 || body.response_type == 7 {
-        if let Some(data) = &body.data {
+    if (body.response_type == 4 || body.response_type == 7)
+        && let Some(data) = &body.data {
             let _ = state.gateway_tx.send(GatewayEvent {
                 event_type: nexus_common::gateway_event::event_types::MESSAGE_CREATE.to_string(),
                 data: data.clone(),
@@ -415,7 +445,6 @@ async fn interaction_callback(
                 user_id: None,
             });
         }
-    }
 
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
@@ -424,14 +453,12 @@ async fn interaction_callback(
 // Helpers
 // ============================================================================
 
-async fn verify_app_access(
-    state: &AppState,
-    app_id: Uuid,
-    user_id: Uuid,
-) -> NexusResult<()> {
+async fn verify_app_access(state: &AppState, app_id: Uuid, user_id: Uuid) -> NexusResult<()> {
     let app = bots::get_bot(&state.db.pool, app_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "application".to_string() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "application".to_string(),
+        })?;
     if app.owner_id != user_id {
         return Err(NexusError::Forbidden);
     }

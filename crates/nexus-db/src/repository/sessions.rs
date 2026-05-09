@@ -55,41 +55,53 @@ pub async fn list_sessions(
     pool: &sqlx::AnyPool,
     user_id: Uuid,
 ) -> Result<Vec<SessionRow>, sqlx::Error> {
-    let rows: Vec<(String, Option<String>, Option<String>, Option<String>, String, String)> =
-        sqlx::query_as(
-            "SELECT id::text, device_info, user_agent, ip_address::text, \
+    let rows: Vec<(
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        String,
+        String,
+    )> = sqlx::query_as(
+        "SELECT id::text, device_info, user_agent, ip_address::text, \
                     to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"'), \
                     to_char(last_seen_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') \
              FROM refresh_tokens \
              WHERE user_id = $1::uuid AND expires_at > NOW() \
              ORDER BY last_seen_at DESC",
-        )
-        .bind(user_id.to_string())
-        .fetch_all(pool)
-        .await?;
+    )
+    .bind(user_id.to_string())
+    .fetch_all(pool)
+    .await?;
 
     rows.into_iter()
-        .map(|(id, device_info, user_agent, ip_address, created_str, last_seen_str)| {
-            let created_at =
-                created_str.parse::<DateTime<Utc>>().unwrap_or(DateTime::<Utc>::MIN_UTC);
-            let last_seen_at =
-                last_seen_str.parse::<DateTime<Utc>>().unwrap_or(DateTime::<Utc>::MIN_UTC);
-            Ok(SessionRow { id, device_info, user_agent, ip_address, created_at, last_seen_at })
-        })
+        .map(
+            |(id, device_info, user_agent, ip_address, created_str, last_seen_str)| {
+                let created_at = created_str
+                    .parse::<DateTime<Utc>>()
+                    .unwrap_or(DateTime::<Utc>::MIN_UTC);
+                let last_seen_at = last_seen_str
+                    .parse::<DateTime<Utc>>()
+                    .unwrap_or(DateTime::<Utc>::MIN_UTC);
+                Ok(SessionRow {
+                    id,
+                    device_info,
+                    user_agent,
+                    ip_address,
+                    created_at,
+                    last_seen_at,
+                })
+            },
+        )
         .collect()
 }
 
 /// Touch the `last_seen_at` timestamp for a session when the token is used.
-pub async fn touch_session(
-    pool: &sqlx::AnyPool,
-    session_id: Uuid,
-) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "UPDATE refresh_tokens SET last_seen_at = NOW() WHERE id = $1::uuid",
-    )
-    .bind(session_id.to_string())
-    .execute(pool)
-    .await?;
+pub async fn touch_session(pool: &sqlx::AnyPool, session_id: Uuid) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE refresh_tokens SET last_seen_at = NOW() WHERE id = $1::uuid")
+        .bind(session_id.to_string())
+        .execute(pool)
+        .await?;
     Ok(())
 }
 
@@ -101,13 +113,12 @@ pub async fn revoke_session(
     user_id: Uuid,
     session_id: Uuid,
 ) -> Result<bool, sqlx::Error> {
-    let result = sqlx::query(
-        "DELETE FROM refresh_tokens WHERE id = $1::uuid AND user_id = $2::uuid",
-    )
-    .bind(session_id.to_string())
-    .bind(user_id.to_string())
-    .execute(pool)
-    .await?;
+    let result =
+        sqlx::query("DELETE FROM refresh_tokens WHERE id = $1::uuid AND user_id = $2::uuid")
+            .bind(session_id.to_string())
+            .bind(user_id.to_string())
+            .execute(pool)
+            .await?;
     Ok(result.rows_affected() > 0)
 }
 
@@ -130,10 +141,9 @@ pub async fn revoke_all_except(
 
 /// Delete all expired sessions (background maintenance, called by cleanup job).
 pub async fn purge_expired(pool: &sqlx::AnyPool) -> Result<u64, sqlx::Error> {
-    let result =
-        sqlx::query("DELETE FROM refresh_tokens WHERE expires_at <= NOW()")
-            .execute(pool)
-            .await?;
+    let result = sqlx::query("DELETE FROM refresh_tokens WHERE expires_at <= NOW()")
+        .execute(pool)
+        .await?;
     Ok(result.rows_affected())
 }
 

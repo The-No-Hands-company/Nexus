@@ -6,6 +6,8 @@
 - When something breaks, fix the root cause and verify the result.
 - Keep implementation quality high: correct behavior, stable builds, maintainable code, and minimal technical debt.
 - If a change affects shared infrastructure, verify downstream app behavior after the fix.
+- Follow ../docs/ENGINEERING_STANDARDS.md as the ecosystem-wide baseline.
+- Rust validation target: cargo fmt --all --check && cargo lint.
 
 ---
 

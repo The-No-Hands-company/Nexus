@@ -71,10 +71,7 @@ pub async fn get_version(
         .await
 }
 
-pub async fn delete_version(
-    pool: &AnyPool,
-    version_id: Uuid,
-) -> Result<bool, sqlx::Error> {
+pub async fn delete_version(pool: &AnyPool, version_id: Uuid) -> Result<bool, sqlx::Error> {
     let r = sqlx::query("DELETE FROM file_versions WHERE id = $1")
         .bind(version_id.to_string())
         .execute(pool)
@@ -84,10 +81,7 @@ pub async fn delete_version(
 
 // ── Storage Quotas ────────────────────────────────────────────────────────────
 
-pub async fn get_quota(
-    pool: &AnyPool,
-    server_id: Uuid,
-) -> Result<ServerStorageQuota, sqlx::Error> {
+pub async fn get_quota(pool: &AnyPool, server_id: Uuid) -> Result<ServerStorageQuota, sqlx::Error> {
     sqlx::query_as::<_, ServerStorageQuota>(
         "INSERT INTO server_storage_quotas (server_id) VALUES ($1) \
          ON CONFLICT (server_id) DO NOTHING; \

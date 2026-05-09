@@ -3,9 +3,9 @@
 use anyhow::{Context, Result};
 use aws_sdk_s3::presigning::PresigningConfig;
 use aws_sdk_s3::{
+    Client,
     config::{Builder as S3Builder, Credentials, Region},
     primitives::ByteStream,
-    Client,
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -53,7 +53,11 @@ pub struct StorageConfig {
 // ── Backend ───────────────────────────────────────────────────────────────────
 
 enum StorageBackend {
-    S3(Client, String /* bucket */, Option<String> /* public_url */),
+    S3(
+        Client,
+        String,         /* bucket */
+        Option<String>, /* public_url */
+    ),
     Local(PathBuf /* data_dir */, String /* public_base */),
 }
 
@@ -123,7 +127,8 @@ impl StorageClient {
                 if let Some(parent) = dest.parent() {
                     tokio::fs::create_dir_all(parent).await?;
                 }
-                tokio::fs::write(&dest, &data).await
+                tokio::fs::write(&dest, &data)
+                    .await
                     .with_context(|| format!("Local: failed to write {key}"))?;
                 Ok(key.to_string())
             }
@@ -149,9 +154,7 @@ impl StorageClient {
                     .with_context(|| format!("S3: failed to presign {key}"))?;
                 Ok(req.uri().to_string())
             }
-            StorageBackend::Local(_, base) => {
-                Ok(format!("{}/{}", base.trim_end_matches('/'), key))
-            }
+            StorageBackend::Local(_, base) => Ok(format!("{}/{}", base.trim_end_matches('/'), key)),
         }
     }
 
@@ -184,7 +187,8 @@ impl StorageClient {
             StorageBackend::Local(dir, _) => {
                 let path = dir.join(key.replace('/', std::path::MAIN_SEPARATOR_STR));
                 if path.exists() {
-                    tokio::fs::remove_file(&path).await
+                    tokio::fs::remove_file(&path)
+                        .await
                         .with_context(|| format!("Local: failed to delete {key}"))?;
                 }
                 Ok(())
@@ -251,8 +255,14 @@ impl StorageClient {
         }
     }
 
-    pub async fn upload_file(&self, key: &str, path: &std::path::Path, content_type: &str) -> Result<String> {
-        let data = tokio::fs::read(path).await
+    pub async fn upload_file(
+        &self,
+        key: &str,
+        path: &std::path::Path,
+        content_type: &str,
+    ) -> Result<String> {
+        let data = tokio::fs::read(path)
+            .await
             .with_context(|| format!("Failed to read {}", path.display()))?;
         self.put_object(key, data, content_type).await
     }
@@ -264,17 +274,21 @@ impl StorageClient {
             StorageBackend::S3(client, bucket, _) => {
                 if client.head_bucket().bucket(bucket).send().await.is_err() {
                     tracing::info!(bucket = %bucket, "Creating S3 bucket");
-                    client.create_bucket().bucket(bucket).send().await
+                    client
+                        .create_bucket()
+                        .bucket(bucket)
+                        .send()
+                        .await
                         .context("Failed to create S3 bucket")?;
                 }
                 Ok(())
             }
             StorageBackend::Local(dir, _) => {
-                tokio::fs::create_dir_all(dir).await
+                tokio::fs::create_dir_all(dir)
+                    .await
                     .with_context(|| format!("Failed to create data dir: {}", dir.display()))?;
                 Ok(())
             }
         }
     }
 }
-

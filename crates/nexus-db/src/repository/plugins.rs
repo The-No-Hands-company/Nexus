@@ -8,16 +8,27 @@ use nexus_common::models::plugin::{ClientPlugin, Theme, UserPluginInstall, UserT
 
 fn row_to_plugin(row: &sqlx::any::AnyRow) -> ClientPlugin {
     ClientPlugin {
-        id: row.try_get::<String, _>("id").unwrap_or_default().parse().unwrap_or_default(),
-        author_id: row.try_get::<Option<String>, _>("author_id").unwrap_or(None).and_then(|s| s.parse().ok()),
+        id: row
+            .try_get::<String, _>("id")
+            .unwrap_or_default()
+            .parse()
+            .unwrap_or_default(),
+        author_id: row
+            .try_get::<Option<String>, _>("author_id")
+            .unwrap_or(None)
+            .and_then(|s| s.parse().ok()),
         name: row.try_get("name").unwrap_or_default(),
         slug: row.try_get("slug").unwrap_or_default(),
         version: row.try_get("version").unwrap_or_default(),
         description: row.try_get("description").unwrap_or(None),
         homepage: row.try_get("homepage").unwrap_or(None),
         repository: row.try_get("repository").unwrap_or(None),
-        engine_range: row.try_get("engine_range").unwrap_or_else(|_| "*".to_string()),
-        permissions: row.try_get::<Option<String>, _>("permissions").unwrap_or(None)
+        engine_range: row
+            .try_get("engine_range")
+            .unwrap_or_else(|_| "*".to_string()),
+        permissions: row
+            .try_get::<Option<String>, _>("permissions")
+            .unwrap_or(None)
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default(),
         bundle_url: row.try_get("bundle_url").unwrap_or(None),
@@ -32,13 +43,22 @@ fn row_to_plugin(row: &sqlx::any::AnyRow) -> ClientPlugin {
 
 fn row_to_theme(row: &sqlx::any::AnyRow) -> Theme {
     Theme {
-        id: row.try_get::<String, _>("id").unwrap_or_default().parse().unwrap_or_default(),
-        author_id: row.try_get::<Option<String>, _>("author_id").unwrap_or(None).and_then(|s| s.parse().ok()),
+        id: row
+            .try_get::<String, _>("id")
+            .unwrap_or_default()
+            .parse()
+            .unwrap_or_default(),
+        author_id: row
+            .try_get::<Option<String>, _>("author_id")
+            .unwrap_or(None)
+            .and_then(|s| s.parse().ok()),
         name: row.try_get("name").unwrap_or_default(),
         slug: row.try_get("slug").unwrap_or_default(),
         version: row.try_get("version").unwrap_or_default(),
         description: row.try_get("description").unwrap_or(None),
-        variables: row.try_get::<Option<String>, _>("variables").unwrap_or(None)
+        variables: row
+            .try_get::<Option<String>, _>("variables")
+            .unwrap_or(None)
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or(serde_json::Value::Object(Default::default())),
         css: row.try_get("css").unwrap_or_default(),
@@ -53,10 +73,20 @@ fn row_to_theme(row: &sqlx::any::AnyRow) -> Theme {
 
 fn row_to_user_plugin(row: &sqlx::any::AnyRow) -> (UserPluginInstall, Option<Uuid>) {
     let install = UserPluginInstall {
-        user_id: row.try_get::<String, _>("user_id").unwrap_or_default().parse().unwrap_or_default(),
-        plugin_id: row.try_get::<String, _>("plugin_id").unwrap_or_default().parse().unwrap_or_default(),
+        user_id: row
+            .try_get::<String, _>("user_id")
+            .unwrap_or_default()
+            .parse()
+            .unwrap_or_default(),
+        plugin_id: row
+            .try_get::<String, _>("plugin_id")
+            .unwrap_or_default()
+            .parse()
+            .unwrap_or_default(),
         enabled: row.try_get("enabled").unwrap_or(true),
-        settings: row.try_get::<Option<String>, _>("settings").unwrap_or(None)
+        settings: row
+            .try_get::<Option<String>, _>("settings")
+            .unwrap_or(None)
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or(serde_json::Value::Object(Default::default())),
         installed_at: crate::any_compat::get_datetime(row, "installed_at").unwrap_or_default(),
@@ -67,8 +97,16 @@ fn row_to_user_plugin(row: &sqlx::any::AnyRow) -> (UserPluginInstall, Option<Uui
 
 fn row_to_user_theme(row: &sqlx::any::AnyRow) -> UserThemeInstall {
     UserThemeInstall {
-        user_id: row.try_get::<String, _>("user_id").unwrap_or_default().parse().unwrap_or_default(),
-        theme_id: row.try_get::<String, _>("theme_id").unwrap_or_default().parse().unwrap_or_default(),
+        user_id: row
+            .try_get::<String, _>("user_id")
+            .unwrap_or_default()
+            .parse()
+            .unwrap_or_default(),
+        theme_id: row
+            .try_get::<String, _>("theme_id")
+            .unwrap_or_default()
+            .parse()
+            .unwrap_or_default(),
         active: row.try_get("active").unwrap_or(false),
         installed_at: crate::any_compat::get_datetime(row, "installed_at").unwrap_or_default(),
         theme: None,
@@ -79,7 +117,11 @@ fn row_to_user_theme(row: &sqlx::any::AnyRow) -> UserThemeInstall {
 // Plugins
 // ============================================================================
 
-pub async fn list_plugins(pool: &sqlx::AnyPool, limit: i64, offset: i64) -> Result<Vec<ClientPlugin>> {
+pub async fn list_plugins(
+    pool: &sqlx::AnyPool,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<ClientPlugin>> {
     let rows = sqlx::query(
         "SELECT * FROM client_plugins WHERE verified = true ORDER BY install_count DESC LIMIT $1 OFFSET $2",
     )
@@ -90,7 +132,10 @@ pub async fn list_plugins(pool: &sqlx::AnyPool, limit: i64, offset: i64) -> Resu
     Ok(rows.iter().map(row_to_plugin).collect())
 }
 
-pub async fn get_plugin_by_id(pool: &sqlx::AnyPool, plugin_id: Uuid) -> Result<Option<ClientPlugin>> {
+pub async fn get_plugin_by_id(
+    pool: &sqlx::AnyPool,
+    plugin_id: Uuid,
+) -> Result<Option<ClientPlugin>> {
     let row = sqlx::query("SELECT * FROM client_plugins WHERE id = $1")
         .bind(plugin_id.to_string())
         .fetch_optional(pool)
@@ -143,7 +188,10 @@ pub async fn create_plugin(
 // User Plugin Installs
 // ============================================================================
 
-pub async fn get_user_plugins(pool: &sqlx::AnyPool, user_id: Uuid) -> Result<Vec<UserPluginInstall>> {
+pub async fn get_user_plugins(
+    pool: &sqlx::AnyPool,
+    user_id: Uuid,
+) -> Result<Vec<UserPluginInstall>> {
     let rows = sqlx::query(
         "SELECT * FROM user_plugin_installs WHERE user_id = $1 ORDER BY installed_at DESC",
     )
@@ -182,7 +230,9 @@ pub async fn update_plugin_install(
     enabled: Option<bool>,
     settings: Option<serde_json::Value>,
 ) -> Result<Option<UserPluginInstall>> {
-    let settings_str = settings.as_ref().map(|v| serde_json::to_string(v).unwrap_or_default());
+    let settings_str = settings
+        .as_ref()
+        .map(|v| serde_json::to_string(v).unwrap_or_default());
     let row = sqlx::query(
         r#"UPDATE user_plugin_installs SET
                enabled  = COALESCE($1, enabled),
@@ -199,14 +249,17 @@ pub async fn update_plugin_install(
     Ok(row.as_ref().map(|r| row_to_user_plugin(r).0))
 }
 
-pub async fn uninstall_plugin(pool: &sqlx::AnyPool, user_id: Uuid, plugin_id: Uuid) -> Result<bool> {
-    let result = sqlx::query(
-        "DELETE FROM user_plugin_installs WHERE user_id = $1 AND plugin_id = $2",
-    )
-    .bind(user_id.to_string())
-    .bind(plugin_id.to_string())
-    .execute(pool)
-    .await?;
+pub async fn uninstall_plugin(
+    pool: &sqlx::AnyPool,
+    user_id: Uuid,
+    plugin_id: Uuid,
+) -> Result<bool> {
+    let result =
+        sqlx::query("DELETE FROM user_plugin_installs WHERE user_id = $1 AND plugin_id = $2")
+            .bind(user_id.to_string())
+            .bind(plugin_id.to_string())
+            .execute(pool)
+            .await?;
     Ok(result.rows_affected() > 0)
 }
 
@@ -310,12 +363,10 @@ pub async fn install_theme(
 }
 
 pub async fn activate_theme(pool: &sqlx::AnyPool, user_id: Uuid, theme_id: Uuid) -> Result<bool> {
-    sqlx::query(
-        "UPDATE user_theme_installs SET active = false WHERE user_id = $1",
-    )
-    .bind(user_id.to_string())
-    .execute(pool)
-    .await?;
+    sqlx::query("UPDATE user_theme_installs SET active = false WHERE user_id = $1")
+        .bind(user_id.to_string())
+        .execute(pool)
+        .await?;
     let result = sqlx::query(
         "UPDATE user_theme_installs SET active = true WHERE user_id = $1 AND theme_id = $2",
     )

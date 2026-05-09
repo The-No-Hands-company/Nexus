@@ -11,10 +11,10 @@
 
 use axum::http::HeaderMap;
 use axum::{
+    Json, Router,
     extract::{Extension, Path, State},
     middleware,
     routing::{get, post},
-    Json, Router,
 };
 use chrono::{DateTime, Utc};
 use nexus_common::{
@@ -29,7 +29,10 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip}, AppState};
+use crate::{
+    AppState,
+    middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip},
+};
 
 // ============================================================
 // Router
@@ -49,11 +52,10 @@ pub fn router() -> Router<Arc<AppState>> {
             "/channels/{channel_id}/polls/{poll_id}/results",
             get(get_results),
         )
-        .route(
-            "/channels/{channel_id}/polls/{poll_id}/end",
-            post(end_poll),
-        )
-        .route_layer(middleware::from_fn(crate::middleware::combined_auth_middleware))
+        .route("/channels/{channel_id}/polls/{poll_id}/end", post(end_poll))
+        .route_layer(middleware::from_fn(
+            crate::middleware::combined_auth_middleware,
+        ))
 }
 
 // ============================================================
@@ -119,7 +121,7 @@ struct PollRow {
     message_id: Option<String>,
     author_id: String,
     question: String,
-    options: String,     // jsonb as text
+    options: String, // jsonb as text
     ends_at: Option<String>,
     allow_multiselect: bool,
     is_anonymous: bool,
@@ -150,18 +152,29 @@ impl TryFrom<PollRow> for Poll {
 
     fn try_from(r: PollRow) -> Result<Self, Self::Error> {
         Ok(Self {
-            id: r.id.parse::<Uuid>().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
-            channel_id: r.channel_id.parse::<Uuid>().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
+            id: r
+                .id
+                .parse::<Uuid>()
+                .map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
+            channel_id: r
+                .channel_id
+                .parse::<Uuid>()
+                .map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
             message_id: r.message_id.and_then(|s| s.parse().ok()),
-            author_id: r.author_id.parse::<Uuid>().map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
+            author_id: r
+                .author_id
+                .parse::<Uuid>()
+                .map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
             question: r.question,
             options: serde_json::from_str::<Vec<String>>(&r.options).unwrap_or_default(),
             ends_at: r.ends_at.as_deref().and_then(|s| parse_dt(s).ok()),
             allow_multiselect: r.allow_multiselect,
             is_anonymous: r.is_anonymous,
             status: r.status,
-            created_at: parse_dt(&r.created_at).map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
-            updated_at: parse_dt(&r.updated_at).map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
+            created_at: parse_dt(&r.created_at)
+                .map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
+            updated_at: parse_dt(&r.updated_at)
+                .map_err(|e| NexusError::Internal(anyhow::anyhow!(e)))?,
         })
     }
 }
@@ -177,7 +190,9 @@ async fn require_manage_messages(
 ) -> NexusResult<()> {
     let channel = channels::find_by_id(&state.db.pool, channel_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Channel".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Channel".into(),
+        })?;
 
     let server_id = channel.server_id.ok_or(NexusError::MissingPermission {
         permission: "MANAGE_MESSAGES".into(),
@@ -185,7 +200,9 @@ async fn require_manage_messages(
 
     let server = servers::find_by_id(&state.db.pool, server_id)
         .await?
-        .ok_or(NexusError::NotFound { resource: "Server".into() })?;
+        .ok_or(NexusError::NotFound {
+            resource: "Server".into(),
+        })?;
 
     if server.owner_id == user_id {
         return Ok(());
@@ -194,7 +211,9 @@ async fn require_manage_messages(
     let member = members::find_member(&state.db.pool, user_id, server_id)
         .await
         .map_err(|e| NexusError::Internal(e.into()))?
-        .ok_or(NexusError::MissingPermission { permission: "MANAGE_MESSAGES".into() })?;
+        .ok_or(NexusError::MissingPermission {
+            permission: "MANAGE_MESSAGES".into(),
+        })?;
 
     let all_roles = roles::list_server_roles(&state.db.pool, server_id)
         .await
@@ -215,7 +234,9 @@ async fn require_manage_messages(
     if effective.has(Permissions::MANAGE_MESSAGES) {
         Ok(())
     } else {
-        Err(NexusError::MissingPermission { permission: "MANAGE_MESSAGES".into() })
+        Err(NexusError::MissingPermission {
+            permission: "MANAGE_MESSAGES".into(),
+        })
     }
 }
 
@@ -267,28 +288,37 @@ async fn create_poll(
         format!("rl:polls:user:{}", ctx.user_id),
         10,
         3600,
-    ).await?;
+    )
+    .await?;
     check_rate_limit_with_fallback(
         state.db.redis.as_ref(),
         format!("rl:polls:ip:{ip}"),
         20,
         3600,
-    ).await?;
+    )
+    .await?;
 
     if body.question.trim().is_empty() {
-        return Err(NexusError::Validation { message: "Poll question cannot be empty".into() });
+        return Err(NexusError::Validation {
+            message: "Poll question cannot be empty".into(),
+        });
     }
     if body.options.len() < 2 {
-        return Err(NexusError::Validation { message: "Polls require at least 2 options".into() });
+        return Err(NexusError::Validation {
+            message: "Polls require at least 2 options".into(),
+        });
     }
     if body.options.len() > 10 {
-        return Err(NexusError::Validation { message: "Polls may have at most 10 options".into() });
+        return Err(NexusError::Validation {
+            message: "Polls may have at most 10 options".into(),
+        });
     }
-    if let Some(ends_at) = body.ends_at {
-        if ends_at <= Utc::now() {
-            return Err(NexusError::Validation { message: "ends_at must be in the future".into() });
+    if let Some(ends_at) = body.ends_at
+        && ends_at <= Utc::now() {
+            return Err(NexusError::Validation {
+                message: "ends_at must be in the future".into(),
+            });
         }
-    }
 
     let poll_id = snowflake::generate_id();
     let options_json =
@@ -327,7 +357,9 @@ async fn create_poll(
     let _ = state.gateway_tx.send(GatewayEvent {
         event_type: nexus_common::gateway_event::event_types::POLL_CREATE.into(),
         data: serde_json::to_value(&poll).unwrap_or_default(),
-        server_id: None, channel_id: None, user_id: None,
+        server_id: None,
+        channel_id: None,
+        user_id: None,
     });
 
     Ok(Json(poll))
@@ -348,16 +380,15 @@ async fn cast_vote(
         format!("rl:vote:user:{}", ctx.user_id),
         30,
         60,
-    ).await?;
-    check_rate_limit_with_fallback(
-        state.db.redis.as_ref(),
-        format!("rl:vote:ip:{ip}"),
-        60,
-        60,
-    ).await?;
+    )
+    .await?;
+    check_rate_limit_with_fallback(state.db.redis.as_ref(), format!("rl:vote:ip:{ip}"), 60, 60)
+        .await?;
 
     if body.option_indices.is_empty() {
-        return Err(NexusError::Validation { message: "option_indices must not be empty".into() });
+        return Err(NexusError::Validation {
+            message: "option_indices must not be empty".into(),
+        });
     }
 
     // Fetch poll — check it's open and belongs to the channel
@@ -378,15 +409,20 @@ async fn cast_vote(
 
     let poll = match row {
         Some(r) => Poll::try_from(r)?,
-        None => return Err(NexusError::NotFound { resource: "Poll".into() }),
+        None => {
+            return Err(NexusError::NotFound {
+                resource: "Poll".into(),
+            });
+        }
     };
 
     // Check not expired
-    if let Some(ends_at) = poll.ends_at {
-        if Utc::now() > ends_at {
-            return Err(NexusError::Validation { message: "This poll has ended".into() });
+    if let Some(ends_at) = poll.ends_at
+        && Utc::now() > ends_at {
+            return Err(NexusError::Validation {
+                message: "This poll has ended".into(),
+            });
         }
-    }
 
     // Validate indices
     let num_options = poll.options.len() as i32;
@@ -400,9 +436,9 @@ async fn cast_vote(
 
     for &idx in &unique_indices {
         if idx < 0 || idx >= num_options {
-            return Err(NexusError::Validation { message: format!(
-                "option_index {idx} is out of range (0..{num_options})"
-            ) });
+            return Err(NexusError::Validation {
+                message: format!("option_index {idx} is out of range (0..{num_options})"),
+            });
         }
     }
 
@@ -439,7 +475,9 @@ async fn cast_vote(
             "user_id": ctx.user_id,
             "option_indices": unique_indices,
         }),
-        server_id: None, channel_id: None, user_id: None,
+        server_id: None,
+        channel_id: None,
+        user_id: None,
     });
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -462,17 +500,17 @@ async fn retract_vote(
     .map_err(|e| NexusError::Internal(e.into()))?;
 
     if !exists {
-        return Err(NexusError::NotFound { resource: "Poll".into() });
+        return Err(NexusError::NotFound {
+            resource: "Poll".into(),
+        });
     }
 
-    sqlx::query(
-        "DELETE FROM poll_votes WHERE poll_id = $1 AND user_id = $2",
-    )
-    .bind(poll_id.to_string())
-    .bind(ctx.user_id.to_string())
-    .execute(&state.db.pool)
-    .await
-    .map_err(|e| NexusError::Internal(e.into()))?;
+    sqlx::query("DELETE FROM poll_votes WHERE poll_id = $1 AND user_id = $2")
+        .bind(poll_id.to_string())
+        .bind(ctx.user_id.to_string())
+        .execute(&state.db.pool)
+        .await
+        .map_err(|e| NexusError::Internal(e.into()))?;
 
     let _ = state.gateway_tx.send(GatewayEvent {
         event_type: nexus_common::gateway_event::event_types::POLL_VOTE_REMOVE.into(),
@@ -481,7 +519,9 @@ async fn retract_vote(
             "channel_id": channel_id,
             "user_id": ctx.user_id,
         }),
-        server_id: None, channel_id: None, user_id: None,
+        server_id: None,
+        channel_id: None,
+        user_id: None,
     });
 
     Ok(Json(serde_json::json!({ "ok": true })))
@@ -510,7 +550,11 @@ async fn get_results(
 
     let poll = match row {
         Some(r) => Poll::try_from(r)?,
-        None => return Err(NexusError::NotFound { resource: "Poll".into() }),
+        None => {
+            return Err(NexusError::NotFound {
+                resource: "Poll".into(),
+            });
+        }
     };
 
     // Collect vote counts per option
@@ -549,21 +593,28 @@ async fn get_results(
                 index: i as i32,
                 label: label.clone(),
                 vote_count,
-                voter_ids: if poll.is_anonymous { vec![] } else { voter_ids_raw },
+                voter_ids: if poll.is_anonymous {
+                    vec![]
+                } else {
+                    voter_ids_raw
+                },
             }
         })
         .collect();
     options.sort_by_key(|o| o.index);
 
-    let total_voters: i64 = sqlx::query_scalar(
-        "SELECT COUNT(DISTINCT user_id) FROM poll_votes WHERE poll_id = $1",
-    )
-    .bind(poll_id.to_string())
-    .fetch_one(&state.db.pool)
-    .await
-    .map_err(|e| NexusError::Internal(e.into()))?;
+    let total_voters: i64 =
+        sqlx::query_scalar("SELECT COUNT(DISTINCT user_id) FROM poll_votes WHERE poll_id = $1")
+            .bind(poll_id.to_string())
+            .fetch_one(&state.db.pool)
+            .await
+            .map_err(|e| NexusError::Internal(e.into()))?;
 
-    Ok(Json(PollResults { poll, options, total_voters }))
+    Ok(Json(PollResults {
+        poll,
+        options,
+        total_voters,
+    }))
 }
 
 /// POST /api/v1/channels/{channel_id}/polls/{poll_id}/end
@@ -595,13 +646,19 @@ async fn end_poll(
 
     let poll = match row {
         Some(r) => Poll::try_from(r)?,
-        None => return Err(NexusError::NotFound { resource: "Poll or poll already ended".into() }),
+        None => {
+            return Err(NexusError::NotFound {
+                resource: "Poll or poll already ended".into(),
+            });
+        }
     };
 
     let _ = state.gateway_tx.send(GatewayEvent {
         event_type: nexus_common::gateway_event::event_types::POLL_ENDED.into(),
         data: serde_json::to_value(&poll).unwrap_or_default(),
-        server_id: None, channel_id: None, user_id: None,
+        server_id: None,
+        channel_id: None,
+        user_id: None,
     });
 
     Ok(Json(poll))
