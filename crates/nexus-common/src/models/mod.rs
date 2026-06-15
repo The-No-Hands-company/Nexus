@@ -75,3 +75,7 @@ pub use growth::*;
 // v2.x Sustainability & Extensibility
 pub mod sustainability;
 pub use sustainability::*;
+
+// v3.0 Phantom Protocol — Post-Quantum E2EE
+pub mod phantom;
+pub use phantom::*;
