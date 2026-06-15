@@ -22,6 +22,20 @@ pub async fn run_migration(pool: &AnyPool) -> Result<(), sqlx::Error> {
     )
     .execute(pool)
     .await?;
+
+    // Also create the message signatures table
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS phantom_message_sigs (
+            message_id  UUID PRIMARY KEY,
+            user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            phantom_did TEXT NOT NULL,
+            signature   BYTEA NOT NULL,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )"
+    )
+    .execute(pool)
+    .await?;
+
     Ok(())
 }
 

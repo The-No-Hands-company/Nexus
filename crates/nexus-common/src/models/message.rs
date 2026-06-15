@@ -66,6 +66,14 @@ pub struct Message {
     /// Encryption metadata (sender key ID, algorithm, etc.)
     pub encryption_metadata: Option<serde_json::Value>,
 
+    /// Phantom PQ signature (Dilithium-5) — base64, present if sender has Phantom identity
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phantom_signature: Option<String>,
+
+    /// Phantom DID of the signer
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phantom_did: Option<String>,
+
     pub created_at: DateTime<Utc>,
 }
 
