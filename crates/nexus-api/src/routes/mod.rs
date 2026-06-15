@@ -13,6 +13,7 @@ pub mod extensibility;
 pub mod federation;
 pub mod files;
 pub mod password_reset;
+pub mod phantom;
 // v0.8.5 Federation UX — admin management endpoints
 pub mod bookmarks;
 pub mod drafts;
