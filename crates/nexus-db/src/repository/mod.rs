@@ -75,3 +75,6 @@ pub mod sustainability;
 
 /// Push notification subscriptions (Web Push / VAPID)
 pub mod push_subscriptions;
+
+/// Phantom Protocol — post-quantum identity storage
+pub mod phantom;
