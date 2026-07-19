@@ -10,6 +10,7 @@ using json = nlohmann::json;
 bool saveMetaProgress(const std::string& path, const MetaProgress& progress) {
     json root;
     root["essence"] = progress.essence;
+    root["theme_id"] = progress.themeId;
     root["upgrades"] = {
         {"vitality", progress.upgrades.vitality},
         {"luck", progress.upgrades.luck},
@@ -39,6 +40,7 @@ bool loadMetaProgress(const std::string& path, MetaProgress& outProgress) {
     }
 
     outProgress.essence = root.value("essence", int64_t{0});
+    outProgress.themeId = root.value("theme_id", std::string{"classic"});
     if (root.contains("upgrades")) {
         const auto& u = root["upgrades"];
         outProgress.upgrades.vitality = u.value("vitality", 0);

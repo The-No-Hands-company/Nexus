@@ -51,6 +51,15 @@ void Window::pollEvents(InputState& input) {
                 } else if (event.key.keysym.sym == SDLK_p ||
                            event.key.keysym.sym == SDLK_SPACE) {
                     input.togglePause = true;
+                } else if (event.key.keysym.sym == SDLK_t) {
+                    input.toggleThemeMenu = true;
+                } else if (event.key.keysym.sym == SDLK_LEFT) {
+                    input.navigateLeft = true;
+                } else if (event.key.keysym.sym == SDLK_RIGHT) {
+                    input.navigateRight = true;
+                } else if (event.key.keysym.sym == SDLK_RETURN ||
+                           event.key.keysym.sym == SDLK_KP_ENTER) {
+                    input.confirm = true;
                 }
                 break;
             default:

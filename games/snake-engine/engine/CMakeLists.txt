@@ -7,6 +7,8 @@ add_library(snake_engine STATIC
     src/upgrades.cpp
     src/save.cpp
     src/game.cpp
+    src/theme.cpp
+    src/theme_catalog.cpp
     src/window_sdl.cpp
     src/renderer_sdl.cpp
 )

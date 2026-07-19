@@ -14,6 +14,10 @@ struct InputState {
     bool quitRequested = false;
     bool restartRequested = false;
     bool togglePause = false;
+    bool toggleThemeMenu = false;  // T
+    bool navigateLeft = false;     // Left arrow
+    bool navigateRight = false;    // Right arrow
+    bool confirm = false;          // Enter/Return
 };
 
 // Thin SDL2 wrapper. This is the only place window/event-loop platform

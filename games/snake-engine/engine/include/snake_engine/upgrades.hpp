@@ -45,6 +45,7 @@ class MetaProgress {
 public:
     int64_t essence = 0;
     UpgradeLevels upgrades;
+    std::string themeId = "classic";
 
     // Returns true and deducts essence if affordable, false (no-op) if not.
     bool purchase(UpgradeKind kind);
