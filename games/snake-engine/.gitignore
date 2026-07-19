@@ -1,0 +1,19 @@
+# Build output
+build/
+build-*/
+out/
+cmake-build-*/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+compile_commands.json
+
+# Editors / IDEs
+.vs/
+.vscode/
+*.user
+
+# Runtime artifacts
+*.log
+snake_engine_save.json

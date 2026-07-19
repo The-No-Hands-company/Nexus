@@ -1,0 +1,124 @@
+{
+  "$schema": "https://github.com/The-No-hands-Company/nexus/games/snake-engine — effect definition data",
+  "_comment": "Loaded by snake_engine::EffectCatalog. Edited by hand today; edited by SnakeED's effect editor tomorrow. Tiers within bonus_tiers / drawback_tiers must be ordered mild -> extreme: the Luck upgrade reshapes odds by tier *index*, not by magnitude.",
+  "effects": [
+    {
+      "id": "life",
+      "display_name": "Life Force",
+      "category": "Life",
+      "spawn_weight": 3.0,
+      "polarity_weights": { "bonus": 55, "drawback": 45 },
+      "bonus_tiers": [
+        { "name": "Snack", "weight": 45, "magnitude_type": "flat_life", "magnitude": 1 },
+        { "name": "Meal", "weight": 30, "magnitude_type": "flat_life", "magnitude": 3 },
+        { "name": "Feast", "weight": 18, "magnitude_type": "percent_of_current_life", "magnitude": 0.25 },
+        { "name": "Vitality Surge", "weight": 6, "magnitude_type": "percent_of_current_life", "magnitude": 0.50 },
+        { "name": "Rebirth", "weight": 1, "magnitude_type": "percent_of_current_life", "magnitude": 1.00 }
+      ],
+      "drawback_tiers": [
+        { "name": "Trivial", "weight": 40, "magnitude_type": "flat_life", "magnitude": -1 },
+        { "name": "Minor", "weight": 25, "magnitude_type": "percent_of_current_life", "magnitude": -0.05 },
+        { "name": "Moderate", "weight": 16, "magnitude_type": "percent_of_current_life", "magnitude": -0.15 },
+        { "name": "Major", "weight": 10, "magnitude_type": "percent_of_current_life", "magnitude": -0.35 },
+        { "name": "Severe", "weight": 6, "magnitude_type": "percent_of_current_life", "magnitude": -0.60 },
+        { "name": "Critical", "weight": 2.5, "magnitude_type": "percent_of_current_life", "magnitude": -0.85 },
+        { "name": "Catastrophic", "weight": 0.5, "magnitude_type": "percent_of_current_life", "magnitude": -0.99 }
+      ]
+    },
+    {
+      "id": "speed",
+      "display_name": "Momentum",
+      "category": "Speed",
+      "spawn_weight": 2.0,
+      "polarity_weights": { "bonus": 50, "drawback": 50 },
+      "bonus_tiers": [
+        { "name": "Quickstep", "weight": 60, "magnitude_type": "flat_value", "magnitude": 1.15, "duration_seconds": 6 },
+        { "name": "Sprint", "weight": 30, "magnitude_type": "flat_value", "magnitude": 1.35, "duration_seconds": 6 },
+        { "name": "Blitz", "weight": 10, "magnitude_type": "flat_value", "magnitude": 1.60, "duration_seconds": 5 }
+      ],
+      "drawback_tiers": [
+        { "name": "Sluggish", "weight": 55, "magnitude_type": "flat_value", "magnitude": 0.80, "duration_seconds": 6 },
+        { "name": "Molasses", "weight": 30, "magnitude_type": "flat_value", "magnitude": 0.60, "duration_seconds": 6 },
+        { "name": "Frenzy", "weight": 15, "magnitude_type": "flat_value", "magnitude": 1.90, "duration_seconds": 5 }
+      ]
+    },
+    {
+      "id": "size",
+      "display_name": "Mass",
+      "category": "Size",
+      "spawn_weight": 2.0,
+      "polarity_weights": { "bonus": 60, "drawback": 40 },
+      "bonus_tiers": [
+        { "name": "Growth", "weight": 70, "magnitude_type": "flat_value", "magnitude": 2 },
+        { "name": "Overgrowth", "weight": 25, "magnitude_type": "flat_value", "magnitude": 5 },
+        { "name": "Colossus", "weight": 5, "magnitude_type": "flat_value", "magnitude": 9 }
+      ],
+      "drawback_tiers": [
+        { "name": "Shrink", "weight": 60, "magnitude_type": "flat_value", "magnitude": -2 },
+        { "name": "Wither", "weight": 30, "magnitude_type": "flat_value", "magnitude": -4 },
+        { "name": "Atrophy", "weight": 10, "magnitude_type": "flat_value", "magnitude": -7 }
+      ]
+    },
+    {
+      "id": "score",
+      "display_name": "Fortune",
+      "category": "Score",
+      "spawn_weight": 2.0,
+      "polarity_weights": { "bonus": 60, "drawback": 40 },
+      "bonus_tiers": [
+        { "name": "Bounty", "weight": 55, "magnitude_type": "flat_score", "magnitude": 25 },
+        { "name": "Jackpot", "weight": 35, "magnitude_type": "flat_score", "magnitude": 75 },
+        { "name": "Windfall", "weight": 10, "magnitude_type": "flat_score", "magnitude": 200 }
+      ],
+      "drawback_tiers": [
+        { "name": "Toll", "weight": 60, "magnitude_type": "flat_score", "magnitude": -20 },
+        { "name": "Fine", "weight": 30, "magnitude_type": "flat_score", "magnitude": -60 },
+        { "name": "Forfeiture", "weight": 10, "magnitude_type": "flat_score", "magnitude": -150 }
+      ]
+    },
+    {
+      "id": "control",
+      "display_name": "Steadiness",
+      "category": "Control",
+      "spawn_weight": 1.5,
+      "polarity_weights": { "bonus": 50, "drawback": 50 },
+      "bonus_tiers": [
+        { "name": "Precision", "weight": 70, "magnitude_type": "flat_value", "magnitude": 0.5, "duration_seconds": 8 },
+        { "name": "Steady Hand", "weight": 30, "magnitude_type": "flat_value", "magnitude": 0.25, "duration_seconds": 8 }
+      ],
+      "drawback_tiers": [
+        { "name": "Wobble", "weight": 60, "magnitude_type": "flat_value", "magnitude": 0.35, "duration_seconds": 6 },
+        { "name": "Static", "weight": 30, "magnitude_type": "flat_value", "magnitude": 0.65, "duration_seconds": 6 },
+        { "name": "Chaos", "weight": 10, "magnitude_type": "flat_value", "magnitude": 1.0, "duration_seconds": 4 }
+      ]
+    },
+    {
+      "id": "vision",
+      "display_name": "Clarity",
+      "category": "Vision",
+      "spawn_weight": 1.5,
+      "polarity_weights": { "bonus": 50, "drawback": 50 },
+      "bonus_tiers": [
+        { "name": "Clear Sight", "weight": 70, "magnitude_type": "flat_value", "magnitude": 1.3, "duration_seconds": 10 },
+        { "name": "Farsight", "weight": 30, "magnitude_type": "flat_value", "magnitude": 1.6, "duration_seconds": 8 }
+      ],
+      "drawback_tiers": [
+        { "name": "Haze", "weight": 60, "magnitude_type": "flat_value", "magnitude": 0.75, "duration_seconds": 8 },
+        { "name": "Fog", "weight": 30, "magnitude_type": "flat_value", "magnitude": 0.55, "duration_seconds": 6 },
+        { "name": "Blackout", "weight": 10, "magnitude_type": "flat_value", "magnitude": 0.35, "duration_seconds": 4 }
+      ]
+    },
+    {
+      "id": "shield",
+      "display_name": "Ward",
+      "category": "Shield",
+      "spawn_weight": 1.0,
+      "polarity_weights": { "bonus": 100, "drawback": 0 },
+      "bonus_tiers": [
+        { "name": "Ward", "weight": 75, "magnitude_type": "flat_value", "magnitude": 1 },
+        { "name": "Aegis", "weight": 25, "magnitude_type": "flat_value", "magnitude": 2 }
+      ],
+      "drawback_tiers": []
+    }
+  ]
+}

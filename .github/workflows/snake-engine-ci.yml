@@ -1,0 +1,52 @@
+name: SnakeEngine CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "games/snake-engine/**"
+      - ".github/workflows/snake-engine-ci.yml"
+  pull_request:
+    paths:
+      - "games/snake-engine/**"
+      - ".github/workflows/snake-engine-ci.yml"
+
+defaults:
+  run:
+    working-directory: games/snake-engine
+
+jobs:
+  build:
+    name: Build & test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libsdl2-dev nlohmann-json3-dev
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja sdl2 nlohmann-json
+
+      - name: Configure (Ninja)
+        if: runner.os != 'Windows'
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+
+      - name: Configure (Visual Studio generator)
+        if: runner.os == 'Windows'
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+
+      - name: Build
+        run: cmake --build build --config RelWithDebInfo --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --build-config RelWithDebInfo

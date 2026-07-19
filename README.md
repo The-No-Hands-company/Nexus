@@ -287,6 +287,14 @@ nexus/
 │   ├── nexus-sdk-py/             # v0.7 Python Bot SDK (nexus-sdk)
 │   └── nexus-sdk-rs/             # v0.7 Rust Bot SDK (nexus-sdk)
 │
+├── games/
+│   └── snake-engine/             # Standalone C++20 project: a cursor-driven
+│                                  # snake game and the seed of a future
+│                                  # level/character/environment editor
+│                                  # (SnakeED). Own CMake build, independent
+│                                  # of the Rust/TS stack above — see
+│                                  # games/snake-engine/README.md.
+│
 └── .planning/                    # Development planning docs
     ├── BRIEF.md                  # Project vision & architecture
     └── ROADMAP.md                # Development phases

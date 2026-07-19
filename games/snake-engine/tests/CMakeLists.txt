@@ -1,0 +1,5 @@
+add_executable(snake_engine_tests test_effects.cpp)
+target_link_libraries(snake_engine_tests PRIVATE snake_engine)
+target_compile_features(snake_engine_tests PRIVATE cxx_std_20)
+
+add_test(NAME snake_engine_tests COMMAND snake_engine_tests)
