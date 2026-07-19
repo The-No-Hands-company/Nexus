@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SnakeEngine</title>
+  <style>
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: #0c0c10;
+      color: #e6e6ea;
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+    canvas {
+      background: #000;
+      outline: none;
+      image-rendering: pixelated;
+      max-width: 96vw;
+      max-height: 82vh;
+    }
+    p {
+      margin: 0;
+      font-size: 13px;
+      color: #8a8a96;
+      text-align: center;
+    }
+    #status {
+      color: #5ae66e;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+  <p>
+    Move the mouse to steer. <kbd>P</kbd>/<kbd>Space</kbd> pause,
+    <kbd>R</kbd> restart, <kbd>1</kbd>-<kbd>4</kbd> buy upgrades on the
+    game-over screen. <span id="status">loading…</span>
+  </p>
+  <script>
+    var Module = {
+      canvas: document.getElementById('canvas'),
+      setStatus: function (text) {
+        var el = document.getElementById('status');
+        if (el) el.textContent = text || 'running';
+      },
+    };
+  </script>
+  <script src="snake_game.js"></script>
+</body>
+</html>

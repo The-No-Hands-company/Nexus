@@ -12,6 +12,12 @@ chat platform in the rest of the repository — its own CMake build, its own
 C++20 codebase, licensed the same as the rest of Nexus
 ([AGPL-3.0-or-later](../../LICENSE)).
 
+**Platforms:** Linux (any distro — Ubuntu and Fedora both have dedicated
+build scripts below), macOS, Windows, Android, and the Web (WebAssembly).
+The same `engine/` + `game/src/main.cpp` builds on all of them; only the
+window/asset/save-path plumbing branches per platform (see
+`docs/ARCHITECTURE.md`).
+
 ## What makes it a "snake-like" and not classic Snake
 
 - **Movement follows the cursor**, continuously — no arrow keys. The snake
@@ -67,7 +73,28 @@ powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1
 .\build\game\RelWithDebInfo\snake_game.exe
 ```
 
-### Manual (any platform)
+### Fedora
+```bash
+./scripts/build_fedora.sh         # optionally dnf-installs SDL2/nlohmann-json first
+./build/game/snake_game
+```
+
+### Web (WebAssembly, via Emscripten)
+```bash
+./scripts/build_web.sh            # needs emcc/emcmake on PATH — see the script's comments
+python3 -m http.server -d build-web/game 8080   # then open http://localhost:8080
+```
+Cursor input is mouse movement, same as desktop; the game-over upgrade shop
+(essence balance, buy keys `1`-`4`) persists between page reloads via
+IndexedDB. Emscripten's own SDL2 port is used here (a compiler/linker flag,
+`-sUSE_SDL=2`) rather than the FetchContent path the other platforms use.
+
+### Android
+See [`android/README.md`](android/README.md) — `cd android && ./gradlew assembleDebug`.
+Touch input drives the same cursor-follow steering as the mouse does
+elsewhere (SDL2 synthesizes mouse events from touch by default).
+
+### Manual (any native desktop platform)
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build --parallel
@@ -76,7 +103,7 @@ ctest --test-dir build          # run the unit tests
 
 `SNAKE_BUILD_GAME` and `SNAKE_BUILD_TESTS` CMake options (both `ON` by
 default) let you build just the `snake_engine` library if you're embedding
-it elsewhere.
+it elsewhere. `SNAKE_BUILD_TESTS` is skipped automatically under Emscripten.
 
 ## Project layout
 
@@ -86,6 +113,8 @@ snake-engine/
 │               effect system, item spawner, upgrades, save, SDL2 window
 │               + renderer). No game-specific glue.
 ├── game/       the playable executable — wires engine pieces together
+│   └── web/    index.html shell for the Emscripten build
+├── android/    Gradle/NDK project wrapping engine/ + game/src/main.cpp
 ├── editor/     SnakeED, not built yet — see docs/ROADMAP.md
 ├── data/       JSON-authored effect/item definitions
 ├── tests/      dependency-free CTest unit tests

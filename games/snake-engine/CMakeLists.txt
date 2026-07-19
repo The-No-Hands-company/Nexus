@@ -24,7 +24,12 @@ if(SNAKE_BUILD_GAME)
     add_subdirectory(game)
 endif()
 
-if(SNAKE_BUILD_TESTS)
+if(SNAKE_BUILD_TESTS AND NOT EMSCRIPTEN)
+    # The test binary exercises pure engine logic (RNG, effects, grid/snake
+    # math) with no rendering — nothing about it is platform-specific, so
+    # it's only built for the native desktop toolchain that's actually
+    # running the build, rather than also standing up a Node-based ctest
+    # runner for the wasm output.
     enable_testing()
     add_subdirectory(tests)
 endif()

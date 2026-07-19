@@ -81,12 +81,54 @@ design levers.
 ## Meta-progression
 
 `MetaProgress` (essence balance + `UpgradeLevels`) is separate from a single
-run's `Game` state and persists to `snake_engine_save.json` next to the
-executable (`save.hpp`/`save.cpp`, plain JSON via nlohmann_json — no
-platform-specific "app data directory" API, so it behaves identically on
-every OS). `computeModifiers()` turns upgrade levels into the numbers `Game`
-actually uses (`PlayerStatModifiers`): bonus max life, a luck value that
-reshapes future item rolls, starting shield charges, and passive regen.
+run's `Game` state and persists as plain JSON via nlohmann_json
+(`save.hpp`/`save.cpp`, which just takes a path and doesn't care where it
+comes from). `computeModifiers()` turns upgrade levels into the numbers
+`Game` actually uses (`PlayerStatModifiers`): bonus max life, a luck value
+that reshapes future item rolls, starting shield charges, and passive regen.
+
+## Platform plumbing (game/src/main.cpp)
+
+The engine itself has no platform-specific code beyond the SDL2 backend, but
+`main.cpp` branches in a few places since "where do I read/write files" and
+"how big is my window" aren't the same question on a desktop, a phone, and a
+browser tab:
+
+- **Data/save paths.** Desktop resolves both relative to
+  `SDL_GetBasePath()`. Android reads the bundled JSON through
+  `SDL_RWFromFile`'s transparent APK-asset fallback (a *relative* path with
+  no prefix — see `android/README.md`) and writes saves to
+  `SDL_AndroidGetInternalStoragePath()`. Emscripten reads from the
+  `--preload-file`-populated path `/data/...` and writes saves under
+  `/save/...`, a directory mounted with IDBFS (see below).
+  `EffectCatalog::loadFromFile` reads through `SDL_RWops` rather than
+  `std::ifstream` specifically so the same call works across all of this.
+- **Window sizing.** `main()` asks for a default pixel size, then re-reads
+  the *actual* size via `SDL_GetRendererOutputSize` and sizes grid cells to
+  fit — Android always hands back the full device display regardless of
+  what was requested, so this is the only way to not render a tiny corner
+  of the screen.
+- **The main loop.** Refactored into a single `iterate(void*)` step function
+  so it can be driven two ways: a plain blocking `while` loop natively, or
+  `emscripten_set_main_loop_arg` on the web, which is non-negotiable there —
+  a blocking loop never yields back to the browser's event loop and the tab
+  just hangs.
+- **Web persistence.** `main()` mounts an IDBFS-backed directory at `/save`
+  and only calls `snake_engine_start()` (which does everything `start()`
+  used to do directly on other platforms) from inside `FS.syncfs`'s async
+  load callback — otherwise the very first `loadMetaProgress` call would
+  race the IndexedDB read and silently see a not-yet-populated filesystem.
+  `-sEXIT_RUNTIME=0` keeps the wasm instance alive across that async gap.
+  Every `saveMetaProgress` call is followed by a fire-and-forget
+  `FS.syncfs(false, ...)` to flush back out to IndexedDB.
+- **Entry point signature.** `main()` deliberately takes no arguments. A
+  `main(int, char**)` on the wasm32 target compiles to a differently-named
+  `__main_argc_argv` symbol that (at least with the toolchain/flag
+  combination this was built and verified against) never gets its `main`
+  trampoline linked in — the program builds and loads with no error at all,
+  it just silently never runs. `main()` with no parameters avoids the
+  ambiguity entirely, which is also all this project ever needed since argc/
+  argv were never used.
 
 ## Rendering without a font dependency
 

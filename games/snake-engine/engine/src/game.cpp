@@ -13,7 +13,6 @@ Vec2i startPositionFor(const Grid& grid) {
 
 Game::Game(Grid grid, const EffectCatalog& catalog, PlayerStatModifiers mods)
     : grid_(grid),
-      catalog_(catalog),
       mods_(mods),
       snake_(startPositionFor(grid), 4),
       itemSpawner_(grid.width, grid.height, catalog) {

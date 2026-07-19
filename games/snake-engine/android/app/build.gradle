@@ -1,0 +1,65 @@
+plugins {
+    id "com.android.application"
+}
+
+android {
+    namespace "com.nohandscompany.snakeengine"
+    compileSdk 34
+    ndkVersion "26.2.11394342"
+
+    defaultConfig {
+        applicationId "com.nohandscompany.snakeengine"
+        minSdk 21
+        targetSdk 34
+        versionCode 1
+        versionName "0.1.0"
+
+        externalNativeBuild {
+            cmake {
+                // SDL2/nlohmann_json are fetched from source on Android (no
+                // system package exists on-device); see ../../cmake/FetchDeps.cmake,
+                // reused unchanged by app/CMakeLists.txt.
+                arguments "-DANDROID_STL=c++_shared"
+                abiFilters "arm64-v8a", "armeabi-v7a", "x86_64"
+            }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "CMakeLists.txt"
+            version "3.22.1"
+        }
+    }
+
+    sourceSets {
+        main {
+            // The effect/item JSON data lives once, under the shared
+            // snake-engine data/ directory, and is packaged into the APK's
+            // assets/ as-is rather than duplicated into this module.
+            assets.srcDirs += ["../../data"]
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = false
+        }
+    }
+
+    lint {
+        abortOnError false
+    }
+}

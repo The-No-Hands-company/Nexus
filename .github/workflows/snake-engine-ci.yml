@@ -50,3 +50,37 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build --output-on-failure --build-config RelWithDebInfo
+
+  web:
+    name: Build (WebAssembly)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mymindstorm/setup-emsdk@v14
+
+      - name: Configure
+        run: emcmake cmake -S . -B build-web -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build-web --parallel
+
+  android:
+    name: Build (Android APK)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install NDK + CMake
+        run: sdkmanager --install "ndk;26.2.11394342" "cmake;3.22.1"
+
+      - name: Assemble debug APK
+        working-directory: games/snake-engine/android
+        run: ./gradlew assembleDebug --console=plain

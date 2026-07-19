@@ -54,7 +54,6 @@ public:
 
 private:
     Grid grid_;
-    const EffectCatalog& catalog_;
     PlayerStatModifiers mods_;
     Rng rng_;
 

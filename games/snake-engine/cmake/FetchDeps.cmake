@@ -11,20 +11,34 @@ include(FetchContent)
 # ---------------------------------------------------------------------------
 # SDL2 — window, input, 2D rendering backend
 # ---------------------------------------------------------------------------
-find_package(SDL2 QUIET)
-if(NOT SDL2_FOUND)
-    message(STATUS "SnakeEngine: system SDL2 not found, fetching source via FetchContent")
-    set(SDL_TEST OFF CACHE BOOL "" FORCE)
-    set(SDL_TESTS OFF CACHE BOOL "" FORCE)
-    set(SDL_SHARED ON CACHE BOOL "" FORCE)
-    set(SDL_STATIC OFF CACHE BOOL "" FORCE)
-    FetchContent_Declare(
-        SDL2
-        GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
-        GIT_TAG release-2.30.9
-        GIT_SHALLOW TRUE
-    )
-    FetchContent_MakeAvailable(SDL2)
+if(EMSCRIPTEN)
+    # Emscripten ships its own prebuilt SDL2 port; compiling/linking against
+    # it is a matter of compiler/linker flags, not a library to find or
+    # fetch. Wrapping it in the same SDL2::SDL2 target name means engine/ and
+    # game/ need zero platform-specific code to consume it.
+    if(NOT TARGET SDL2::SDL2)
+        add_library(SDL2::SDL2 INTERFACE IMPORTED)
+        set_target_properties(SDL2::SDL2 PROPERTIES
+            INTERFACE_COMPILE_OPTIONS "-sUSE_SDL=2"
+            INTERFACE_LINK_OPTIONS "-sUSE_SDL=2"
+        )
+    endif()
+else()
+    find_package(SDL2 QUIET)
+    if(NOT SDL2_FOUND)
+        message(STATUS "SnakeEngine: system SDL2 not found, fetching source via FetchContent")
+        set(SDL_TEST OFF CACHE BOOL "" FORCE)
+        set(SDL_TESTS OFF CACHE BOOL "" FORCE)
+        set(SDL_SHARED ON CACHE BOOL "" FORCE)
+        set(SDL_STATIC OFF CACHE BOOL "" FORCE)
+        FetchContent_Declare(
+            SDL2
+            GIT_REPOSITORY https://github.com/libsdl-org/SDL.git
+            GIT_TAG release-2.30.9
+            GIT_SHALLOW TRUE
+        )
+        FetchContent_MakeAvailable(SDL2)
+    endif()
 endif()
 
 # ---------------------------------------------------------------------------

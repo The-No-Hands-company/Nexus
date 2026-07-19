@@ -16,8 +16,12 @@ a placeholder.
   `data/effects/core_effects.json`, not hardcoded.
 - Persistent meta-progression: essence earned per run, spent on 4 upgrades
   (Vitality, Luck, Insurance, Regeneration) that carry into the next run.
-- CMake build that works from a clean checkout on Linux, macOS, and Windows,
-  fetching SDL2/nlohmann_json from source when no system package is found.
+- CMake build that works from a clean checkout on Linux (Ubuntu and Fedora
+  both have dedicated `scripts/build_*.sh`), macOS, and Windows, fetching
+  SDL2/nlohmann_json from source when no system package is found.
+- Android (Gradle + NDK, `android/`) and Web (Emscripten + WebAssembly,
+  `scripts/build_web.sh`) builds of the same `engine/` + `game/`, with touch
+  and mouse both driving the same cursor-follow steering.
 - `engine` (static library) / `game` (executable) split so the editor can
   link the same core later without depending on the game's `main.cpp`.
 

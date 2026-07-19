@@ -17,3 +17,15 @@ compile_commands.json
 # Runtime artifacts
 *.log
 snake_engine_save.json
+
+# Android (Gradle/NDK build outputs, local machine config)
+android/local.properties
+android/.gradle/
+android/.cxx/
+android/app/.cxx/
+android/app/build/
+android/build/
+android/*.iml
+android/.idea/
+android/captures/
+

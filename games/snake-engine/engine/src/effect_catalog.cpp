@@ -1,7 +1,8 @@
 #include "snake_engine/effect_catalog.hpp"
 
+#include <SDL.h>
+
 #include <algorithm>
-#include <fstream>
 #include <nlohmann/json.hpp>
 
 #include "snake_engine/math.hpp"
@@ -46,15 +47,40 @@ std::vector<SeverityTier> parseTiers(const json& arr) {
 
 }  // namespace
 
+namespace {
+
+// Reads the whole file through SDL_RWops rather than std::ifstream: on
+// Android that transparently falls back to the APK's packaged assets/ (a
+// plain relative path can't reach those via libc fopen at all), and on
+// Emscripten it reads the virtual filesystem set up by --preload-file. On
+// desktop it behaves like a normal file read.
+bool readWholeFile(const std::string& path, std::string& outContents) {
+    SDL_RWops* rw = SDL_RWFromFile(path.c_str(), "rb");
+    if (rw == nullptr) {
+        return false;
+    }
+    Sint64 size = SDL_RWsize(rw);
+    if (size < 0) {
+        SDL_RWclose(rw);
+        return false;
+    }
+    outContents.resize(static_cast<size_t>(size));
+    size_t readBytes = SDL_RWread(rw, outContents.data(), 1, static_cast<size_t>(size));
+    SDL_RWclose(rw);
+    return readBytes == static_cast<size_t>(size);
+}
+
+}  // namespace
+
 bool EffectCatalog::loadFromFile(const std::string& path) {
-    std::ifstream file(path);
-    if (!file.is_open()) {
+    std::string contents;
+    if (!readWholeFile(path, contents)) {
         return false;
     }
 
     json root;
     try {
-        file >> root;
+        root = json::parse(contents);
     } catch (const json::parse_error&) {
         return false;
     }
