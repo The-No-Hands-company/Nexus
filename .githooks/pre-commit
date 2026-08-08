@@ -59,5 +59,23 @@ if ! HOOK_BIN="$(resolve_hook_bin)"; then
   exit 1
 fi
 
+# Scan against a baseline when the repo has one. detect-secrets inspects whole
+# staged files, not just the diff, so a single audited finding anywhere in a file
+# — a localhost test DSN, say — would otherwise block every future commit that
+# touches it. With a baseline, known findings are recorded and only NEW ones fail.
+# Regenerate after auditing:  detect-secrets scan > .secrets.baseline
+baseline_args=()
+if [[ -f "${REPO_ROOT}/.secrets.baseline" ]]; then
+  baseline_args=(--baseline "${REPO_ROOT}/.secrets.baseline")
+fi
+
+# The baseline records each finding as a SHA1 digest, which the scanner then
+# reports as a high-entropy string — so scanning the baseline with itself can
+# never pass. Exclude it; its contents are hashes, not secrets.
+scan_files=$(printf '%s\n' "${staged_files}" | grep -v '^\.secrets\.baseline$' || true)
+if [[ -z "${scan_files}" ]]; then
+  exit 0
+fi
+
 # shellcheck disable=SC2086
-"${HOOK_BIN}" ${staged_files}
+"${HOOK_BIN}" ${baseline_args[@]+"${baseline_args[@]}"} ${scan_files}
