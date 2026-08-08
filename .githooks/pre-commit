@@ -1,20 +1,61 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-HOOK_BIN="/run/media/zajferx/Data/dev/The-No-hands-Company/projects/Active/Nexus-Systems/.venv/bin/detect-secrets-hook"
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+
+resolve_hook_bin() {
+  if [[ -n "${DETECT_SECRETS_HOOK_BIN:-}" && -x "${DETECT_SECRETS_HOOK_BIN}" ]]; then
+    echo "${DETECT_SECRETS_HOOK_BIN}"
+    return 0
+  fi
+
+  if command -v detect-secrets-hook >/dev/null 2>&1; then
+    command -v detect-secrets-hook
+    return 0
+  fi
+
+  if [[ -x "${REPO_ROOT}/.venv/bin/detect-secrets-hook" ]]; then
+    echo "${REPO_ROOT}/.venv/bin/detect-secrets-hook"
+    return 0
+  fi
+
+  if [[ -x "${REPO_ROOT}/../.venv/bin/detect-secrets-hook" ]]; then
+    echo "${REPO_ROOT}/../.venv/bin/detect-secrets-hook"
+    return 0
+  fi
+
+  return 1
+}
 
 staged_files=$(git diff --cached --name-only --diff-filter=ACM)
 if [[ -z "${staged_files}" ]]; then
   exit 0
 fi
 
-if echo "${staged_files}" | rg -n '(^|/)\.env($|\.)|vite\.config\.ts\.timestamp-.*\.mjs$' >/dev/null; then
-  echo "Blocked: .env or vite timestamp temp file detected in staged changes."
+while IFS= read -r file; do
+  base="$(basename "$file")"
+  if [[ "$base" == ".env" ]]; then
+    echo "Blocked: .env file detected in staged changes."
+    exit 1
+  fi
+
+  if [[ "$base" == .env.* && "$base" != ".env.example" ]]; then
+    echo "Blocked: sensitive env file detected in staged changes: $base"
+    exit 1
+  fi
+done <<< "${staged_files}"
+
+if echo "${staged_files}" | rg -n 'vite\.config\.ts\.timestamp-.*\.mjs$' >/dev/null; then
+  echo "Blocked: vite timestamp temp file detected in staged changes."
   exit 1
 fi
 
-if [[ ! -x "${HOOK_BIN}" ]]; then
-  echo "Missing detect-secrets hook binary at ${HOOK_BIN}."
+if ! HOOK_BIN="$(resolve_hook_bin)"; then
+  echo "Missing detect-secrets hook binary."
+  echo "Install options:"
+  echo "  1) python -m pip install detect-secrets"
+  echo "  2) create ${REPO_ROOT}/.venv and install detect-secrets there"
+  echo "  3) set DETECT_SECRETS_HOOK_BIN=/absolute/path/to/detect-secrets-hook"
   exit 1
 fi
 

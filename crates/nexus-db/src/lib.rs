@@ -210,6 +210,21 @@ impl Database {
             return Ok(());
         };
 
+        // On a fresh database the `_sqlx_migrations` table does not exist yet;
+        // `MIGRATOR.run()` creates it afterwards. Nothing to reconcile there.
+        let table_exists = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS (\
+                SELECT 1 FROM information_schema.tables\
+                WHERE table_schema = ANY (current_schemas(false))\
+                  AND table_name = '_sqlx_migrations'\
+            )",
+        )
+        .fetch_one(&self.pool)
+        .await?;
+        if !table_exists {
+            return Ok(());
+        }
+
         let applied = sqlx::query_as::<_, (bool, Vec<u8>)>(
             "SELECT success, checksum FROM _sqlx_migrations WHERE version = $1",
         )
