@@ -1,8 +1,14 @@
+-- no-transaction
 -- Nexus SQLite Schema (lite mode)
 -- Single consolidated migration — covers all features.
 -- Types: TEXT for UUIDs/timestamps/JSON, INTEGER for booleans/bigints.
 -- No ENUMs: TEXT columns with CHECK constraints where meaningful.
 -- No PL/pgSQL triggers; no tsvector; no ARRAY types.
+--
+-- The `-- no-transaction` directive above is load-bearing. sqlx wraps each
+-- migration in a transaction by default, and SQLite refuses to switch journal
+-- modes inside one — `nexus serve --lite` died on first run with "cannot change
+-- into wal mode from within a transaction", so lite mode could never start.
 
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;

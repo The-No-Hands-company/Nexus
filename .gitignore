@@ -114,3 +114,7 @@ nexus.db
 nexus.db-*
 *.db-shm
 *.db-wal
+
+# Generated on first `nexus serve --lite` run and holds the JWT signing secret
+# (see generate_or_load_lite_secret in crates/nexus-server/src/main.rs).
+nexus.toml
