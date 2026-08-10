@@ -96,11 +96,26 @@ impl Database {
             }
             DbBackend::Sqlite => {
                 tracing::info!("Connecting to SQLite: {}", &config.database.url);
-                sqlx::any::AnyPoolOptions::new()
+                let pool = sqlx::any::AnyPoolOptions::new()
                     .max_connections(1)
                     .min_connections(1)
                     .connect(&config.database.url)
-                    .await?
+                    .await?;
+
+                // Applied here rather than in the migration: SQLite cannot
+                // change journal mode inside a transaction, sqlx wraps every
+                // migration in one, and the `Any` driver ignores the
+                // `-- no-transaction` directive that used to opt out. Running
+                // them on the live pool is also simply the right place —
+                // foreign_keys is per-connection state, not schema.
+                //
+                // Safe with max_connections(1): both settings apply to the one
+                // connection every query uses, and journal_mode persists in the
+                // database file regardless.
+                sqlx::query("PRAGMA journal_mode = WAL").execute(&pool).await?;
+                sqlx::query("PRAGMA foreign_keys = ON").execute(&pool).await?;
+
+                pool
             }
         };
 
@@ -213,10 +228,13 @@ impl Database {
         // On a fresh database the `_sqlx_migrations` table does not exist yet;
         // `MIGRATOR.run()` creates it afterwards. Nothing to reconcile there.
         let table_exists = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS (\
-                SELECT 1 FROM information_schema.tables\
-                WHERE table_schema = ANY (current_schemas(false))\
-                  AND table_name = '_sqlx_migrations'\
+            // Note the spaces before each '\': a Rust line continuation eats the
+            // newline AND the next line's indentation, so without them this
+            // collapses to "...information_schema.tablesWHERE table_schema...".
+            "SELECT EXISTS ( \
+                SELECT 1 FROM information_schema.tables \
+                WHERE table_schema = ANY (current_schemas(false)) \
+                  AND table_name = '_sqlx_migrations' \
             )",
         )
         .fetch_one(&self.pool)
@@ -241,20 +259,20 @@ impl Database {
         }
 
         let has_ratchet_column = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS (\
-                SELECT 1 FROM information_schema.columns\
-                WHERE table_name = 'encrypted_messages'\
-                  AND column_name = 'sender_ratchet_step'\
+            "SELECT EXISTS ( \
+                SELECT 1 FROM information_schema.columns \
+                WHERE table_name = 'encrypted_messages' \
+                  AND column_name = 'sender_ratchet_step' \
             )",
         )
         .fetch_one(&self.pool)
         .await?;
 
         let has_ratchet_index = sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS (\
-                SELECT 1 FROM pg_indexes\
-                WHERE schemaname = ANY (current_schemas(false))\
-                  AND indexname = 'idx_enc_msg_ratchet'\
+            "SELECT EXISTS ( \
+                SELECT 1 FROM pg_indexes \
+                WHERE schemaname = ANY (current_schemas(false)) \
+                  AND indexname = 'idx_enc_msg_ratchet' \
             )",
         )
         .fetch_one(&self.pool)

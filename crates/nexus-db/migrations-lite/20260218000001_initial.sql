@@ -1,17 +1,19 @@
--- no-transaction
 -- Nexus SQLite Schema (lite mode)
 -- Single consolidated migration — covers all features.
 -- Types: TEXT for UUIDs/timestamps/JSON, INTEGER for booleans/bigints.
 -- No ENUMs: TEXT columns with CHECK constraints where meaningful.
 -- No PL/pgSQL triggers; no tsvector; no ARRAY types.
 --
--- The `-- no-transaction` directive above is load-bearing. sqlx wraps each
--- migration in a transaction by default, and SQLite refuses to switch journal
--- modes inside one — `nexus serve --lite` died on first run with "cannot change
--- into wal mode from within a transaction", so lite mode could never start.
-
-PRAGMA journal_mode = WAL;
-PRAGMA foreign_keys = ON;
+-- `PRAGMA journal_mode = WAL` and `PRAGMA foreign_keys = ON` are deliberately
+-- NOT here. SQLite refuses to switch journal modes inside a transaction, and
+-- sqlx wraps every migration in one. A `-- no-transaction` directive used to
+-- head this file to opt out, but the `Any` driver does not honour it, so
+-- `nexus serve --lite` still died on first run with "cannot change into wal
+-- mode from within a transaction" and lite mode could never start.
+--
+-- Both pragmas are applied to the pool right after connecting instead — see
+-- Database::connect in ../src/lib.rs. That is also the correct place for
+-- foreign_keys, which is per-connection state rather than schema.
 
 -- ============================================================
 -- Users

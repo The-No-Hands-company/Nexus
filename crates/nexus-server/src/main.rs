@@ -224,15 +224,16 @@ async fn run_server(
                  random value: `openssl rand -hex 32`"
             );
         }
-        if config.auth.jwt_secret == "change-me"
-            || config.auth.jwt_secret == "secret"
-            || config.auth.jwt_secret == "nexus"
-            || config.auth.jwt_secret.starts_with("dev-")
+        // The literals below are the placeholders this check REJECTS, not
+        // credentials — hence the allowlist pragmas for the secret scanner.
+        if config.auth.jwt_secret == "change-me" // pragma: allowlist secret
+            || config.auth.jwt_secret == "secret" // pragma: allowlist secret
+            || config.auth.jwt_secret == "nexus" // pragma: allowlist secret
+            || config.auth.jwt_secret.starts_with("dev-") // pragma: allowlist secret
         {
+            let preview = &config.auth.jwt_secret[..config.auth.jwt_secret.len().min(8)];
             anyhow::bail!(
-                "JWT secret looks like a placeholder value ('{}...'). \
-                 Set a random secret: `openssl rand -hex 32`",
-                &config.auth.jwt_secret[..config.auth.jwt_secret.len().min(8)]
+                "JWT secret looks like a placeholder value ('{preview}...'). Set a random secret: `openssl rand -hex 32`" // pragma: allowlist secret
             );
         }
         tracing::info!(length = jwt_len, "JWT secret validated");
@@ -274,22 +275,29 @@ async fn run_server(
     };
 
     // ── Search ────────────────────────────────────────────────────────────────
-    let search = if !lite && !config.search.url.is_empty() {
+    // MeiliSearch when it is configured; otherwise the embedded Tantivy index.
+    //
+    // Full mode used to demand MeiliSearch whenever a URL was set and disable
+    // search entirely when it was not — so a self-hosted node without Meili got
+    // no search at all, even though the binary already ships an embedded engine
+    // that lite mode uses happily. Falling back to Tantivy keeps search working
+    // with no extra service to run, and clearing NEXUS__SEARCH__URL is now the
+    // way to opt out of MeiliSearch rather than the way to lose search.
+    let search = if !config.search.url.is_empty() {
         let s = SearchClient::new(&config.search.url, &config.search.api_key);
         s.bootstrap_indexes().await?;
         tracing::info!(subsystem = "search", backend = "meilisearch", url = %config.search.url, "search ready");
         s
-    } else if lite {
+    } else {
         let data_dir = &config.storage.data_dir;
         tracing::info!(
             subsystem = "search",
             backend = "tantivy",
             mode = "embedded",
+            lite,
             "search ready"
         );
         SearchClient::new_tantivy(data_dir)?
-    } else {
-        SearchClient::disabled()
     };
 
     // ── Federation ────────────────────────────────────────────────────────────
