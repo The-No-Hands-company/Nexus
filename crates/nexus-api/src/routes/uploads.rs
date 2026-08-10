@@ -355,10 +355,16 @@ async fn delete_attachment(
 // Helpers
 // ============================================================
 
-/// Strip path separators and null bytes from filenames.
+/// Strip path separators, drive/stream specifiers and control bytes from filenames.
+///
+/// ':' matters as much as the slashes: on Windows it separates a drive
+/// ("C:\path") and, on NTFS, an alternate data stream ("report.pdf:evil.exe"),
+/// so a name keeping it can still escape the intended file. Control characters
+/// go for the same reason '\0' did — they are never meaningful in a stored
+/// object key and they hide the real extension in logs and UIs.
 fn sanitize_filename(name: &str) -> String {
     name.chars()
-        .filter(|c| !matches!(c, '/' | '\\' | '\0'))
+        .filter(|c| !matches!(c, '/' | '\\' | ':') && !c.is_control())
         .take(255)
         .collect()
 }
@@ -443,6 +449,24 @@ fn mime_families_match(claimed: &str, sniffed: &'static str) -> bool {
     let claimed_family = claimed.split('/').next().unwrap_or("");
     let sniffed_family = sniffed.split('/').next().unwrap_or("");
     if claimed_family == sniffed_family && !claimed_family.is_empty() {
+        return true;
+    }
+    // Container formats carry either audio-only or audio+video, and magic bytes
+    // identify the container, not what is inside it — an OGG file sniffs as
+    // video/ogg whether or not it has a video stream. So audio/x and video/x
+    // describe the same file and must agree, even though their top-level types
+    // differ. The subtypes still have to match, so image/jpeg vs video/mp4
+    // stays rejected.
+    let (claimed_sub, sniffed_sub) = (
+        claimed.split('/').nth(1).unwrap_or(""),
+        sniffed.split('/').nth(1).unwrap_or(""),
+    );
+    let is_av = |f: &str| matches!(f, "audio" | "video");
+    if claimed_sub == sniffed_sub
+        && !claimed_sub.is_empty()
+        && is_av(claimed_family)
+        && is_av(sniffed_family)
+    {
         return true;
     }
     // ZIP is the container for many formats (docx, xlsx, jar…) — if sniffed

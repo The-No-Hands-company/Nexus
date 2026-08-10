@@ -9,14 +9,13 @@ use axum::{
     http::StatusCode,
     routing::{get, post},
 };
-use nexus_common::{
-    models::phantom::{PhantomIdentity, PhantomKeyPair, PhantomSecretKeys},
-};
-use serde::{Deserialize, Serialize};
+use nexus_common::models::phantom::PhantomKeyPair;
+use nexus_db::repository::phantom as phantom_repo;
+use serde::Serialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::{AppState, auth};
+use crate::{AppState, middleware::AuthContext};
 
 /// POST /api/users/@me/phantom — Generate a Phantom identity.
 /// Returns the public DID and base64-encoded public keys.
@@ -41,18 +40,16 @@ struct PhantomPublicResponse {
 /// Generate a Phantom identity for the authenticated user.
 async fn generate_phantom_identity(
     State(state): State<Arc<AppState>>,
-    Extension(auth_ctx): Extension<auth::AuthContext>,
+    Extension(auth): Extension<AuthContext>,
 ) -> Result<(StatusCode, Json<PhantomIdentityResponse>), StatusCode> {
-    let user_id = auth_ctx.user_id;
+    let user_id = auth.user_id;
+    let pool = &state.db.pool;
 
-    // Check if user already has a Phantom identity
-    let existing: Option<PhantomIdentity> = sqlx::query_as(
-        "SELECT user_id, did, kem_public, signing_public, created_at FROM phantom_identities WHERE user_id = $1"
-    )
-    .bind(user_id)
-    .fetch_optional(&state.db_pool)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    // Already has one? Generating again would orphan the existing key pair and
+    // silently invalidate every signature made with it, so return what exists.
+    let existing = phantom_repo::get_identity(pool, user_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     if let Some(identity) = existing {
         return Ok((
@@ -66,51 +63,40 @@ async fn generate_phantom_identity(
         ));
     }
 
-    // Generate new Phantom keys
-    let username = sqlx::query_scalar::<_, String>(
-        "SELECT username FROM users WHERE id = $1"
-    )
-    .bind(user_id)
-    .fetch_one(&state.db_pool)
-    .await
-    .map_err(|_| StatusCode::NOT_FOUND)?;
+    let username = sqlx::query_scalar::<_, String>("SELECT username FROM users WHERE id = $1::uuid")
+        .bind(user_id.to_string())
+        .fetch_one(pool)
+        .await
+        .map_err(|_| StatusCode::NOT_FOUND)?;
 
     let keys = PhantomKeyPair::generate(user_id, &username);
 
-    // Store identity in database
-    sqlx::query(
-        "INSERT INTO phantom_identities (user_id, did, kem_public, signing_public, created_at)
-         VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT (user_id) DO NOTHING"
-    )
-    .bind(keys.identity.user_id)
-    .bind(&keys.identity.did)
-    .bind(&keys.identity.kem_public)
-    .bind(&keys.identity.signing_public)
-    .bind(keys.identity.created_at)
-    .execute(&state.db_pool)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    // One statement writes the identity and its secrets together. This used to
+    // be an INSERT that omitted the secrets followed by a separate UPDATE that
+    // added them: a crash between the two left an identity whose keys could
+    // never be recovered, and whose DID was already published.
+    let stored = phantom_repo::insert_identity(pool, &keys.identity, &keys.secrets)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    // Store secret keys securely (encrypted at rest)
-    // In production: encrypt with VAULT_MASTER_KEY before storing
-    sqlx::query(
-        "UPDATE phantom_identities SET kem_secret = $1, signing_secret = $2 WHERE user_id = $3"
-    )
-    .bind(&keys.secrets.kem_secret)
-    .bind(&keys.secrets.signing_secret)
-    .bind(user_id)
-    .execute(&state.db_pool)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    // ON CONFLICT DO NOTHING yields no row when another request created the
+    // identity first; that request's keys are authoritative, so read them back
+    // rather than reporting keys we did not store.
+    let identity = match stored {
+        Some(identity) => identity,
+        None => phantom_repo::get_identity(pool, user_id)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?,
+    };
 
     Ok((
         StatusCode::CREATED,
         Json(PhantomIdentityResponse {
-            did: keys.identity.did,
-            kem_public: keys.identity.kem_public,
-            signing_public: keys.identity.signing_public,
-            created_at: keys.identity.created_at.to_rfc3339(),
+            did: identity.did,
+            kem_public: identity.kem_public,
+            signing_public: identity.signing_public,
+            created_at: identity.created_at.to_rfc3339(),
         }),
     ))
 }
@@ -120,13 +106,9 @@ async fn get_user_phantom(
     State(state): State<Arc<AppState>>,
     Path(user_id): Path<Uuid>,
 ) -> Result<Json<PhantomPublicResponse>, StatusCode> {
-    let identity: Option<PhantomIdentity> = sqlx::query_as(
-        "SELECT user_id, did, kem_public, signing_public, created_at FROM phantom_identities WHERE user_id = $1"
-    )
-    .bind(user_id)
-    .fetch_optional(&state.db_pool)
-    .await
-    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let identity = phantom_repo::get_identity(&state.db.pool, user_id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
     match identity {
         Some(id) => Ok(Json(PhantomPublicResponse {

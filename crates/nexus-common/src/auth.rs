@@ -42,9 +42,25 @@ pub fn validate_token(token: &str, secret: &str) -> Result<Claims, jsonwebtoken:
     let token_data = decode::<Claims>(
         token,
         &DecodingKey::from_secret(secret.as_bytes()),
-        &Validation::default(),
+        &validation(),
     )?;
     Ok(token_data.claims)
+}
+
+/// Clock-skew allowance when checking `exp`, in seconds.
+///
+/// Zero, set explicitly. `Validation::default()` allows **60 seconds**, which
+/// silently extends the life of every token — including access tokens whose
+/// short expiry is the whole revocation story — by a full minute past its
+/// stated `exp`. These are first-party tokens: the same instance signs and
+/// validates them, so there is no clock to skew against and no reason to
+/// accept one after it expires.
+const LEEWAY_SECS: u64 = 0;
+
+fn validation() -> Validation {
+    let mut v = Validation::default();
+    v.leeway = LEEWAY_SECS;
+    v
 }
 
 #[cfg(test)]
@@ -108,6 +124,24 @@ mod tests {
         // exp in the past
         let token = encode_claims(&make_claims("access", -10), SECRET);
         assert!(validate_token(&token, SECRET).is_err());
+    }
+
+    #[test]
+    fn expiry_is_enforced_without_leeway() {
+        // Guards against a silent return to Validation::default(), whose 60s
+        // allowance kept every token valid for a minute past exp — which is
+        // exactly what made expired_token_rejected fail.
+        for expired_by in [1_i64, 5, 30, 59] {
+            let token = encode_claims(&make_claims("access", -expired_by), SECRET);
+            assert!(
+                validate_token(&token, SECRET).is_err(),
+                "token expired {expired_by}s ago must be rejected",
+            );
+        }
+
+        // A token that has not expired still validates.
+        let live = encode_claims(&make_claims("access", 3600), SECRET);
+        assert!(validate_token(&live, SECRET).is_ok());
     }
 
     #[test]

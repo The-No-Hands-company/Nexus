@@ -19,7 +19,18 @@ use crate::{AppState, auth};
 fn normalize_path(path: &str) -> String {
     // Try to use the matched route pattern from Axum (`:id` placeholders)
     // before falling back to raw prefix truncation.
-    path.split('/').take(4).collect::<Vec<_>>().join("/")
+    //
+    // Splitting a rooted path yields a leading empty segment ("/a/b" ->
+    // ["", "a", "b"]), so a plain take(4) spent one of its four on that empty
+    // string and kept only three real ones. Filter the empties out and rebuild,
+    // so "four segments" means what the name and the tests say it means.
+    let kept: String = path
+        .split('/')
+        .filter(|s| !s.is_empty())
+        .take(4)
+        .map(|s| format!("/{s}"))
+        .collect();
+    if kept.is_empty() { "/".to_owned() } else { kept }
 }
 
 /// Record per-request Prometheus counters and latency histograms.
@@ -759,10 +770,19 @@ mod tests {
     #[tokio::test]
     async fn rate_limit_local_window_resets_after_expiry() {
         let key = format!("test:reset:{}", uuid::Uuid::new_v4());
-        // Exhaust a limit with a 0-second window (already expired by next call)
-        check_rate_limit_local(&key, 1, 0).await.unwrap();
-        // A 0-second window resets immediately — next call should succeed
-        let result = check_rate_limit_local(&key, 1, 0).await;
+
+        // This used to pass window_secs = 0 and expect an instant reset, but
+        // check_rate_limit_local clamps the window with .max(1) precisely so a
+        // misconfigured zero cannot disable rate limiting. Wait out a real
+        // window instead — that is the property worth holding.
+        check_rate_limit_local(&key, 1, 1).await.unwrap();
+        check_rate_limit_local(&key, 1, 1)
+            .await
+            .expect_err("second call inside the window must be limited");
+
+        tokio::time::sleep(Duration::from_millis(1_100)).await;
+
+        let result = check_rate_limit_local(&key, 1, 1).await;
         assert!(result.is_ok(), "window should have reset");
     }
 }

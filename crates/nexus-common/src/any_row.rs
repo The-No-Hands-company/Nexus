@@ -48,6 +48,7 @@ use crate::models::{
         UserXp,
     },
     member::Member,
+    phantom::PhantomIdentity,
     multimedia::{
         Drawing, MediaGalleryFilter, Story, StoryView, VideoNote, VoiceMusicQueueItem, VoiceNote,
         VoiceSettings,
@@ -2086,6 +2087,20 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for MigrationGuide {
             author_id: opt_uuid(row, "author_id")?,
             created_at: dt(row, "created_at")?,
             updated_at: dt(row, "updated_at")?,
+        })
+    }
+}
+
+// ── PhantomIdentity ───────────────────────────────────────────────────────────
+
+impl<'r> sqlx::FromRow<'r, AnyRow> for PhantomIdentity {
+    fn from_row(row: &'r AnyRow) -> Result<Self, sqlx::Error> {
+        Ok(PhantomIdentity {
+            user_id: uuid(row, "user_id")?,
+            did: row.try_get("did")?,
+            kem_public: row.try_get("kem_public")?,
+            signing_public: row.try_get("signing_public")?,
+            created_at: dt(row, "created_at")?,
         })
     }
 }

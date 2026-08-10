@@ -141,60 +141,22 @@ fn base64_decode(s: &str) -> Vec<u8> {
     base64::engine::general_purpose::STANDARD.decode(s).unwrap_or_default()
 }
 
-/// Sign a message with the user's Phantom identity and return (did, signature_base64).
-/// Call this after `messages::create_message()` in the send_message route.
-///
-/// Usage in send_message route:
-/// ```ignore
-/// if let Ok(Some(secrets)) = nexus_db::repository::phantom::get_secret_keys(&state.db.pool, auth.user_id).await {
-///     if let Some((did, sig)) = phantom::sign_and_store(&state.db.pool, msg.id, &secrets.signing_secret, &msg.content).await.ok() {
-///         // Attach to message response
-///     }
-/// }
-/// ```
-pub async fn sign_message_content(
-    pool: &sqlx::AnyPool,
-    user_id: Uuid,
-    content: &str,
-) -> Option<(String, String)> {
-    // Get user's Phantom secret keys
-    let secrets = crate::phantom_secret_keys(pool, user_id).await.ok()??;
-    let sig_bytes = sign_message(&secrets.signing_secret, content.as_bytes())?;
-    let identity = crate::phantom_identity(pool, user_id).await.ok()??;
-
-    // Store signature in phantom_message_sigs table
-    let _ = sqlx::query(
-        "INSERT INTO phantom_message_sigs (message_id, user_id, phantom_did, signature, created_at)
-         VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
-         ON CONFLICT (message_id) DO NOTHING"
-    )
-    .bind(user_id)
-    .bind(&identity.did)
-    .bind(&sig_bytes)
-    .execute(pool)
-    .await;
-
-    Some((identity.did, base64::engine::general_purpose::STANDARD.encode(&sig_bytes)))
-}
-
-// DB helpers (internal)
-#[allow(dead_code)]
-async fn phantom_identity(pool: &sqlx::AnyPool, user_id: Uuid) -> Result<Option<crate::PhantomIdentity>, sqlx::Error> {
-    sqlx::query_as("SELECT user_id, did, kem_public, signing_public, created_at FROM phantom_identities WHERE user_id = $1")
-        .bind(user_id)
-        .fetch_optional(pool)
-        .await
-}
-
-#[allow(dead_code)]
-async fn phantom_secret_keys(pool: &sqlx::AnyPool, user_id: Uuid) -> Result<Option<crate::PhantomSecretKeys>, sqlx::Error> {
-    struct Row { user_id: Uuid, kem_secret: Option<Vec<u8>>, signing_secret: Option<Vec<u8>> }
-    let row: Option<Row> = sqlx::query_as("SELECT user_id, kem_secret, signing_secret FROM phantom_identities WHERE user_id = $1")
-        .bind(user_id).fetch_optional(pool).await?;
-    Ok(row.and_then(|r| Some(crate::PhantomSecretKeys {
-        user_id: r.user_id, kem_secret: r.kem_secret?, signing_secret: r.signing_secret?,
-    })))
-}
+// Database access for Phantom identities deliberately does NOT live here.
+// nexus-common is the foundation layer — "no business logic, just primitives and
+// contracts" — and it sits below nexus-db, so it has no business issuing
+// queries. The storage side is nexus_db::repository::phantom:
+// `get_identity`, `get_secret_keys`, `insert_identity`, `delete_identity`.
+//
+// This module previously also carried sign_message_content() plus private
+// phantom_identity()/phantom_secret_keys() helpers. They had never compiled
+// (they referenced their own module through `crate::`, bound Uuid values to an
+// AnyPool that has no Uuid encoder, and declared a row struct with no
+// FromRow<AnyRow> impl) and had no callers anywhere in the workspace; their own
+// doc comment pointed at nexus_db::repository::phantom for the real thing.
+// Their INSERT was also unwritable as specified: it names message_id but the
+// function took no message_id, supplying three binds for four placeholders.
+// Signing-on-send belongs next to the other queries in nexus-db, built on
+// get_secret_keys() and the pure sign_message() above.
 
 #[cfg(test)]
 mod tests {
