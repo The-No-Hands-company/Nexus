@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
-import { useStore, bootstrapSession } from "./store";
+import { useStore, bootstrapSession, lastBootstrapReason } from "./store";
 
 /**
  * Where to send someone who is not signed in.
@@ -65,6 +65,10 @@ export default function App() {
         <a className="rounded bg-blue-600 px-4 py-2 text-white" href={signInHref()}>
           Sign in
         </a>
+        {/* Say why. A dead end with no reason is one nobody can report usefully. */}
+        {lastBootstrapReason && (
+          <p className="max-w-lg px-4 text-center text-xs opacity-60">{lastBootstrapReason}</p>
+        )}
       </div>
     );
   }

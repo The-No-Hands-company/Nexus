@@ -166,14 +166,27 @@ export function authHeaders(_session: Session | null): HeadersInit {
  * let it through, it already attached a verified identity, so a 200 here *is*
  * the sign-in. A 401 means the gate will redirect on the next navigation.
  */
+/**
+ * Why the last bootstrap did not produce a session.
+ *
+ * Kept because "Not signed in" with no explanation is undiagnosable from the
+ * outside: the server can be returning 200 to curl while the browser sees
+ * something else entirely, and without this there is no way to tell which.
+ */
+export let lastBootstrapReason: string | null = null;
+
 export async function bootstrapSession(): Promise<Session | null> {
   const origin = currentServerOrigin();
+  lastBootstrapReason = null;
   try {
     const res = await fetch(`${origin}/api/v1/users/@me`, {
       headers: { "Content-Type": "application/json" },
       credentials: "include",
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      lastBootstrapReason = `${origin}/api/v1/users/@me returned ${res.status}`;
+      return null;
+    }
     const body = await res.json();
     const user = body.user ?? body;
     return {
@@ -187,7 +200,12 @@ export async function bootstrapSession(): Promise<Session | null> {
       bio: user.bio ?? null,
       status: user.status ?? null,
     };
-  } catch {
+  } catch (err) {
+    // A redirect to the sign-in host counts as a network error here, because
+    // the page's own CSP (connect-src 'self') refuses to follow it.
+    lastBootstrapReason = `request to ${origin} failed: ${
+      err instanceof Error ? err.message : String(err)
+    }`;
     return null;
   }
 }
