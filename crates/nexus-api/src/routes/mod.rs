@@ -1,6 +1,5 @@
 //! API route modules.
 
-pub mod auth;
 pub mod bots;
 pub mod channels;
 pub mod directory;
@@ -12,7 +11,6 @@ pub mod experience;
 pub mod extensibility;
 pub mod federation;
 pub mod files;
-pub mod password_reset;
 pub mod phantom;
 // v0.8.5 Federation UX — admin management endpoints
 pub mod bookmarks;
@@ -34,7 +32,6 @@ pub mod sessions;
 pub mod slash_commands;
 pub mod stages;
 pub mod threads;
-pub mod two_fa;
 pub mod uploads;
 pub mod users;
 pub mod verification;

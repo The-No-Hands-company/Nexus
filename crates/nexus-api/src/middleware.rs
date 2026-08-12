@@ -8,7 +8,7 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
-use crate::{AppState, auth};
+use crate::AppState;
 
 // ── HTTP metrics middleware ──────────────────────────────────────────────────
 
@@ -72,8 +72,9 @@ pub async fn record_request_metrics(request: Request, next: Next) -> Response {
 
 /// Authentication context extracted from the Authorization header.
 ///
-/// Populated by either `auth_middleware` (JWT Bearer tokens for human users)
-/// or `combined_auth_middleware` (supports both JWT Bearer and `Bot <token>`).
+/// Populated by `identity_middleware` (the ecosystem identity header) or by
+/// `combined_auth_middleware`, which accepts that same header for users and
+/// `Bot <token>` for bot applications.
 #[derive(Debug, Clone)]
 pub struct AuthContext {
     pub user_id: uuid::Uuid,
@@ -153,132 +154,6 @@ fn sha256_hex(input: &str) -> String {
     format!("{:x}", h.finalize())
 }
 
-// ── JWT-only middleware (user routes that bots must not access) ──────────────
-
-/// Extract and validate the JWT from the `Authorization: Bearer <token>` header.
-///
-/// Use this middleware on routes that must only be called by human users (e.g.
-/// login, registration, token refresh).  For routes that both users AND bots may
-/// call, use `combined_auth_middleware` instead.
-pub async fn auth_middleware(mut request: Request, next: Next) -> Result<Response, NexusError> {
-    let auth_header = request
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .ok_or(NexusError::Unauthorized)?;
-
-    let token = auth_header
-        .strip_prefix("Bearer ")
-        .ok_or(NexusError::Unauthorized)?;
-
-    let config = nexus_common::config::get();
-    let claims = auth::validate_token(token, &config.auth.jwt_secret)
-        .map_err(|_| NexusError::InvalidToken)?;
-
-    // Ensure it's an access token, not a refresh token
-    if claims.token_type != "access" {
-        return Err(NexusError::InvalidToken);
-    }
-
-    let user_id = claims
-        .sub
-        .parse::<uuid::Uuid>()
-        .map_err(|_| NexusError::InvalidToken)?;
-
-    let session_id = claims.jti.parse::<uuid::Uuid>().ok();
-
-    // ── Session revocation check ──────────────────────────────────────────────
-    // Validate the JWT's `jti` claim against the active sessions table so that
-    // logout (which deletes the session row) actually invalidates the token
-    // before its cryptographic expiry.
-    //
-    // We cache the result in Redis with a TTL of 60 seconds to bound the DB
-    // fanout while keeping the revocation window short:
-    //   - Tokens expire in 15 minutes (ACCESS_TOKEN_TTL_SECS = 900)
-    //   - Revoked tokens stay valid for at most 60 extra seconds
-    //   - Each unique session_id is looked up from Redis, not DB, on hot paths
-    //
-    // Tokens issued before jti support (jti == "") bypass this check — they
-    // expire naturally and can no longer be issued.
-    if let Some(sid) = session_id {
-        let state = request
-            .extensions()
-            .get::<std::sync::Arc<AppState>>()
-            .cloned();
-
-        if let Some(state) = state {
-            // Fast path: check Redis cache first
-            let cache_key = format!("sess:active:{sid}");
-            let cached = if let Some(ref redis) = state.db.redis {
-                let mut conn = redis.clone();
-                let val: Option<String> = redis::AsyncCommands::get(&mut conn, &cache_key)
-                    .await
-                    .unwrap_or(None);
-                val
-            } else {
-                None
-            };
-
-            let is_active = match cached.as_deref() {
-                Some("1") => true,
-                Some("0") => false,
-                None => {
-                    // Cache miss — query DB
-                    let exists = nexus_db::repository::sessions::session_exists(
-                        &state.db.pool,
-                        sid,
-                        user_id,
-                    )
-                    .await
-                    .unwrap_or(true); // fail open on DB error to avoid locking out all users
-
-                    // Cache result for 60 seconds
-                    if let Some(ref redis) = state.db.redis {
-                        let mut conn = redis.clone();
-                        let val = if exists { "1" } else { "0" };
-                        let _: Result<(), _> =
-                            redis::AsyncCommands::set_ex(&mut conn, &cache_key, val, 60u64).await;
-                    }
-
-                    exists
-                }
-                _ => true,
-            };
-
-            if !is_active {
-                return Err(NexusError::InvalidToken);
-            }
-        }
-    }
-
-    let two_fa_verified = claims.two_fa_verified;
-    let email_verified = claims.email_verified;
-
-    let auth_ctx = AuthContext {
-        user_id,
-        username: claims.username,
-        is_bot: false,
-        session_id,
-        two_fa_verified,
-        email_verified,
-        flags: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
-    };
-
-    // Insert auth context into request extensions for handlers to use
-    request.extensions_mut().insert(auth_ctx.clone());
-
-    // Email verification gate (same policy as combined_auth_middleware)
-    let config = nexus_common::config::get();
-    if config.features.require_email_verification && !auth_ctx.email_verified {
-        let path = request.uri().path();
-        if !path.contains("/auth/") && !path.starts_with("/health") {
-            return Err(NexusError::Forbidden);
-        }
-    }
-
-    Ok(next.run(request).await)
-}
-
 // ── Combined auth middleware (users + bots) ──────────────────────────────────
 
 /// Accept **either** `Authorization: Bearer <jwt>` (human users) **or**
@@ -294,11 +169,16 @@ pub async fn combined_auth_middleware(
     mut request: Request,
     next: Next,
 ) -> Result<Response, NexusError> {
+    // Optional, and only ever inspected for a `Bot ` prefix. It used to be
+    // mandatory, because every caller was expected to present a local JWT here.
+    // Users now arrive with no Authorization header at all — the proxy puts
+    // their identity in X-Nexus-Identity — so requiring it rejected every real
+    // user before the identity branch below could run.
     let auth_header = request
         .headers()
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
-        .ok_or(NexusError::Unauthorized)?
+        .unwrap_or_default()
         .to_owned();
 
     let auth_ctx = if let Some(raw_token) = auth_header.strip_prefix("Bot ") {
@@ -328,37 +208,16 @@ pub async fn combined_auth_middleware(
             flags: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
         }
     } else {
-        // ── JWT Bearer authentication ─────────────────────────────────────
-        let token = auth_header
-            .strip_prefix("Bearer ")
+        // ── Ecosystem identity ────────────────────────────────────────────
+        // Not a local JWT. This server no longer issues credentials; the proxy
+        // authenticates the browser and forwards a short-lived signed token.
+        // The Authorization header is only still read above, for `Bot `.
+        let state = request
+            .extensions()
+            .get::<Arc<AppState>>()
+            .cloned()
             .ok_or(NexusError::Unauthorized)?;
-
-        let config = nexus_common::config::get();
-        let claims = auth::validate_token(token, &config.auth.jwt_secret)
-            .map_err(|_| NexusError::InvalidToken)?;
-
-        if claims.token_type != "access" {
-            return Err(NexusError::InvalidToken);
-        }
-
-        let user_id = claims
-            .sub
-            .parse::<uuid::Uuid>()
-            .map_err(|_| NexusError::InvalidToken)?;
-
-        let session_id = claims.jti.parse::<uuid::Uuid>().ok();
-        let two_fa_verified = claims.two_fa_verified;
-        let email_verified = claims.email_verified;
-
-        AuthContext {
-            user_id,
-            username: claims.username,
-            is_bot: false,
-            session_id,
-            two_fa_verified,
-            email_verified,
-            flags: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
-        }
+        identity_context(request.headers(), state).await?
     };
 
     request.extensions_mut().insert(auth_ctx.clone());
@@ -787,71 +646,39 @@ mod tests {
     }
 }
 
-// ── Ecosystem identity middleware ────────────────────────────────────────────
+// ── Ecosystem identity ───────────────────────────────────────────────────────
 
-/// The header the ecosystem proxy puts a verified user's identity token in.
-pub const IDENTITY_HEADER: &str = "x-nexus-identity";
+pub use nexus_common::identity::IDENTITY_HEADER;
 
-/// Process-wide JWKS cache for Auth's signing keys.
+/// Verify the identity header and turn it into an `AuthContext`.
 ///
-/// One per process rather than one per request: the point of the cache is to
-/// avoid refetching keys, which a per-request instance would defeat entirely.
-fn identity_keys() -> &'static crate::identity::JwksCache {
-    static KEYS: OnceLock<crate::identity::JwksCache> = OnceLock::new();
-    KEYS.get_or_init(|| {
-        let base = std::env::var("NEXUS_AUTH_INTERNAL_URL")
-            .unwrap_or_else(|_| "http://127.0.0.1:4310".to_string());
-        crate::identity::JwksCache::from_auth_base_url(&base)
-    })
-}
-
-/// Authenticate a request from the ecosystem identity header.
-///
-/// Replaces this server's own login: accounts live in Nexus-Auth, the proxy
-/// authenticates the browser, and what arrives here is a ~120-second RS256
-/// token naming the user. A local row is provisioned on first sight so that
-/// messages, memberships and every other foreign key have something to point
-/// at.
-///
-/// The `Authorization` header is deliberately **not** consulted. Leaving that
-/// path alive would mean a locally-minted JWT still authenticated, which is the
-/// whole thing this replaces — the gate at the proxy would be bypassable by
-/// anyone holding an old token.
+/// Shared by `identity_middleware` and the user branch of
+/// `combined_auth_middleware` so the two cannot drift — a difference between
+/// them would be a difference in who gets in.
 ///
 /// `session_id` is `None` on purpose. Revocation lives at the proxy and in
-/// Auth now, and these tokens expire in two minutes; keeping the local session
-/// table in the path would mean maintaining a second revocation system that
-/// nothing writes to, and failing open when it is empty.
-pub async fn identity_middleware(
-    mut request: Request,
-    next: Next,
-) -> Result<Response, NexusError> {
-    let token = request
-        .headers()
-        .get(IDENTITY_HEADER)
-        .and_then(|v| v.to_str().ok())
-        .map(str::to_owned)
-        .ok_or(NexusError::Unauthorized)?;
-
+/// Auth now, and these tokens expire in ~120 seconds; keeping the local
+/// session table in the path would mean maintaining a second revocation system
+/// that nothing writes to and that fails open when empty.
+///
+/// Takes the headers and state rather than the `Request` itself: holding a
+/// `&Request` across an await makes the whole middleware future non-Send,
+/// because `axum::body::Body` is not Sync, and `from_fn` then silently fails
+/// its `Service` bound at every call site.
+async fn identity_context(
+    headers: &axum::http::HeaderMap,
+    state: Arc<AppState>,
+) -> Result<AuthContext, NexusError> {
     let config = nexus_common::config::get();
     // The audience is this server's public name. Auth mints the token for the
     // host the browser asked for, so checking it here is what stops a token
-    // minted for another app in the ecosystem from being replayed at this one.
-    let audience = config.server.name.clone();
-
-    let claims = identity_keys()
-        .verify(&token, &audience)
+    // minted for another app in the ecosystem being replayed at this one.
+    let claims = nexus_common::identity::verify_header(headers, &config.server.name)
         .await
         .map_err(|e| {
             tracing::debug!(error = %e, "rejected identity token");
-            NexusError::InvalidToken
+            NexusError::Unauthorized
         })?;
-
-    let state = request
-        .extensions()
-        .get::<Arc<AppState>>()
-        .cloned()
-        .ok_or(NexusError::Unauthorized)?;
 
     let user_id = nexus_db::repository::users::provision_from_identity(
         &state.db.pool,
@@ -865,7 +692,7 @@ pub async fn identity_middleware(
         NexusError::Database(e)
     })?;
 
-    request.extensions_mut().insert(AuthContext {
+    Ok(AuthContext {
         user_id,
         username: claims.username,
         is_bot: false,
@@ -876,8 +703,31 @@ pub async fn identity_middleware(
         two_fa_verified: true,
         email_verified: true,
         flags: Arc::new(Mutex::new(None)),
-    });
+    })
+}
 
+/// Authenticate a request from the ecosystem identity header.
+///
+/// Replaces this server's own login: accounts live in Nexus-Auth, the proxy
+/// authenticates the browser, and what arrives here is a short-lived RS256
+/// token naming the user. A local row is provisioned on first sight so that
+/// messages, memberships and every other foreign key have something to point
+/// at.
+///
+/// The `Authorization` header is deliberately not consulted. Leaving that path
+/// alive would mean a locally-minted JWT still authenticated, which is the
+/// whole thing this replaces.
+pub async fn identity_middleware(
+    mut request: Request,
+    next: Next,
+) -> Result<Response, NexusError> {
+    let state = request
+        .extensions()
+        .get::<Arc<AppState>>()
+        .cloned()
+        .ok_or(NexusError::Unauthorized)?;
+    let auth_ctx = identity_context(request.headers(), state).await?;
+    request.extensions_mut().insert(auth_ctx);
     Ok(next.run(request).await)
 }
 
@@ -942,6 +792,30 @@ mod identity_middleware_tests {
             .unwrap();
 
         assert_eq!(status_for(req).await, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn combined_auth_also_refuses_a_local_bearer_token() {
+        // combined_auth_middleware guards 62 routers — nearly the whole API.
+        // It used to accept a locally-minted JWT here. If that branch ever
+        // came back, this server would have a second credential system and the
+        // proxy's gate would be bypassable by anyone holding an old token.
+        let app = Router::new()
+            .route("/probe", get(|| async { "reached the handler" }))
+            .layer(axum::middleware::from_fn(combined_auth_middleware));
+
+        ensure_config();
+        let req = Request::builder()
+            .uri("/probe")
+            .header(
+                header::AUTHORIZATION,
+                format!("Bearer {}.{}.{}", "eyJhbGciOiJIUzI1NiJ9", "e30", "sig"),
+            )
+            .body(Body::empty())
+            .unwrap();
+
+        let status = app.oneshot(req).await.expect("router responds").status();
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
     }
 
     #[tokio::test]

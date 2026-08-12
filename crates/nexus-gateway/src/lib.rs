@@ -22,7 +22,7 @@ use axum::{
         State, WebSocketUpgrade,
         ws::{Message, WebSocket},
     },
-    response::Response,
+    response::{IntoResponse, Response},
     routing::get,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -82,8 +82,16 @@ struct RedisGatewayEnvelope {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op", content = "d")]
 pub enum GatewayMessage {
-    /// Client → Server: Authenticate with access token (human users — sends JWT)
-    Identify { token: String },
+    /// Client → Server: begin a user session.
+    ///
+    /// Carries no credential. The user was already authenticated by the
+    /// ecosystem proxy, which put a signed identity token on the upgrade
+    /// request; this server verified it before the socket existed. `token` is
+    /// accepted and ignored so older clients still parse.
+    Identify {
+        #[serde(default)]
+        token: Option<String>,
+    },
 
     /// Client → Server: Bot-specific identify.
     ///
@@ -311,13 +319,61 @@ fn setup_redis_fanout_bridge(state: &GatewayState) {
     }
 }
 
+/// Who the proxy says is on the other end of this socket.
+#[derive(Clone)]
+struct GatewayIdentity {
+    user_id: uuid::Uuid,
+    username: String,
+}
+
 /// WebSocket upgrade handler.
-async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<GatewayState>>) -> Response {
-    ws.on_upgrade(move |socket| handle_connection(socket, state))
+///
+/// Authentication happens here, on the HTTP upgrade, not inside the socket.
+/// That is the only point where the proxy's `X-Nexus-Identity` header exists —
+/// and doing it here means an unauthenticated client never gets a WebSocket at
+/// all, rather than one it can hold open while trying things.
+async fn ws_handler(
+    ws: WebSocketUpgrade,
+    headers: axum::http::HeaderMap,
+    State(state): State<Arc<GatewayState>>,
+) -> Response {
+    let config = nexus_common::config::get();
+    let claims = match nexus_common::identity::verify_header(&headers, &config.server.name).await {
+        Ok(claims) => claims,
+        Err(e) => {
+            tracing::debug!(error = %e, "Gateway: rejected upgrade, no valid identity");
+            return (axum::http::StatusCode::UNAUTHORIZED, "unauthorized").into_response();
+        }
+    };
+
+    let user_id = match nexus_db::repository::users::provision_from_identity(
+        &state.db.pool,
+        &claims.sub,
+        &claims.username,
+        Some(claims.email.as_str()),
+    )
+    .await
+    {
+        Ok(id) => id,
+        Err(e) => {
+            tracing::error!(error = %e, "Gateway: failed to provision user from identity");
+            return (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "provisioning failed",
+            )
+                .into_response();
+        }
+    };
+
+    let identity = GatewayIdentity {
+        user_id,
+        username: claims.username,
+    };
+    ws.on_upgrade(move |socket| handle_connection(socket, state, identity))
 }
 
 /// Handle a single WebSocket connection.
-async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
+async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>, identity: GatewayIdentity) {
     let (mut sender, mut receiver) = socket.split();
 
     let session_id = uuid::Uuid::new_v4().to_string();
@@ -434,13 +490,14 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
                     continue;
                 };
                 match gateway_msg {
-                    GatewayMessage::Identify { token } => {
-                        let config = nexus_common::config::get();
-                        match nexus_common::auth::validate_token(&token, &config.auth.jwt_secret) {
-                            Ok(claims) => {
-                                let Ok(uid) = claims.sub.parse::<uuid::Uuid>() else {
-                                    continue;
-                                };
+                    GatewayMessage::Identify { token: _ } => {
+                        // The identity was established on the upgrade request.
+                        // Whatever the client sent here is not a credential and
+                        // is deliberately not consulted.
+                        {
+                            {
+                                let uid = identity.user_id;
+                                let username = identity.username.clone();
 
                                 // Reject suspended or disabled accounts before doing anything else.
                                 let account_ok = match nexus_db::repository::users::find_by_id(
@@ -484,7 +541,7 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
 
                                 // Build READY payload (servers + channels + read states)
                                 let ready_data =
-                                    build_ready_payload(&state, uid, &session_id, &claims.username)
+                                    build_ready_payload(&state, uid, &session_id, &username)
                                         .await;
 
                                 // Populate subscribed server list BEFORE sender task
@@ -531,17 +588,9 @@ async fn handle_connection(socket: WebSocket, state: Arc<GatewayState>) {
 
                                 tracing::info!(
                                     session = %session_id,
-                                    user = %claims.username,
+                                    user = %username,
                                     "Gateway READY sent"
                                 );
-                            }
-                            Err(_) => {
-                                let _ = direct_tx
-                                    .send(serde_json::json!({
-                                        "op": "InvalidSession",
-                                        "d": null,
-                                    }))
-                                    .await;
                             }
                         }
                     }

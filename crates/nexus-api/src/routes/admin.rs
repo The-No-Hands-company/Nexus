@@ -33,7 +33,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/admin/instance-audit", get(get_instance_audit))
         .route("/admin/users/{id}", patch(update_user_flags))
         .route("/admin/servers/{id}", delete(delete_server))
-        .route_layer(middleware::from_fn(crate::middleware::auth_middleware))
+        .route_layer(middleware::from_fn(crate::middleware::identity_middleware))
 }
 
 // ── Auth guard ────────────────────────────────────────────────────────────────

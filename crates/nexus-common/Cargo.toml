@@ -24,6 +24,9 @@ axum = { workspace = true }
 sqlx = { workspace = true }
 redis = { workspace = true }
 jsonwebtoken = { workspace = true }
+# Fetching Auth's JWKS, and the RwLock guarding the key cache.
+reqwest = { workspace = true }
+tokio = { workspace = true }
 regex = "1.11"
 sha2 = { workspace = true }
 base64 = { workspace = true }
@@ -34,4 +37,8 @@ pqcrypto-dilithium = "0.5"
 pqcrypto-traits = "0.3"
 
 [dev-dependencies]
-tokio = { workspace = true }
+# Generates the throwaway RSA keypair the identity tests sign with, so no
+# private key material lives in the source of a public repo.
+rsa = "0.9"
+rand_core = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

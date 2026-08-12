@@ -154,7 +154,8 @@ pub async fn purge_expired(pool: &sqlx::AnyPool) -> Result<u64, sqlx::Error> {
 /// invalidates the token before its cryptographic expiry.
 ///
 /// The result is intentionally NOT cached at this layer; callers use Redis for
-/// short-lived caching (see `crate::middleware::auth_middleware`).
+/// short-lived caching. No longer read on the request path: user sessions
+/// live in Nexus-Auth now and identity tokens expire in ~120 seconds.
 pub async fn session_exists(
     pool: &sqlx::AnyPool,
     session_id: Uuid,

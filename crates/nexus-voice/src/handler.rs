@@ -24,7 +24,7 @@ use axum::{
         State, WebSocketUpgrade,
         ws::{Message, WebSocket},
     },
-    response::Response,
+    response::{IntoResponse, Response},
     routing::get,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -50,7 +50,11 @@ pub struct VoiceServerState {
 pub enum VoiceSignal {
     // === Client → Server ===
     /// Authenticate with JWT token.
-    Identify { token: String },
+    /// Begin a voice session. Carries no credential — see `ws_handler`.
+    Identify {
+        #[serde(default)]
+        token: Option<String>,
+    },
 
     /// Join a voice channel.
     Join {
@@ -155,13 +159,64 @@ pub fn build_router(state: VoiceServerState) -> Router {
         .with_state(Arc::new(state))
 }
 
+/// Who the proxy says is on the other end of this socket.
+#[derive(Clone)]
+struct VoiceIdentity {
+    user_id: Uuid,
+    username: String,
+}
+
 /// WebSocket upgrade handler.
-async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<VoiceServerState>>) -> Response {
-    ws.on_upgrade(move |socket| handle_voice_connection(socket, state))
+///
+/// Authentication happens on the HTTP upgrade, where the proxy's
+/// `X-Nexus-Identity` header exists — an unauthenticated client never gets a
+/// socket at all.
+async fn ws_handler(
+    ws: WebSocketUpgrade,
+    headers: axum::http::HeaderMap,
+    State(state): State<Arc<VoiceServerState>>,
+) -> Response {
+    let config = nexus_common::config::get();
+    let claims = match nexus_common::identity::verify_header(&headers, &config.server.name).await {
+        Ok(claims) => claims,
+        Err(e) => {
+            tracing::debug!(error = %e, "Voice: rejected upgrade, no valid identity");
+            return (axum::http::StatusCode::UNAUTHORIZED, "unauthorized").into_response();
+        }
+    };
+
+    let user_id = match nexus_db::repository::users::provision_from_identity(
+        &state.db.pool,
+        &claims.sub,
+        &claims.username,
+        Some(claims.email.as_str()),
+    )
+    .await
+    {
+        Ok(id) => id,
+        Err(e) => {
+            tracing::error!(error = %e, "Voice: failed to provision user from identity");
+            return (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "provisioning failed",
+            )
+                .into_response();
+        }
+    };
+
+    let identity = VoiceIdentity {
+        user_id,
+        username: claims.username,
+    };
+    ws.on_upgrade(move |socket| handle_voice_connection(socket, state, identity))
 }
 
 /// Handle a single voice signaling WebSocket connection.
-async fn handle_voice_connection(socket: WebSocket, state: Arc<VoiceServerState>) {
+async fn handle_voice_connection(
+    socket: WebSocket,
+    state: Arc<VoiceServerState>,
+    identity: VoiceIdentity,
+) {
     let (mut sender, mut receiver) = socket.split();
 
     let session_id = Uuid::new_v4().to_string();
@@ -211,35 +266,22 @@ async fn handle_voice_connection(socket: WebSocket, state: Arc<VoiceServerState>
                 };
 
                 match signal {
-                    VoiceSignal::Identify { token } => {
-                        let config = nexus_common::config::get();
-                        match nexus_common::auth::validate_token(&token, &config.auth.jwt_secret) {
-                            Ok(claims) => {
-                                let uid: Uuid = match claims.sub.parse() {
-                                    Ok(id) => id,
-                                    Err(_) => {
-                                        send_error(&mut sender, 4001, "Invalid user ID").await;
-                                        continue;
-                                    }
-                                };
-                                authenticated = true;
-                                user_id = Some(uid);
+                    VoiceSignal::Identify { token: _ } => {
+                        // Established on the upgrade request; anything the
+                        // client sends here is not a credential.
+                        authenticated = true;
+                        user_id = Some(identity.user_id);
 
-                                let ready = VoiceSignal::Ready {
-                                    session_id: session_id.clone(),
-                                };
-                                send_signal(&mut sender, &ready).await;
+                        let ready = VoiceSignal::Ready {
+                            session_id: session_id.clone(),
+                        };
+                        send_signal(&mut sender, &ready).await;
 
-                                tracing::info!(
-                                    session = %session_id,
-                                    user = %claims.username,
-                                    "Voice client authenticated"
-                                );
-                            }
-                            Err(_) => {
-                                send_error(&mut sender, 4004, "Invalid token").await;
-                            }
-                        }
+                        tracing::info!(
+                            session = %session_id,
+                            user = %identity.username,
+                            "Voice client authenticated"
+                        );
                     }
 
                     VoiceSignal::Join {

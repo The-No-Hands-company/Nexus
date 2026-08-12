@@ -265,6 +265,39 @@ impl JwksCache {
     }
 }
 
+/// The header the ecosystem proxy puts a verified user's identity token in.
+pub const IDENTITY_HEADER: &str = "x-nexus-identity";
+
+/// Auth's signing keys, cached once for the whole process.
+///
+/// One cache, not one per consumer: the API, the WebSocket gateway and the
+/// voice server all verify the same tokens against the same keys, and a cache
+/// per caller would triple the fetches and give each its own rotation window.
+pub fn shared_keys() -> &'static JwksCache {
+    static KEYS: std::sync::OnceLock<JwksCache> = std::sync::OnceLock::new();
+    KEYS.get_or_init(|| {
+        let base = std::env::var("NEXUS_AUTH_INTERNAL_URL")
+            .unwrap_or_else(|_| "http://127.0.0.1:4310".to_string());
+        JwksCache::from_auth_base_url(&base)
+    })
+}
+
+/// Verify the identity header on an incoming request.
+///
+/// The single entry point every server-side consumer uses, so the rules about
+/// which header carries the token and what a missing one means are stated once
+/// rather than re-derived in three places.
+pub async fn verify_header(
+    headers: &axum::http::HeaderMap,
+    audience: &str,
+) -> Result<IdentityClaims, IdentityError> {
+    let token = headers
+        .get(IDENTITY_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .ok_or(IdentityError::Malformed)?;
+    shared_keys().verify(token, audience).await
+}
+
 fn parse_keys(jwks: &Jwks) -> HashMap<String, DecodingKey> {
     jwks.keys
         .iter()

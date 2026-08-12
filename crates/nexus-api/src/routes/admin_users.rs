@@ -48,7 +48,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/admin/users/{user_id}/unsuspend", post(unsuspend_user))
         .route("/admin/users/{user_id}/disable", post(disable_user))
         .route("/admin/servers", get(list_servers))
-        .route_layer(middleware::from_fn(crate::middleware::auth_middleware))
+        .route_layer(middleware::from_fn(crate::middleware::identity_middleware))
 }
 
 // ── Auth guard ────────────────────────────────────────────────────────────────

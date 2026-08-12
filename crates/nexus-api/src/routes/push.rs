@@ -26,7 +26,7 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/push/vapid-public-key", get(get_vapid_public_key))
         .route("/push/subscriptions", post(subscribe).delete(unsubscribe))
-        .route_layer(middleware::from_fn(crate::middleware::auth_middleware))
+        .route_layer(middleware::from_fn(crate::middleware::identity_middleware))
 }
 
 // ── Response types ─────────────────────────────────────────────────────────────

@@ -45,6 +45,12 @@ function updateReactionState(
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface Session {
+  /**
+   * Empty under ecosystem SSO. This client holds no credential at all: the
+   * proxy authenticates the browser and injects a signed identity header the
+   * server verifies. Kept on the type so the many call sites that read it
+   * still compile; nothing is sent.
+   */
   accessToken: string;
   refreshToken: string;
   username: string;
@@ -122,10 +128,46 @@ export function apiBase(session: Session | null): string {
   return `${origin}/api/v1`;
 }
 
-export function authHeaders(session: Session | null): HeadersInit {
-  const h: Record<string, string> = { "Content-Type": "application/json" };
-  if (session) h["Authorization"] = `Bearer ${session.accessToken}`;
-  return h;
+export function authHeaders(_session: Session | null): HeadersInit {
+  // No Authorization header. The server stopped accepting locally-minted JWTs
+  // when its login was deleted; identity now arrives as a signed header the
+  // ecosystem proxy adds, which the browser cannot see or forge.
+  return { "Content-Type": "application/json" };
+}
+
+/**
+ * Ask the server who we are.
+ *
+ * Replaces the login form. The request carries no credential — if the proxy
+ * let it through, it already attached a verified identity, so a 200 here *is*
+ * the sign-in. A 401 means the gate will redirect on the next navigation.
+ */
+export async function bootstrapSession(): Promise<Session | null> {
+  const origin = normalizeServerUrl(
+    localStorage.getItem("nexus_server_url") ?? DEFAULT_SERVER_URL
+  );
+  try {
+    const res = await fetch(`${origin}/api/v1/users/@me`, {
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+    });
+    if (!res.ok) return null;
+    const body = await res.json();
+    const user = body.user ?? body;
+    return {
+      accessToken: "",
+      refreshToken: "",
+      username: user.username,
+      userId: user.id,
+      avatar: user.avatar ?? null,
+      serverUrl: origin,
+      displayName: user.display_name ?? null,
+      bio: user.bio ?? null,
+      status: user.status ?? null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 async function apiFetch<T>(

@@ -19,7 +19,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::{
-    AppState, auth,
+    AppState,
     middleware::{AuthContext, check_rate_limit_with_fallback, extract_client_ip},
 };
 
@@ -33,7 +33,6 @@ pub fn router() -> Router<Arc<AppState>> {
                 .delete(delete_account),
         )
         .route("/users/@me/cancel-deletion", post(cancel_account_deletion))
-        .route("/users/@me/change-password", post(change_password))
         .route("/users/@me/data-export", get(data_export))
         .route("/users/@me/note-to-self", get(get_note_to_self_channel))
         .route("/users/{user_id}", get(get_user))
@@ -193,11 +192,14 @@ async fn get_user_profile(
 
 // ── Account lifecycle (09.7-04) ───────────────────────────────────────────────
 
+/// Body of a delete request.
+///
+/// Empty: the password confirmation this used to carry cannot be satisfied by
+/// an ecosystem-provisioned account, whose stored hash is deliberately
+/// unparseable. Kept as a type so the endpoint still takes a JSON body and
+/// clients need no change.
 #[derive(Deserialize)]
-struct DeleteAccountBody {
-    /// Current account password — required as a security confirmation.
-    password: String,
-}
+struct DeleteAccountBody {}
 
 /// DELETE /api/v1/users/@me
 ///
@@ -210,7 +212,7 @@ async fn delete_account(
     Extension(auth_ctx): Extension<AuthContext>,
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    Json(body): Json<DeleteAccountBody>,
+    Json(_body): Json<DeleteAccountBody>,
 ) -> NexusResult<StatusCode> {
     // Rate limit account deletion attempts (3 per hour per user)
     let ip = extract_client_ip(&headers);
@@ -235,12 +237,12 @@ async fn delete_account(
             resource: "User".into(),
         })?;
 
-    // Require password confirmation to prevent accidental/hijacked deletions
-    let valid = auth::verify_password(&body.password, &user.password_hash)
-        .map_err(|_| NexusError::InvalidCredentials)?;
-    if !valid {
-        return Err(NexusError::InvalidCredentials);
-    }
+    // No password confirmation. Accounts are provisioned from the ecosystem and
+    // carry a deliberately unparseable hash, so this check could only ever fail
+    // — it would make the endpoint unusable rather than safe. The protections
+    // that remain are real: the rate limits above, and the fact that deletion
+    // is scheduled 30 days out and reversible through
+    // POST /users/@me/cancel-deletion.
 
     // Schedule deletion 30 days from now
     sqlx::query(
@@ -462,113 +464,3 @@ async fn get_note_to_self_channel(
     }))
 }
 
-// ── Change password ───────────────────────────────────────────────────────────
-
-#[derive(Deserialize)]
-struct ChangePasswordBody {
-    /// The user's current password — required to prevent CSRF-based password changes.
-    current_password: String,
-    /// The new password — subject to the same length/strength rules as registration.
-    new_password: String,
-}
-
-/// POST /api/v1/users/@me/change-password
-///
-/// Allows an authenticated user to change their own password.
-///
-/// Security requirements:
-///   1. Current password verified before accepting the change (prevents
-///      stolen-session account takeover by an attacker who can't guess the password).
-///   2. New password re-hashed with Argon2id at the same parameters as registration.
-///   3. ALL other active sessions revoked after the change (forces re-authentication
-///      on every other device — limits exposure of a compromised session).
-///   4. The current session's Redis revocation cache is invalidated immediately
-///      so the response token stays valid.
-async fn change_password(
-    Extension(auth): Extension<AuthContext>,
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    Json(body): Json<ChangePasswordBody>,
-) -> NexusResult<StatusCode> {
-    // Rate limit password changes (5 per hour per user)
-    let ip = extract_client_ip(&headers);
-    check_rate_limit_with_fallback(
-        state.db.redis.as_ref(),
-        format!("rl:user:{}:change_password", auth.user_id),
-        5,
-        3600,
-    )
-    .await?;
-    check_rate_limit_with_fallback(
-        state.db.redis.as_ref(),
-        format!("rl:change_password:ip:{ip}"),
-        20,
-        3600,
-    )
-    .await?;
-
-    // Enforce minimum complexity on new password
-    if body.new_password.len() < 8 {
-        return Err(NexusError::Validation {
-            message: "New password must be at least 8 characters".into(),
-        });
-    }
-    if body.new_password.len() > 128 {
-        return Err(NexusError::Validation {
-            message: "New password must be 128 characters or fewer".into(),
-        });
-    }
-    if body.current_password == body.new_password {
-        return Err(NexusError::Validation {
-            message: "New password must differ from the current password".into(),
-        });
-    }
-
-    let user = users::find_by_id(&state.db.pool, auth.user_id)
-        .await?
-        .ok_or(NexusError::NotFound {
-            resource: "User".into(),
-        })?;
-
-    // Verify current password — constant-time comparison inside verify_password
-    let valid = crate::auth::verify_password(&body.current_password, &user.password_hash)
-        .map_err(|_| NexusError::InvalidCredentials)?;
-    if !valid {
-        return Err(NexusError::InvalidCredentials);
-    }
-
-    // Hash the new password with Argon2id
-    let new_hash = crate::auth::hash_password(&body.new_password)
-        .map_err(|e| NexusError::Internal(anyhow::anyhow!("Password hash failed: {}", e)))?;
-
-    // Persist the new password hash
-    sqlx::query("UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2::uuid")
-        .bind(&new_hash)
-        .bind(user.id.to_string())
-        .execute(&state.db.pool)
-        .await
-        .map_err(|e| NexusError::Internal(e.into()))?;
-
-    // Revoke every session except the current one — forces re-login on all
-    // other devices. This is the same pattern used after a password reset.
-    if let Some(current_session) = auth.session_id {
-        let _ = nexus_db::repository::sessions::revoke_all_except(
-            &state.db.pool,
-            auth.user_id,
-            current_session,
-        )
-        .await;
-
-        // Purge the Redis revocation cache for all other sessions so they are
-        // not served stale "session active" responses for the next 60 seconds.
-        // We can't enumerate all revoked session IDs here, but the 60-second
-        // TTL ensures consistency — the worst window is the Redis cache TTL.
-    }
-
-    tracing::info!(
-        user_id = %auth.user_id,
-        "Password changed — all other sessions revoked"
-    );
-
-    Ok(StatusCode::NO_CONTENT)
-}

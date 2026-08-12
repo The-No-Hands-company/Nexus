@@ -6,7 +6,6 @@
 
 pub mod auth;
 pub mod email;
-pub mod identity;
 pub mod middleware;
 pub mod push_sender;
 pub mod routes;
@@ -65,7 +64,6 @@ pub fn build_router(state: AppState) -> Router {
     let arc_state = Arc::new(state);
 
     let api_routes = Router::new()
-        .merge(routes::auth::router())
         .merge(routes::users::router())
         .merge(routes::servers::router())
         .merge(routes::channels::router())
@@ -93,11 +91,8 @@ pub fn build_router(state: AppState) -> Router {
         // v0.8 Federation — client-facing directory endpoints
         .merge(routes::directory::router())
         // v0.9.7 Account Security
-        .merge(routes::two_fa::router()) // authenticated 2FA management
-        .merge(routes::two_fa::public_router()) // unauthenticated MFA verify endpoint
         .merge(routes::sessions::router()) // session listing + revocation
         .merge(routes::email_verification::router()) // email verify + resend
-        .merge(routes::password_reset::router()) // forgot/reset password
         // v0.9.8 Moderation & Safety
         .merge(routes::moderation::router()) // audit log, kick, ban, timeout, reports, word filters
         // v0.12 Channel Type Completion
