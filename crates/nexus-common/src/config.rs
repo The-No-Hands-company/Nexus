@@ -88,7 +88,11 @@ fn build_base_config()
     // Some("") when no Redis is configured.
     config::Config::builder()
         // Defaults
-        .set_default("server.host", "0.0.0.0")?
+        // Loopback, not 0.0.0.0. A default bind address is a security default:
+        // the safe one is the one that exposes nothing until an operator asks
+        // for exposure. Deployments that front this with a proxy (ours) need
+        // nothing; containers that must publish set NEXUS__SERVER__HOST=0.0.0.0.
+        .set_default("server.host", "127.0.0.1")?
         .set_default("server.port", 8080)?
         .set_default("server.gateway_port", 8081)?
         .set_default("server.voice_port", 8082)?

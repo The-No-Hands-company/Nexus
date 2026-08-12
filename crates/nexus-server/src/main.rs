@@ -370,7 +370,22 @@ async fn run_server(
     };
     let search_for_workers = api_state.search.clone();
     let api_router = build_router(api_state);
-    let host: std::net::IpAddr = "0.0.0.0".parse()?;
+    // Loopback by default: the ecosystem proxy is the only intended client, and
+    // the login gate lives there. Hardcoding 0.0.0.0 let anyone on the LAN reach
+    // the API, gateway and voice ports directly and skip authentication — a gate
+    // is only a gate if it is the sole way in. Override with
+    // NEXUS__SERVER__HOST=0.0.0.0 when something off-box genuinely must connect.
+    //
+    // An unparseable value falls back to loopback rather than propagating the
+    // error: failing closed on a bind address means a typo costs you a local-only
+    // server, not a publicly listening one.
+    let host: std::net::IpAddr = config.server.host.parse().unwrap_or_else(|_| {
+        tracing::warn!(
+            host = %config.server.host,
+            "invalid NEXUS__SERVER__HOST — falling back to 127.0.0.1"
+        );
+        std::net::IpAddr::from([127, 0, 0, 1])
+    });
     let api_addr = SocketAddr::new(host, port);
     let gateway_addr = SocketAddr::new(host, gateway_port);
     let voice_addr = SocketAddr::new(host, voice_port);
