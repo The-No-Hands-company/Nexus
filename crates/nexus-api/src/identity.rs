@@ -228,12 +228,13 @@ impl JwksCache {
     async fn refresh_if_allowed(&self) -> Result<(), IdentityError> {
         {
             let guard = self.inner.read().await;
-            if let Some(t) = guard.attempted_at {
-                if t.elapsed() < MIN_REFRESH_INTERVAL {
-                    // Recently attempted; treat as "no such key" rather than
-                    // hammering Auth once per forged request.
-                    return Ok(());
-                }
+            // Recently attempted; treat as "no such key" rather than hammering
+            // Auth once per forged request.
+            if guard
+                .attempted_at
+                .is_some_and(|t| t.elapsed() < MIN_REFRESH_INTERVAL)
+            {
+                return Ok(());
             }
         }
         {

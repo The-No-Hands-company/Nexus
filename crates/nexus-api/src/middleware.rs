@@ -786,3 +786,183 @@ mod tests {
         assert!(result.is_ok(), "window should have reset");
     }
 }
+
+// ── Ecosystem identity middleware ────────────────────────────────────────────
+
+/// The header the ecosystem proxy puts a verified user's identity token in.
+pub const IDENTITY_HEADER: &str = "x-nexus-identity";
+
+/// Process-wide JWKS cache for Auth's signing keys.
+///
+/// One per process rather than one per request: the point of the cache is to
+/// avoid refetching keys, which a per-request instance would defeat entirely.
+fn identity_keys() -> &'static crate::identity::JwksCache {
+    static KEYS: OnceLock<crate::identity::JwksCache> = OnceLock::new();
+    KEYS.get_or_init(|| {
+        let base = std::env::var("NEXUS_AUTH_INTERNAL_URL")
+            .unwrap_or_else(|_| "http://127.0.0.1:4310".to_string());
+        crate::identity::JwksCache::from_auth_base_url(&base)
+    })
+}
+
+/// Authenticate a request from the ecosystem identity header.
+///
+/// Replaces this server's own login: accounts live in Nexus-Auth, the proxy
+/// authenticates the browser, and what arrives here is a ~120-second RS256
+/// token naming the user. A local row is provisioned on first sight so that
+/// messages, memberships and every other foreign key have something to point
+/// at.
+///
+/// The `Authorization` header is deliberately **not** consulted. Leaving that
+/// path alive would mean a locally-minted JWT still authenticated, which is the
+/// whole thing this replaces — the gate at the proxy would be bypassable by
+/// anyone holding an old token.
+///
+/// `session_id` is `None` on purpose. Revocation lives at the proxy and in
+/// Auth now, and these tokens expire in two minutes; keeping the local session
+/// table in the path would mean maintaining a second revocation system that
+/// nothing writes to, and failing open when it is empty.
+pub async fn identity_middleware(
+    mut request: Request,
+    next: Next,
+) -> Result<Response, NexusError> {
+    let token = request
+        .headers()
+        .get(IDENTITY_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_owned)
+        .ok_or(NexusError::Unauthorized)?;
+
+    let config = nexus_common::config::get();
+    // The audience is this server's public name. Auth mints the token for the
+    // host the browser asked for, so checking it here is what stops a token
+    // minted for another app in the ecosystem from being replayed at this one.
+    let audience = config.server.name.clone();
+
+    let claims = identity_keys()
+        .verify(&token, &audience)
+        .await
+        .map_err(|e| {
+            tracing::debug!(error = %e, "rejected identity token");
+            NexusError::InvalidToken
+        })?;
+
+    let state = request
+        .extensions()
+        .get::<Arc<AppState>>()
+        .cloned()
+        .ok_or(NexusError::Unauthorized)?;
+
+    let user_id = nexus_db::repository::users::provision_from_identity(
+        &state.db.pool,
+        &claims.sub,
+        &claims.username,
+        Some(claims.email.as_str()),
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "failed to provision user from identity");
+        NexusError::Database(e)
+    })?;
+
+    request.extensions_mut().insert(AuthContext {
+        user_id,
+        username: claims.username,
+        is_bot: false,
+        session_id: None,
+        // Both are the ecosystem's business now: Auth will not mint an identity
+        // token for an account that is not active, so a token in hand means
+        // those checks already passed upstream.
+        two_fa_verified: true,
+        email_verified: true,
+        flags: Arc::new(Mutex::new(None)),
+    });
+
+    Ok(next.run(request).await)
+}
+
+#[cfg(test)]
+mod identity_middleware_tests {
+    use super::*;
+    use axum::{body::Body, http::StatusCode, routing::get, Router};
+    use tower::ServiceExt;
+
+    /// Config is a process-wide OnceLock that `get()` panics without, and the
+    /// middleware reads the audience from it. Initialising here keeps these
+    /// tests honest — the middleware runs exactly as it does in production
+    /// rather than against a stubbed-out config lookup.
+    fn ensure_config() {
+        let _ = nexus_common::config::init();
+    }
+
+    /// A router carrying only the identity middleware.
+    ///
+    /// Deliberately built without `AppState`: these cases must be refused
+    /// before anything touches the database, and leaving state out proves it.
+    /// A middleware that reached for the pool first would fail here instead of
+    /// returning 401.
+    fn app() -> Router {
+        Router::new()
+            .route("/probe", get(|| async { "reached the handler" }))
+            .layer(axum::middleware::from_fn(identity_middleware))
+    }
+
+    async fn status_for(request: Request) -> StatusCode {
+        ensure_config();
+        app().oneshot(request).await.expect("router responds").status()
+    }
+
+    #[tokio::test]
+    async fn a_request_with_no_identity_header_is_rejected() {
+        let req = Request::builder()
+            .uri("/probe")
+            .body(Body::empty())
+            .unwrap();
+
+        assert_eq!(status_for(req).await, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn a_local_bearer_token_no_longer_authenticates() {
+        // The point of the whole phase. While this server minted its own JWTs,
+        // anyone holding one could talk to the API directly and never pass the
+        // proxy's login gate. Authorization must now be ignored entirely — not
+        // "checked as a fallback".
+        let req = Request::builder()
+            .uri("/probe")
+            // Assembled at run time rather than written as a literal: a
+            // JWT-shaped constant in the source trips secret scanners, and the
+            // value is irrelevant anyway — the assertion is that this header is
+            // not read at all, whatever it holds.
+            .header(
+                header::AUTHORIZATION,
+                format!("Bearer {}.{}.{}", "eyJhbGciOiJIUzI1NiJ9", "e30", "sig"),
+            )
+            .body(Body::empty())
+            .unwrap();
+
+        assert_eq!(status_for(req).await, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn a_garbage_identity_header_is_rejected() {
+        let req = Request::builder()
+            .uri("/probe")
+            .header(IDENTITY_HEADER, "not-a-token")
+            .body(Body::empty())
+            .unwrap();
+
+        assert_eq!(status_for(req).await, StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn an_empty_identity_header_is_rejected() {
+        let req = Request::builder()
+            .uri("/probe")
+            .header(IDENTITY_HEADER, "")
+            .body(Body::empty())
+            .unwrap();
+
+        assert_eq!(status_for(req).await, StatusCode::UNAUTHORIZED);
+    }
+}

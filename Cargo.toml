@@ -46,7 +46,7 @@ scylla = { version = "0.15", default-features = false, features = ["ssl"] }
 argon2 = "0.5"
 jsonwebtoken = "9.3"
 rand = "0.9"
-uuid = { version = "1.11", features = ["v4", "v7", "serde"] }
+uuid = { version = "1.11", features = ["v4", "v5", "v7", "serde"] }
 # TOTP (RFC 6238) — 2FA secret generation and code verification
 totp-rs = { version = "5", features = ["gen_secret", "otpauth"] }
 

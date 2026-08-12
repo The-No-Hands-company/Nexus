@@ -41,3 +41,9 @@ rand = { workspace = true }
 hmac = { workspace = true }
 aes-gcm = { workspace = true }
 base64 = { workspace = true }
+
+[dev-dependencies]
+# Only so the provisioning tests can assert that the "no local password"
+# sentinel is not a parseable hash — the property that makes it unloggable.
+argon2 = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

@@ -407,3 +407,157 @@ pub async fn remove_user_flags(
         .await?;
     Ok(())
 }
+
+// ── Ecosystem identity provisioning ──────────────────────────────────────────
+
+/// Namespace for deriving a local user id from an ecosystem account id.
+///
+/// `uuid5(NAMESPACE_URL, "https://auth.tnhc.dev/identity")`. Fixed forever:
+/// changing it renames every provisioned user, orphaning their messages and
+/// memberships behind ids nothing points at any more.
+pub const IDENTITY_NAMESPACE: Uuid = Uuid::from_bytes([
+    0xd6, 0xfe, 0x55, 0x84, 0x6d, 0xd3, 0x59, 0x55, 0x82, 0x71, 0x6e, 0xb5, 0xa6, 0x2e, 0x84, 0x18,
+]);
+
+/// The local user id for an ecosystem account.
+///
+/// Deterministic, so provisioning is idempotent without a read-then-write
+/// race: two concurrent first requests from the same user compute the same id
+/// and the second insert simply conflicts.
+///
+/// A derivation is used rather than storing Auth's id directly because
+/// `users.id` is a UUID column that every foreign key in the schema points at,
+/// while Auth's `sub` is a string like `usr-msosh4ui-2`.
+pub fn local_id_for_subject(subject: &str) -> Uuid {
+    Uuid::new_v5(&IDENTITY_NAMESPACE, subject.as_bytes())
+}
+
+/// A password hash that cannot verify against anything.
+///
+/// Provisioned accounts have no local password — the ecosystem holds the
+/// credential. `password_hash` is NOT NULL, so it needs *a* value, and this one
+/// is deliberately not a valid PHC string: argon2 fails to parse it and returns
+/// an error rather than comparing anything, so there is no input that logs in.
+const NO_LOCAL_PASSWORD: &str = "!ecosystem-identity-no-local-password";
+
+/// Ensure a local user row exists for an ecosystem account, and return its id.
+///
+/// Called on every authenticated request, so the common path is one INSERT
+/// that conflicts and touches nothing. First sight inserts.
+///
+/// Username collisions are possible in principle — Auth guarantees usernames
+/// are unique among ecosystem accounts, but a pre-existing local row could hold
+/// one — so a clash falls back to a suffixed name rather than failing the
+/// request. The id, not the username, is the identity.
+pub async fn provision_from_identity(
+    pool: &sqlx::AnyPool,
+    subject: &str,
+    username: &str,
+    email: Option<&str>,
+) -> Result<Uuid, sqlx::Error> {
+    let id = local_id_for_subject(subject);
+
+    if find_by_id(pool, id).await?.is_some() {
+        return Ok(id);
+    }
+
+    match insert_provisioned(pool, id, subject, username, email).await {
+        Ok(()) => Ok(id),
+        Err(e) => {
+            // Either someone raced us to the same id — fine, they inserted the
+            // same account — or the username/email is taken by a different row.
+            if find_by_id(pool, id).await?.is_some() {
+                return Ok(id);
+            }
+            if !is_unique_violation(&e) {
+                return Err(e);
+            }
+            let fallback = format!("{username}-{}", &id.simple().to_string()[..6]);
+            insert_provisioned(pool, id, subject, &fallback, email).await?;
+            Ok(id)
+        }
+    }
+}
+
+async fn insert_provisioned(
+    pool: &sqlx::AnyPool,
+    id: Uuid,
+    subject: &str,
+    username: &str,
+    email: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    let stored_email = email.map(|e| crate::email_crypto::encrypt(e));
+    let email_hash = email.and_then(|e| crate::email_crypto::lookup_hash(e));
+
+    sqlx::query(
+        "INSERT INTO users \
+           (id, username, email, email_hash, password_hash, external_id, presence, flags, created_at, updated_at) \
+         VALUES ($1::uuid, $2, $3, $4, $5, $6, 'offline', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+    )
+    .bind(id.to_string())
+    .bind(username)
+    .bind(stored_email.as_deref())
+    .bind(email_hash.as_deref())
+    .bind(NO_LOCAL_PASSWORD)
+    .bind(subject)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Whether a database error is a unique-constraint violation.
+///
+/// Matched on text because this runs on both Postgres and SQLite through
+/// sqlx's `Any` driver, which does not surface a portable constraint kind.
+fn is_unique_violation(e: &sqlx::Error) -> bool {
+    match e {
+        sqlx::Error::Database(db) => {
+            let msg = db.message().to_ascii_lowercase();
+            msg.contains("unique") || msg.contains("duplicate")
+        }
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+
+    #[test]
+    fn local_ids_are_stable_across_calls() {
+        // The whole scheme rests on this: if the derivation ever drifts, every
+        // provisioned user silently becomes a different person.
+        assert_eq!(
+            local_id_for_subject("usr-msosh4ui-2"),
+            local_id_for_subject("usr-msosh4ui-2")
+        );
+    }
+
+    #[test]
+    fn local_ids_match_the_documented_namespace() {
+        // Pinned against a value computed independently of this code, so a
+        // change to IDENTITY_NAMESPACE cannot pass unnoticed.
+        assert_eq!(
+            local_id_for_subject("usr-msosh4ui-2").to_string(),
+            "c2c4271c-cbc9-5a0c-badc-ff282dd0485d"
+        );
+    }
+
+    #[test]
+    fn different_subjects_get_different_ids() {
+        assert_ne!(
+            local_id_for_subject("usr-aaa"),
+            local_id_for_subject("usr-bbb")
+        );
+    }
+
+    #[test]
+    fn the_sentinel_password_is_not_a_valid_hash() {
+        // If this ever became parseable, provisioned accounts would gain a
+        // password that somebody could conceivably match.
+        assert!(
+            argon2::password_hash::PasswordHash::new(NO_LOCAL_PASSWORD).is_err(),
+            "the no-login sentinel must not parse as a password hash"
+        );
+    }
+}
