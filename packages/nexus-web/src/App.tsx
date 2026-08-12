@@ -1,6 +1,22 @@
 import { useEffect, useState } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { useStore, bootstrapSession } from "./store";
+
+/**
+ * Where to send someone who is not signed in.
+ *
+ * Straight to the ecosystem sign-in, carrying this page as the return address
+ * so they come back to what they were trying to open. Reloading instead — which
+ * this used to do — only works if the proxy is going to redirect, and when the
+ * bootstrap failed for any other reason it looked to the user like a button
+ * that did nothing.
+ */
+const AUTH_LOGIN_URL =
+  import.meta.env.VITE_AUTH_LOGIN_URL ?? "https://auth.tnhc.dev/login";
+
+function signInHref(): string {
+  return `${AUTH_LOGIN_URL}?redirect_uri=${encodeURIComponent(window.location.href)}`;
+}
 import MainLayout from "./pages/MainLayout";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
@@ -17,38 +33,38 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
  */
 export default function App() {
   const { session, setSession } = useStore();
-  const [checking, setChecking] = useState(!session);
+  // A session persisted before the SSO cutover carries an accessToken, which
+  // nothing issues or accepts any more. Treat it as absent and re-check with
+  // the server, rather than rendering the app around a credential that cannot
+  // work.
+  const stale = !!session && session.accessToken !== "";
+  const usable = session && !stale ? session : null;
+  const [checking, setChecking] = useState(!usable);
 
   useEffect(() => {
-    if (session) return;
+    if (usable) return;
     let cancelled = false;
     void bootstrapSession().then((s) => {
       if (cancelled) return;
-      if (s) setSession(s);
+      setSession(s);
       setChecking(false);
     });
     return () => {
       cancelled = true;
     };
-  }, [session, setSession]);
+  }, [usable, setSession]);
 
   if (checking) {
     return <div className="flex h-screen items-center justify-center">Signing you in…</div>;
   }
 
-  if (!session) {
-    // The proxy should have caught this. Reloading hands the request back to
-    // it, which redirects to the ecosystem sign-in rather than showing a form
-    // this app no longer owns.
+  if (!usable) {
     return (
       <div className="flex h-screen flex-col items-center justify-center gap-4">
         <p>Not signed in.</p>
-        <button
-          className="rounded bg-blue-600 px-4 py-2 text-white"
-          onClick={() => window.location.reload()}
-        >
+        <a className="rounded bg-blue-600 px-4 py-2 text-white" href={signInHref()}>
           Sign in
-        </button>
+        </a>
       </div>
     );
   }

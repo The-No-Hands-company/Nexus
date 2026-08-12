@@ -7,6 +7,30 @@ function normalizeServerUrl(url: string): string {
   return url.trim().replace(/\/$/, "").replace(/\/api\/v1$/, "");
 }
 
+/**
+ * The server this client talks to.
+ *
+ * Always the origin that served the page. Under ecosystem SSO that is not a
+ * preference — the proxy injects the identity header for *this* hostname, so a
+ * request sent anywhere else arrives unauthenticated however signed in you are.
+ *
+ * This used to read a `nexus_server_url` left in localStorage by the old
+ * "type your server" login. Anyone carrying that value from before the cutover
+ * had their bootstrap sent to the wrong origin and was told "Not signed in" on
+ * a host they were perfectly signed in to.
+ *
+ * The dev override stays: a local Vite server on :5173 genuinely is a
+ * different origin from the API on :8080.
+ */
+function currentServerOrigin(): string {
+  if (import.meta.env.DEV) {
+    return normalizeServerUrl(
+      localStorage.getItem("nexus_server_url") ?? DEFAULT_SERVER_URL,
+    );
+  }
+  return window.location.origin;
+}
+
 export function getServerUrlPlaceholder(): string {
   return import.meta.env.DEV ? "http://localhost:8080" : "https://your-nexus-server.com";
 }
@@ -121,11 +145,11 @@ export type GatewayStatus = "offline" | "connecting" | "online";
 
 // ── API helpers ───────────────────────────────────────────────────────────────
 
-export function apiBase(session: Session | null): string {
-  const origin = normalizeServerUrl(
-    session?.serverUrl ?? localStorage.getItem("nexus_server_url") ?? DEFAULT_SERVER_URL
-  );
-  return `${origin}/api/v1`;
+export function apiBase(_session: Session | null): string {
+  // Deliberately ignores session.serverUrl. A session persisted before the SSO
+  // cutover can carry an origin that is no longer right, and honouring it would
+  // send authenticated calls somewhere that cannot authenticate them.
+  return `${currentServerOrigin()}/api/v1`;
 }
 
 export function authHeaders(_session: Session | null): HeadersInit {
@@ -143,9 +167,7 @@ export function authHeaders(_session: Session | null): HeadersInit {
  * the sign-in. A 401 means the gate will redirect on the next navigation.
  */
 export async function bootstrapSession(): Promise<Session | null> {
-  const origin = normalizeServerUrl(
-    localStorage.getItem("nexus_server_url") ?? DEFAULT_SERVER_URL
-  );
+  const origin = currentServerOrigin();
   try {
     const res = await fetch(`${origin}/api/v1/users/@me`, {
       headers: { "Content-Type": "application/json" },
