@@ -6,6 +6,7 @@
 
 pub mod auth;
 pub mod email;
+pub mod identity;
 pub mod middleware;
 pub mod push_sender;
 pub mod routes;
