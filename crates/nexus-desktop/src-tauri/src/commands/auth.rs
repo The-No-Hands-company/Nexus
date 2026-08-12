@@ -23,9 +23,21 @@ pub struct AuthUserInfo {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AuthResponse {
-    pub access_token: String,
-    pub refresh_token: String,
+    /// Ecosystem session token. Sent to apps as the `nexus_session` cookie.
+    pub token: String,
     pub user: AuthUserInfo,
+}
+
+/// Where accounts live: the ecosystem identity service, not the app server.
+///
+/// Overridable so a local ecosystem can be pointed at, but the default is the
+/// real one — a desktop client that guessed wrong here would send a password
+/// somewhere it does not belong.
+fn auth_base() -> String {
+    std::env::var("NEXUS_AUTH_URL")
+        .unwrap_or_else(|_| "https://auth.tnhc.dev".to_string())
+        .trim_end_matches('/')
+        .to_owned()
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -37,52 +49,14 @@ pub struct CurrentUser {
     pub presence: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct RegisterRequest {
-    pub username: String,
-    pub email: String,
-    pub password: String,
-}
-
-/// Register a new account and immediately store the resulting credentials.
+/// Where someone with no account is sent.
+///
+/// Registration is invite-only and deliberately not implemented here: a
+/// request has to be approved by an operator before an account exists, and
+/// that flow already exists on the web.
 #[tauri::command]
-pub async fn register(
-    state: State<'_, AppState>,
-    username: String,
-    email: String,
-    password: String,
-) -> Result<AuthResponse, String> {
-    let session = state.session_snapshot();
-    let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
-
-    let resp = client
-        .post(format!("{base}/api/v1/auth/register"))
-        .json(&RegisterRequest {
-            username,
-            email,
-            password,
-        })
-        .send()
-        .await
-        .map_err(friendly_network_error)?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(friendly_api_error(status, &body));
-    }
-
-    let auth: AuthResponse = resp.json().await.map_err(|e| e.to_string())?;
-
-    {
-        let mut session = state.session.lock().unwrap();
-        session.access_token = Some(auth.access_token.clone());
-        session.refresh_token = Some(auth.refresh_token.clone());
-        session.user_id = Some(auth.user.id);
-        session.username = Some(auth.user.username.clone());
-    }
-
-    Ok(auth)
+pub fn request_access_url() -> String {
+    "https://app.tnhc.dev/request".to_string()
 }
 
 /// Log in and store credentials in `AppState`.
@@ -92,8 +66,10 @@ pub async fn login(
     username: String,
     password: String,
 ) -> Result<AuthResponse, String> {
-    let session = state.session_snapshot();
-    let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
+    // Goes to Auth, not to the app server. There is one account for the whole
+    // ecosystem and only Auth holds it.
+    let client = reqwest::Client::new();
+    let base = auth_base();
 
     let resp = client
         .post(format!("{base}/api/v1/auth/login"))
@@ -113,8 +89,7 @@ pub async fn login(
     // Persist in state
     {
         let mut session = state.session.lock().unwrap();
-        session.access_token = Some(auth.access_token.clone());
-        session.refresh_token = Some(auth.refresh_token.clone());
+        session.session_token = Some(auth.token.clone());
         session.user_id = Some(auth.user.id);
         session.username = Some(auth.user.username.clone());
     }
@@ -131,41 +106,6 @@ pub async fn logout(state: State<'_, AppState>) -> Result<(), String> {
         ..Default::default()
     };
     Ok(())
-}
-
-/// Refresh the access token using the stored refresh token.
-#[tauri::command]
-pub async fn refresh_token(state: State<'_, AppState>) -> Result<String, String> {
-    let session = state.session_snapshot();
-    let refresh = session
-        .refresh_token
-        .as_ref()
-        .ok_or("No refresh token stored")?
-        .clone();
-
-    let (client, base) = api_client(&session).map_err(|e| e.to_string())?;
-
-    let resp = client
-        .post(format!("{base}/api/v1/auth/refresh"))
-        .json(&serde_json::json!({ "refresh_token": refresh }))
-        .send()
-        .await
-        .map_err(friendly_network_error)?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(friendly_api_error(status, &body));
-    }
-
-    let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-    let new_token = body["access_token"]
-        .as_str()
-        .ok_or("Missing access_token in response")?
-        .to_owned();
-
-    state.session.lock().unwrap().access_token = Some(new_token.clone());
-    Ok(new_token)
 }
 
 /// Fetch the currently logged-in user's profile.

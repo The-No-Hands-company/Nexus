@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, Navigate, NavLink, useNavigate } from "react-router-dom";
-import { getSession, setSession, subscribeSession, type Session } from "./api";
-import LoginPage from "./pages/Login";
+import { getSession, setSession, subscribeSession, whoami, type Session } from "./api";
 import OverviewPage from "./pages/Overview";
 import UsersPage from "./pages/Users";
 import UserDetailPage from "./pages/UserDetail";
@@ -120,18 +119,73 @@ function Shell({ children }: { children: React.ReactNode }) {
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const session = useSession();
-  if (!session) return <Navigate to="/login" replace />;
+  if (!session) return null; // App resolves identity before rendering routes.
   return <Shell>{children}</Shell>;
+}
+
+const AUTH_LOGIN_URL =
+  (import.meta as unknown as { env?: Record<string, string | undefined> }).env
+    ?.VITE_AUTH_LOGIN_URL ?? "https://auth.tnhc.dev/login";
+
+function Centered({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex h-screen flex-col items-center justify-center gap-4 text-center">
+      {children}
+    </div>
+  );
 }
 
 // ── App ───────────────────────────────────────────────────────────────────────
 
 export default function App() {
-  const session = useSession();
+  // Three outcomes, not two. "Signed in but not an instance admin" is a
+  // different thing from "not signed in", and telling someone to sign in when
+  // they already are is a dead end they cannot escape.
+  const [state, setState] = useState<"checking" | "admin" | "forbidden" | "anonymous">(
+    "checking",
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    void whoami().then((r) => {
+      if (cancelled) return;
+      if (r.state === "admin") setSession(r.session);
+      setState(r.state);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  if (state === "checking") return <Centered>Checking your access…</Centered>;
+
+  if (state === "anonymous") {
+    return (
+      <Centered>
+        <p>Not signed in.</p>
+        <a
+          className="rounded bg-blue-600 px-4 py-2 text-white"
+          href={`${AUTH_LOGIN_URL}?redirect_uri=${encodeURIComponent(window.location.href)}`}
+        >
+          Sign in
+        </a>
+      </Centered>
+    );
+  }
+
+  if (state === "forbidden") {
+    return (
+      <Centered>
+        <p>This account does not have Instance Admin privileges.</p>
+        <p className="text-sm opacity-70">
+          Ask an operator to grant the INSTANCE_ADMIN flag, then reload.
+        </p>
+      </Centered>
+    );
+  }
+
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/login" element={session ? <Navigate to="/overview" replace /> : <LoginPage />} />
+        <Route path="/login" element={<Navigate to="/overview" replace />} />
         <Route path="/overview"   element={<RequireAuth><OverviewPage /></RequireAuth>} />
         <Route path="/users"      element={<RequireAuth><UsersPage /></RequireAuth>} />
         <Route path="/users/:id"  element={<RequireAuth><UserDetailPage /></RequireAuth>} />
@@ -139,7 +193,7 @@ export default function App() {
         <Route path="/moderation" element={<RequireAuth><ModerationPage /></RequireAuth>} />
         <Route path="/federation" element={<RequireAuth><FederationPage /></RequireAuth>} />
         <Route path="/audit"      element={<RequireAuth><AuditLogPage /></RequireAuth>} />
-        <Route path="*"           element={<Navigate to={session ? "/overview" : "/login"} replace />} />
+        <Route path="*"           element={<Navigate to="/overview" replace />} />
       </Routes>
     </BrowserRouter>
   );

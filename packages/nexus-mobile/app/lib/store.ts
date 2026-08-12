@@ -13,8 +13,8 @@ const STORAGE_KEY_SERVER_URL = "nexus_server_url";
 
 export interface Session {
   user: User;
-  accessToken: string;
-  refreshToken: string;
+  /** Ecosystem session token (`nxs_…`). One account, every app. */
+  token: string;
 }
 
 type Listener = () => void;
@@ -148,9 +148,19 @@ class Store {
       }
       api.setBaseUrl(this.serverUrl);
       if (sessionJson) {
-        const saved: Session = JSON.parse(sessionJson);
-        api.setTokens(saved.accessToken, saved.refreshToken);
-        this.session = saved;
+        const saved = JSON.parse(sessionJson) as Partial<Session> & {
+          accessToken?: string;
+        };
+        // A session stored by a build from before the SSO cutover holds an
+        // accessToken this ecosystem no longer issues or accepts. Discard it
+        // rather than restoring a login that cannot work — the user signs in
+        // once more and is then on the new scheme for good.
+        if (saved.token && saved.user) {
+          api.setSessionToken(saved.token);
+          this.session = { user: saved.user, token: saved.token };
+        } else {
+          await AsyncStorage.removeItem(STORAGE_KEY_SESSION);
+        }
       }
       if (settingsJson) {
         const saved = JSON.parse(settingsJson);
@@ -198,7 +208,7 @@ class Store {
     this.loading = true; this.error = null; this.emit();
     try {
       const r = await api.login(username, password);
-      this.session = { user: r.user, accessToken: r.accessToken, refreshToken: r.refreshToken };
+      this.session = { user: r.user, token: r.token };
       await this._persistSession();
       await this.loadInitialData();
     } catch (e: unknown) {
@@ -209,19 +219,15 @@ class Store {
     }
   }
 
-  async register(username: string, password: string, email?: string) {
-    this.loading = true; this.error = null; this.emit();
-    try {
-      const r = await api.register(username, password, email);
-      this.session = { user: r.user, accessToken: r.accessToken, refreshToken: r.refreshToken };
-      await this._persistSession();
-      await this.loadInitialData();
-    } catch (e: unknown) {
-      this.error = e instanceof Error ? e.message : "Registration failed";
-      throw e;
-    } finally {
-      this.loading = false; this.emit();
-    }
+  /**
+   * Registration is not in this app.
+   *
+   * Access is invite-only: a request has to be approved by an operator before
+   * an account exists, and that flow already exists on the web. Reimplementing
+   * half of it here would mean a second place to keep correct.
+   */
+  requestAccessUrl(): string {
+    return api.requestAccessUrl();
   }
 
   logout() {

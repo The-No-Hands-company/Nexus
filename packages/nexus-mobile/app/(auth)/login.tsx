@@ -5,19 +5,16 @@ import React, { useState } from "react";
 import {
   View, Text, TextInput, Pressable, StyleSheet,
   SafeAreaView, ScrollView, KeyboardAvoidingView,
-  Platform, ActivityIndicator, Alert,
-} from "react-native";
+  Platform, ActivityIndicator, Alert, Linking } from "react-native";
 import { useRouter, Stack } from "expo-router";
 import { store } from "../lib/store";
 import { getServerUrlPlaceholder } from "../lib/api";
 
 export default function LoginScreen() {
   const router = useRouter();
-  const [mode, setMode] = useState<"login" | "register">("login");
   const [serverUrl, setServerUrl] = useState(store.serverUrl || "");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit() {
@@ -29,18 +26,13 @@ export default function LoginScreen() {
       Alert.alert("Error", "Please fill in all required fields");
       return;
     }
-    if (mode === "register" && !email.trim()) {
-      Alert.alert("Error", "Email is required for registration");
-      return;
-    }
     setLoading(true);
     try {
       await store.setServerUrl(serverUrl.trim());
-      if (mode === "login") {
-        await store.login(username.trim(), password);
-      } else {
-        await store.register(username.trim(), password, email.trim() || undefined);
-      }
+      // One credential for the whole ecosystem, checked by Auth. This screen
+      // no longer creates accounts: access is invite-only and needs an
+      // operator to approve the request, which happens on the web.
+      await store.login(username.trim(), password);
       if (store.error) {
         Alert.alert("Error", store.error);
         return;
@@ -68,21 +60,6 @@ export default function LoginScreen() {
           </View>
 
           <View style={styles.card}>
-            <View style={styles.tabs}>
-              <Pressable
-                onPress={() => setMode("login")}
-                style={[styles.tab, mode === "login" && styles.tabActive]}
-              >
-                <Text style={[styles.tabText, mode === "login" && styles.tabTextActive]}>Sign In</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => setMode("register")}
-                style={[styles.tab, mode === "register" && styles.tabActive]}
-              >
-                <Text style={[styles.tabText, mode === "register" && styles.tabTextActive]}>Register</Text>
-              </Pressable>
-            </View>
-
             <TextInput
               style={styles.input}
               placeholder="Username"
@@ -102,18 +79,6 @@ export default function LoginScreen() {
               autoCorrect={false}
               keyboardType="url"
             />
-            {mode === "register" && (
-              <TextInput
-                style={styles.input}
-                placeholder="Email (optional)"
-                placeholderTextColor="#7890b0"
-                value={email}
-                onChangeText={setEmail}
-                autoCapitalize="none"
-                keyboardType="email-address"
-                autoCorrect={false}
-              />
-            )}
             <TextInput
               style={styles.input}
               placeholder="Password"
@@ -131,16 +96,24 @@ export default function LoginScreen() {
               {loading ? (
                 <ActivityIndicator color="#062020" />
               ) : (
-                <Text style={styles.buttonText}>
-                  {mode === "login" ? "Sign In" : "Create Account"}
-                </Text>
+                <Text style={styles.buttonText}>Sign In</Text>
               )}
             </Pressable>
 
+            {/*
+              Accounts are not created here. Access is invite-only: a request
+              has to be approved by an operator before an account exists, and
+              that flow lives on the web. A half-copy of it in the app would be
+              a second place to keep correct.
+            */}
+            <Pressable onPress={() => Linking.openURL(store.requestAccessUrl())}>
+              <Text style={styles.note}>
+                No account? Request access — opens in your browser.
+              </Text>
+            </Pressable>
+
             <Text style={styles.note}>
-              {mode === "login"
-                ? "No ID required. Just username and password."
-                : "Username + password. No phone, no ID, no surveillance."}
+              One account for every Nexus app. No phone, no ID, no surveillance.
             </Text>
           </View>
         </ScrollView>

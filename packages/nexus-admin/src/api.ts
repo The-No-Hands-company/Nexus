@@ -135,12 +135,10 @@ export const USER_FLAGS = {
 
 // ── Session singleton ─────────────────────────────────────────────────────────
 
-let _session: Session | null = (() => {
-  try {
-    const raw = localStorage.getItem("nexus_admin_session");
-    return raw ? (JSON.parse(raw) as Session) : null;
-  } catch { return null; }
-})();
+// Starts empty and is filled by whoami() on load. Nothing is persisted: a
+// session stored here would be a second, staler answer to a question the
+// server can answer authoritatively on every request.
+let _session: Session | null = null;
 
 const _listeners = new Set<() => void>();
 
@@ -148,14 +146,71 @@ export function getSession(): Session | null { return _session; }
 
 export function setSession(s: Session | null): void {
   _session = s;
-  if (s) localStorage.setItem("nexus_admin_session", JSON.stringify(s));
-  else localStorage.removeItem("nexus_admin_session");
+  // Deliberately not persisted; see the declaration above. Clear anything an
+  // older build of this console left behind, so it cannot be read by accident.
+  try { localStorage.removeItem("nexus_admin_session"); } catch { /* private mode */ }
   _listeners.forEach((fn) => fn());
+}
+
+/**
+ * Who the server says we are, and whether they may use this console.
+ *
+ * There is no login form: the ecosystem already authenticated whoever is
+ * looking. The only question left is authorisation, and /admin/overview is the
+ * authority on it — 403 means signed in but not an instance admin, which is a
+ * different answer from "signed out" and deserves different words.
+ */
+export async function whoami(): Promise<
+  { state: "admin"; session: Session } | { state: "forbidden" } | { state: "anonymous" }
+> {
+  try {
+    const res = await fetch(`${apiOrigin()}/api/v1/users/@me`, { credentials: "include" });
+    if (res.status === 401) return { state: "anonymous" };
+    if (!res.ok) return { state: "anonymous" };
+    const body = await res.json();
+    const user = body.user ?? body;
+
+    const gate = await fetch(`${apiOrigin()}/api/v1/admin/overview`, { credentials: "include" });
+    if (gate.status === 403) return { state: "forbidden" };
+    if (gate.status === 401) return { state: "anonymous" };
+
+    return {
+      state: "admin",
+      session: {
+        accessToken: "",
+        username: user.username,
+        userId: user.id,
+        serverUrl: apiOrigin(),
+      },
+    };
+  } catch {
+    return { state: "anonymous" };
+  }
 }
 
 export function subscribeSession(fn: () => void): () => void {
   _listeners.add(fn);
   return () => _listeners.delete(fn);
+}
+
+/**
+ * The server this console talks to.
+ *
+ * Always the origin that served it. This app is a browser client behind the
+ * ecosystem proxy, which injects a verified identity header for *this*
+ * hostname — a request sent anywhere else arrives unauthenticated. The dev
+ * override exists because a Vite server on :5173 really is a different origin
+ * from the API.
+ */
+/** Vite's build-time env, read without requiring the vite/client types. */
+function viteEnv(): Record<string, string | undefined> {
+  return (import.meta as unknown as { env?: Record<string, string | undefined> }).env ?? {};
+}
+
+export function apiOrigin(): string {
+  const env = viteEnv();
+  const override = env.DEV ? env.VITE_NEXUS_API_ORIGIN : undefined;
+  return (override ?? window.location.origin).replace(/\/$/, "");
 }
 
 // ── HTTP client ───────────────────────────────────────────────────────────────
@@ -168,13 +223,14 @@ export class ApiError extends Error {
 }
 
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const session = getSession();
-  const base = session?.serverUrl?.replace(/\/$/, "") ?? "";
-  const res = await fetch(`${base}/api/v1${path}`, {
+  // No Authorization header. The server stopped accepting locally-minted JWTs
+  // when its login was deleted; identity arrives as a signed header the proxy
+  // adds, which the browser can neither see nor forge.
+  const res = await fetch(`${apiOrigin()}/api/v1${path}`, {
     ...init,
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
-      ...(session ? { Authorization: `Bearer ${session.accessToken}` } : {}),
       ...(init.headers ?? {}),
     },
   });
@@ -245,11 +301,6 @@ export const api = {
     apiFetch(`/servers/${serverId}/reports/${reportId}/dismiss`, { method: "POST", body: "{}" }),
 
   // ── Prometheus metrics (raw text) ──────────────────────────────────────────
-  metrics: () => {
-    const session = getSession();
-    const base = session?.serverUrl?.replace(/\/$/, "") ?? "";
-    return fetch(`${base}/api/v1/metrics`, {
-      headers: session ? { Authorization: `Bearer ${session.accessToken}` } : {},
-    }).then((r) => r.text());
-  },
+  metrics: () =>
+    fetch(`${apiOrigin()}/api/v1/metrics`, { credentials: "include" }).then((r) => r.text()),
 };

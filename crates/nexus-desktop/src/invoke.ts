@@ -32,37 +32,18 @@ export function getServerUrl(): string {
   return _serverUrl;
 }
 
-let _token: string | null = localStorage.getItem("nexus:dev:token");
-let _refreshToken: string | null = localStorage.getItem("nexus:dev:refreshToken");
-
-function authHeaders(): Record<string, string> {
-  const h: Record<string, string> = { "Content-Type": "application/json" };
-  if (_token) h["Authorization"] = `Bearer ${_token}`;
-  return h;
+// No token is held here any more. In browser mode the session is a cookie the
+// ecosystem proxy reads and exchanges for a signed identity; the page cannot
+// see it and does not need to. Anything an older build stored is cleared on
+// load so it cannot be picked up by accident.
+for (const k of ["nexus:dev:token", "nexus:dev:refreshToken"]) {
+  try { localStorage.removeItem(k); } catch { /* private mode */ }
 }
 
-/** Try to exchange the stored refresh token for a new access token. */
-async function tryRefreshToken(): Promise<boolean> {
-  if (!_refreshToken) return false;
-  try {
-    const r = await fetch(`${_serverUrl}/api/v1/auth/refresh`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ refresh_token: _refreshToken }),
-    });
-    if (!r.ok) return false;
-    const data = await r.json() as Record<string, unknown>;
-    if (typeof data.access_token !== "string") return false;
-    _token = data.access_token;
-    localStorage.setItem("nexus:dev:token", _token);
-    if (typeof data.refresh_token === "string") {
-      _refreshToken = data.refresh_token;
-      localStorage.setItem("nexus:dev:refreshToken", _refreshToken);
-    }
-    return true;
-  } catch {
-    return false;
-  }
+const AUTH_LOGIN_URL = "https://auth.tnhc.dev/login";
+
+function authHeaders(): Record<string, string> {
+  return { "Content-Type": "application/json" };
 }
 
 async function apiFetch<T>(
@@ -72,27 +53,14 @@ async function apiFetch<T>(
 ): Promise<T> {
   const r = await fetch(`${_serverUrl}${path}`, {
     method,
+    credentials: "include",
     headers: authHeaders(),
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
 
-  // Auto-refresh on 401 and retry once
   if (r.status === 401) {
-    const refreshed = await tryRefreshToken();
-    if (refreshed) {
-      const r2 = await fetch(`${_serverUrl}${path}`, {
-        method,
-        headers: authHeaders(),
-        body: body !== undefined ? JSON.stringify(body) : undefined,
-      });
-      if (r2.ok) return r2.json() as Promise<T>;
-      // Refresh didn't help — clear session
-    }
-    // Token dead and refresh failed → wipe stored credentials
-    _token = null;
-    _refreshToken = null;
-    localStorage.removeItem("nexus:dev:token");
-    localStorage.removeItem("nexus:dev:refreshToken");
+    // Nothing to retry with. Ecosystem sessions are re-established by signing
+    // in again, not renewed from something held here.
     const text = await r.text();
     throw new Error(`401: ${text}`);
   }
@@ -392,54 +360,21 @@ async function browserInvoke<T>(cmd: string, args: Raw = {}): Promise<T> {
     }
 
     case "login": {
-      const resp = await apiFetch<Raw>("POST", "/api/v1/auth/login", {
-        username: args.username,
-        password: args.password,
-      });
-      _token = resp.access_token as string;
-      localStorage.setItem("nexus:dev:token", _token);
-      if (typeof resp.refresh_token === "string") {
-        _refreshToken = resp.refresh_token;
-        localStorage.setItem("nexus:dev:refreshToken", _refreshToken);
-      }
-      return resp as T;
-    }
-
-    case "register": {
-      const resp = await apiFetch<Raw>("POST", "/api/v1/auth/register", {
-        username: args.username,
-        email: args.email,
-        password: args.password,
-      });
-      _token = resp.access_token as string;
-      localStorage.setItem("nexus:dev:token", _token);
-      if (typeof resp.refresh_token === "string") {
-        _refreshToken = resp.refresh_token;
-        localStorage.setItem("nexus:dev:refreshToken", _refreshToken);
-      }
-      return resp as T;
-    }
-
-    case "logout": {
-      _token = null;
-      _refreshToken = null;
-      localStorage.removeItem("nexus:dev:token");
-      localStorage.removeItem("nexus:dev:refreshToken");
+      // Browser mode has no business collecting a password: the ecosystem
+      // sign-in owns that, and the session it sets is a cookie this page
+      // cannot read. Send them there and come back to where they were.
+      const back = encodeURIComponent(window.location.href);
+      window.location.href = `${AUTH_LOGIN_URL}?redirect_uri=${back}`;
       return undefined as unknown as T;
     }
 
-    case "refresh_token": {
-      if (!_refreshToken) throw new Error("No refresh token");
-      const resp = await apiFetch<Raw>("POST", "/api/v1/auth/refresh", {
-        refresh_token: _refreshToken,
-      });
-      _token = resp.access_token as string;
-      localStorage.setItem("nexus:dev:token", _token);
-      if (typeof resp.refresh_token === "string") {
-        _refreshToken = resp.refresh_token;
-        localStorage.setItem("nexus:dev:refreshToken", _refreshToken);
-      }
-      return _token as unknown as T;
+    case "request_access_url":
+      return "https://app.tnhc.dev/request" as unknown as T;
+
+    case "logout": {
+      // Only the ecosystem can clear an ecosystem session; there is nothing
+      // stored locally to drop.
+      return undefined as unknown as T;
     }
 
     // ── Servers ───────────────────────────────────────────────────────────

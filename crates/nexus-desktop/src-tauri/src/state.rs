@@ -7,8 +7,14 @@ use uuid::Uuid;
 /// Persisted to tauri-plugin-store between restarts.
 #[derive(Debug, Default, Clone)]
 pub struct Session {
-    pub access_token: Option<String>,
-    pub refresh_token: Option<String>,
+    /// Ecosystem session token (`nxs_…`), presented to apps as a cookie.
+    ///
+    /// Not a JWT this app minted or can mint. A desktop client is not behind
+    /// the ecosystem proxy and has no browser cookie jar, so it does by hand
+    /// what a browser does automatically: sign in to Auth, hold the session,
+    /// and send it as `nexus_session` on every request. The proxy exchanges it
+    /// for a short-lived signed identity per host.
+    pub session_token: Option<String>,
     pub user_id: Option<Uuid>,
     pub username: Option<String>,
     /// Base URL of the connected Nexus server (e.g. "https://nexus.chat")

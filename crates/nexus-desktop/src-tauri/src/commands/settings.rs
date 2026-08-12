@@ -13,7 +13,7 @@ pub async fn get_settings(state: State<'_, AppState>) -> Result<serde_json::Valu
     Ok(serde_json::json!({
         "server_url": session.server_url,
         "username": session.username,
-        "logged_in": session.access_token.is_some(),
+        "logged_in": session.session_token.is_some(),
     }))
 }
 

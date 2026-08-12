@@ -19,7 +19,7 @@ pub mod voice;
 pub mod webhooks;
 
 use reqwest::Client;
-use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
+use reqwest::header::{CONTENT_TYPE, COOKIE, HeaderMap, HeaderValue};
 
 use crate::state::Session;
 
@@ -56,12 +56,16 @@ pub(crate) fn friendly_api_error(status: reqwest::StatusCode, body: &str) -> Str
 
 /// Build a pre-configured reqwest client for one API call.
 pub(crate) fn api_client(session: &Session) -> anyhow::Result<(Client, String)> {
-    let token = session.access_token.as_deref().unwrap_or("");
+    let token = session.session_token.as_deref().unwrap_or("");
 
     let mut headers = HeaderMap::new();
     if !token.is_empty() {
-        let bearer = format!("Bearer {}", token);
-        headers.insert(AUTHORIZATION, HeaderValue::from_str(&bearer)?);
+        // A cookie, not Authorization. The app servers stopped accepting
+        // locally-minted tokens when their logins were deleted; what they
+        // trust is the identity header the ecosystem proxy adds, and the proxy
+        // mints that from this cookie.
+        let cookie = format!("nexus_session={}", token);
+        headers.insert(COOKIE, HeaderValue::from_str(&cookie)?);
     }
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 

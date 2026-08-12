@@ -76,10 +76,9 @@ pub fn run() {
         // ── Tauri commands ───────────────────────────────────────────────────
         .invoke_handler(tauri::generate_handler![
             // Auth
-            commands::auth::register,
+            commands::auth::request_access_url,
             commands::auth::login,
             commands::auth::logout,
-            commands::auth::refresh_token,
             commands::auth::get_current_user,
             // Servers & channels
             commands::servers::list_servers,

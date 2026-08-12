@@ -92,7 +92,24 @@ export class GatewayClient {
 
   private open() {
     this.intentionalClose = false;
-    this.ws = new WebSocket(this.gatewayUrl);
+    // React Native lets us set handshake headers, which is the whole reason
+    // this works off a browser: the ecosystem proxy reads the session cookie,
+    // exchanges it for a signed identity, and puts that on the socket it opens
+    // to the app. Without the cookie the proxy refuses the upgrade outright.
+    // The cast is because the ambient DOM WebSocket type declares only two
+    // parameters; React Native's implementation takes a third options object,
+    // and that is the one actually running here.
+    const token = store.session?.token;
+    const RNWebSocket = WebSocket as unknown as new (
+      url: string,
+      protocols?: string | string[],
+      options?: { headers?: Record<string, string> },
+    ) => WebSocket;
+    this.ws = new RNWebSocket(
+      this.gatewayUrl,
+      undefined,
+      token ? { headers: { Cookie: `nexus_session=${token}` } } : undefined,
+    );
     this.ws.onopen = this.onOpen.bind(this);
     this.ws.onmessage = this.onMessage.bind(this);
     this.ws.onerror = this.onError.bind(this);
@@ -150,10 +167,10 @@ export class GatewayClient {
 
   private identify() {
     if (!store.session) return;
-    this.send({
-      op: OP_IDENTIFY,
-      d: { token: store.session.accessToken },
-    });
+    // No credential in the payload. The socket was authenticated at the
+    // handshake, from the cookie above; the server verified it before this
+    // connection existed and ignores anything sent here.
+    this.send({ op: OP_IDENTIFY, d: {} });
   }
 
   private send(data: GatewayMessage) {

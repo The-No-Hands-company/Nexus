@@ -64,7 +64,7 @@ pub async fn send_message(
     if session.server_url.is_empty() {
         return Err("No server URL configured. Please log in again.".into());
     }
-    if session.access_token.is_none() {
+    if session.session_token.is_none() {
         return Err("Not authenticated. Please log in again.".into());
     }
     let (client, base) = api_client(&session).map_err(|e| e.to_string())?;

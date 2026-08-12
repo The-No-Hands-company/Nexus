@@ -150,10 +150,23 @@ export interface ServerMember {
 
 // ── API client ────────────────────────────────────────────────────────────────
 
+/**
+ * Where accounts live. Not the chat server — the ecosystem identity service.
+ *
+ * A native app is not behind the ecosystem proxy and has no browser cookie
+ * jar, so it does what a browser does, by hand: sign in to Auth, hold the
+ * session token, and present it as the `nexus_session` cookie on every request
+ * to an app. The proxy exchanges that cookie for a short-lived signed identity
+ * per host, exactly as it does for a browser, and the app never sees the
+ * session at all.
+ */
+export const AUTH_BASE =
+  process.env.EXPO_PUBLIC_NEXUS_AUTH_URL ?? "https://auth.tnhc.dev";
+
 class NexusApi {
   private baseUrl: string;
-  private _accessToken: string | null = null;
-  private refreshToken: string | null = null;
+  /** Ecosystem session token (`nxs_…`), presented as a cookie. */
+  private _sessionToken: string | null = null;
 
   constructor(baseUrl: string = DEFAULT_API_BASE) {
     this.baseUrl = baseUrl;
@@ -164,23 +177,28 @@ class NexusApi {
   getBaseUrl(): string { return this.baseUrl; }
   setBaseUrl(url: string): void { this.baseUrl = normalizeApiBaseUrl(url); }
 
-  setTokens(access: string, refresh: string) {
-    this._accessToken = access;
-    this.refreshToken = refresh;
+  /** Adopt an ecosystem session token, e.g. one restored from storage. */
+  setSessionToken(token: string | null) {
+    this._sessionToken = token;
   }
+
+  getSessionToken(): string | null { return this._sessionToken; }
 
   clearTokens() {
-    this._accessToken = null;
-    this.refreshToken = null;
+    this._sessionToken = null;
   }
 
-  get hasToken(): boolean { return !!this._accessToken; }
+  get hasToken(): boolean { return !!this._sessionToken; }
 
   // ── Core ────────────────────────────────────────────────────────────────────
 
   private headers(): Record<string, string> {
     const h: Record<string, string> = { "Content-Type": "application/json" };
-    if (this._accessToken) h["Authorization"] = "Bearer " + this._accessToken;
+    // A cookie, not an Authorization header. The app servers stopped accepting
+    // locally-minted tokens when their logins were deleted; what they trust is
+    // the identity header the ecosystem proxy adds, and the proxy mints that
+    // from this cookie.
+    if (this._sessionToken) h["Cookie"] = `nexus_session=${this._sessionToken}`;
     return h;
   }
 
@@ -192,13 +210,10 @@ class NexusApi {
     const opts: RequestInit = { method, headers: this.headers() };
     if (body !== undefined) opts.body = JSON.stringify(body);
     const res = await fetch(baseUrl + path, opts);
-    if (res.status === 401 && this.refreshToken) {
-      const ok = await this.tryRefresh();
-      if (ok) {
-        opts.headers = this.headers();
-        const r2 = await fetch(baseUrl + path, opts);
-        if (r2.ok) return r2.json() as Promise<T>;
-      }
+    if (res.status === 401) {
+      // Nothing to refresh: ecosystem sessions are not renewed by this client,
+      // they are re-established by signing in again. Dropping the token here
+      // is what makes the UI fall back to the sign-in screen.
       this.clearTokens();
       throw new Error("Unauthorized");
     }
@@ -210,39 +225,38 @@ class NexusApi {
     return res.json() as Promise<T>;
   }
 
-  private async tryRefresh(): Promise<boolean> {
-    if (!this.refreshToken) return false;
-    try {
-      const r = await fetch(this.baseUrl + "/auth/refresh", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ refresh_token: this.refreshToken }),
-      });
-      if (!r.ok) return false;
-      const data = await r.json() as Record<string, unknown>;
-      if (typeof data.access_token !== "string") return false;
-      this._accessToken = data.access_token as string;
-      if (typeof data.refresh_token === "string") {
-        this.refreshToken = data.refresh_token as string;
-      }
-      return true;
-    } catch { return false; }
-  }
-
   // ── Auth ────────────────────────────────────────────────────────────────────
 
-  async register(username: string, password: string, email?: string) {
-    const r = await this.request<{ user: User } & AuthTokens>("POST", "/auth/register", {
-      username, password, ...(email ? { email } : {}),
+  /**
+   * Sign in to the ecosystem.
+   *
+   * Goes to Auth, not to the app server: there is one account for every app and
+   * only Auth holds it. Returns the session token so the caller can persist it.
+   */
+  async login(username: string, password: string): Promise<{ token: string; user: User }> {
+    const res = await fetch(`${AUTH_BASE}/api/v1/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
     });
-    this.setTokens(r.accessToken, r.refreshToken);
-    return r;
+    if (!res.ok) {
+      throw new Error(res.status === 401 ? "Incorrect username or password." : `HTTP ${res.status}`);
+    }
+    const body = (await res.json()) as { token?: string; user?: User };
+    if (!body.token) throw new Error("Sign-in did not return a session.");
+    this.setSessionToken(body.token);
+    return { token: body.token, user: body.user as User };
   }
 
-  async login(username: string, password: string) {
-    const r = await this.request<{ user: User } & AuthTokens>("POST", "/auth/login", { username, password });
-    this.setTokens(r.accessToken, r.refreshToken);
-    return r;
+  /**
+   * Where to send someone who has no account.
+   *
+   * Registration is invite-only and deliberately not in this app: it needs an
+   * operator to approve the request, so it lives on the web where that flow
+   * already exists rather than being half-reimplemented here.
+   */
+  requestAccessUrl(): string {
+    return "https://app.tnhc.dev/request";
   }
 
   async logout() {
