@@ -5,7 +5,6 @@
 
 /// Manual `sqlx::FromRow<'_, AnyRow>` impls for all model types (AnyPool compat).
 pub mod any_row;
-pub mod auth;
 pub mod config;
 pub mod crypto;
 pub mod error;

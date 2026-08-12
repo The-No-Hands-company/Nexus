@@ -4,7 +4,6 @@
 //! authentication, and client-facing functionality.
 #![allow(clippy::pedantic)]
 
-pub mod auth;
 pub mod email;
 pub mod middleware;
 pub mod push_sender;
