@@ -48,7 +48,12 @@ export function useGateway() {
           if (payload.op === "Hello") {
             const interval =
               (payload.d as { heartbeat_interval?: number })?.heartbeat_interval ?? 45_000;
-            ws.send(JSON.stringify({ op: "Identify", d: { token: session.accessToken } }));
+            // No credential. The browser sent its session cookie with the
+            // handshake, the proxy exchanged it for a signed identity token and
+            // put that on the upstream connection, and the server had already
+            // verified it before this socket existed. There is nothing left for
+            // the client to prove, and it holds no token to prove it with.
+            ws.send(JSON.stringify({ op: "Identify", d: {} }));
             timerRef.current = window.setInterval(() => {
               if (ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({ op: "Heartbeat", d: { timestamp: Date.now() } }));

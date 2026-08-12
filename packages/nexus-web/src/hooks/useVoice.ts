@@ -141,10 +141,12 @@ export function useVoice(): UseVoiceReturn {
 
     if (op === "Hello") {
       // Send Identify
+      // No token: the voice server authenticated this socket from the
+      // proxy-injected identity header at the upgrade, before the connection
+      // existed. The channel and session ids are routing, not credentials.
       ws.send(JSON.stringify({
         op: "Identify",
         d: {
-          token: session?.accessToken,
           channel_id: targetChannelId,
           session_id: sessionId,
         },
