@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run"
   },
   "dependencies": {
     "clsx": "^2.1.1",
@@ -27,6 +28,7 @@
     "@vitejs/plugin-react": "^4",
     "tailwindcss": "^4.2.2",
     "typescript": "^5",
-    "vite": "^5"
+    "vite": "^5",
+    "vitest": "^4.1.10"
   }
 }

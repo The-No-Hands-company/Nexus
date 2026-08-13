@@ -7,6 +7,7 @@ import ServerList from "../components/ServerList";
 import { useVoice } from "../hooks/useVoice";
 import ChannelList from "../components/ChannelList";
 import ChatView from "../components/ChatView";
+import { isEmbedded, shouldShowNotifBanner } from "../embed";
 
 const SettingsPanel   = lazy(() => import("../components/SettingsPanel"));
 const JoinServerModal = lazy(() => import("../components/JoinServerModal"));
@@ -17,10 +18,14 @@ export default function MainLayout() {
   const [notifDismissed, setNotifDismissed] = useState(
     () => localStorage.getItem("nx_notif_dismissed") === "1"
   );
-  const showNotifBanner =
-    !notifDismissed &&
-    typeof Notification !== "undefined" &&
-    Notification.permission === "default";
+  const showNotifBanner = shouldShowNotifBanner({
+    embedded: isEmbedded(),
+    dismissed: notifDismissed,
+    supported: typeof Notification !== "undefined",
+    hasSession: !!session,
+    permissionDefault:
+      typeof Notification !== "undefined" && Notification.permission === "default",
+  });
   const voice = useVoice();
   const [showJoin, setShowJoin]         = useState(false);
 
