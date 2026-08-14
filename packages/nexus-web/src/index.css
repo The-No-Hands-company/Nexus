@@ -1,17 +1,18 @@
 @import "tailwindcss";
+@import "./nexus-tokens.css";
 
 :root {
-  --bg-900: #0d0d0f;
-  --bg-800: #111115;
-  --bg-700: #17171c;
-  --bg-600: #1e1e25;
-  --bg-500: #26262f;
-  --fg:     #e8e8f0;
-  --muted:  #7a7a9a;
-  --accent-300: #a78bfa;
-  --accent-400: #8b5cf6;
-  --accent-500: #7c3aed;
-  --accent-600: #6d28d9;
+  --bg-900: var(--nexus-color-bg-canvas);
+  --bg-800: var(--nexus-color-bg-canvas);
+  --bg-700: var(--nexus-color-bg-surface);
+  --bg-600: var(--nexus-color-bg-elevated);
+  --bg-500: var(--nexus-color-bg-elevated);
+  --fg:     var(--nexus-color-text-primary);
+  --muted:  var(--nexus-color-text-muted);
+  --accent-300: var(--nexus-color-accent-primary);
+  --accent-400: var(--nexus-color-accent-primary);
+  --accent-500: var(--nexus-color-accent-primary);
+  --accent-600: var(--nexus-color-accent-primaryActive);
 }
 
 @theme inline {
