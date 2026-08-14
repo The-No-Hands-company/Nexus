@@ -107,7 +107,9 @@
     "announcementChannel": "Announcement channel {{name}}",
     "encrypted": "End-to-end encrypted",
     "unread": "Unread messages",
-    "draftSaved": "Draft saved"
+    "draftSaved": "Draft saved",
+    "nameRequired": "Enter a channel name.",
+    "selectServerFirst": "Pick a server first — channels live inside one."
   },
   "chat": {
     "messagePlaceholder": "Message #{{channel}}",

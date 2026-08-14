@@ -97,7 +97,14 @@ export interface NxServer {
 export interface NxChannel {
   id: string;
   name: string | null;
-  kind: string;
+  /**
+   * `channel_type` on the wire, like every other field here. It was declared
+   * as `kind`, which the API has never sent or accepted: reads left it
+   * undefined so ChannelList's `kind === "text"` filter matched nothing and
+   * the channel list rendered empty, and writes sent `{name, kind}` which the
+   * API rejected with a 422 the UI swallowed into console.error.
+   */
+  channel_type: string;
   server_id: string | null;
   topic: string | null;
   is_e2ee: boolean;
@@ -455,7 +462,10 @@ export const useStore = create<Store>()(
         if (!s) throw new Error("Not authenticated");
         const ch = await apiFetch<NxChannel>(s, `/servers/${serverId}/channels`, {
           method: "POST",
-          body: JSON.stringify({ name, kind }),
+          // `channel_type`, not `kind` — the API answers 422 "missing field
+          // `channel_type`" to the latter, which is what made the new-channel
+          // button appear to do nothing at all.
+          body: JSON.stringify({ name, channel_type: kind }),
         });
         set((st) => ({ channels: [ch, ...st.channels] }));
         return ch;

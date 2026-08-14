@@ -19,6 +19,12 @@ export default function ChannelList({ voice }: { voice?: UseVoiceReturn }) {
   const { channelId } = useParams<{ channelId: string }>();
   const [creatingText, setCreatingText] = useState(false);
   const [newName, setNewName] = useState("");
+  /**
+   * Why this exists: creation used to fail with a 422 and the handler wrote it
+   * to console.error, so the button looked simply dead. A failure the user
+   * cannot see is indistinguishable from a feature that was never wired up.
+   */
+  const [createError, setCreateError] = useState<string | null>(null);
   const [composingDm, setComposingDm] = useState(false);
   const [dmTarget, setDmTarget] = useState("");
 
@@ -26,9 +32,9 @@ export default function ChannelList({ voice }: { voice?: UseVoiceReturn }) {
   const homeMode = !activeServerId;
 
   const textChannels = channels.filter(
-    (c) => c.kind === "text" || c.kind === "announcement"
+    (c) => c.channel_type === "text" || c.channel_type === "announcement"
   );
-  const voiceChannels = channels.filter((c) => c.kind === "voice");
+  const voiceChannels = channels.filter((c) => c.channel_type === "voice");
 
   const handleChannel = (id: string) => {
     setActiveChannel(id);
@@ -37,20 +43,30 @@ export default function ChannelList({ voice }: { voice?: UseVoiceReturn }) {
   };
 
   const confirmCreate = async () => {
-    if (!newName.trim() || !activeServerId) return;
+    if (!newName.trim()) {
+      setCreateError(t("channel.nameRequired"));
+      return;
+    }
+    if (!activeServerId) {
+      // Silently returning here was the other half of the "dead button": with
+      // no server selected there is nowhere to put a channel, and nothing said so.
+      setCreateError(t("channel.selectServerFirst"));
+      return;
+    }
+    setCreateError(null);
     try {
       const ch = await createChannel(activeServerId, newName.trim(), "text");
       setCreatingText(false);
       setNewName("");
       handleChannel(ch.id);
     } catch (e) {
-      console.error(e);
+      setCreateError(e instanceof Error ? e.message : String(e));
     }
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") confirmCreate();
-    if (e.key === "Escape") { setCreatingText(false); setNewName(""); }
+    if (e.key === "Escape") { setCreatingText(false); setNewName(""); setCreateError(null); }
   };
 
   // ── Home / DM mode ────────────────────────────────────────────────────────
@@ -197,6 +213,11 @@ export default function ChannelList({ voice }: { voice?: UseVoiceReturn }) {
               maxLength={100}
               className="w-full bg-bg-700 text-sm text-fg rounded px-2 py-1 outline-none focus:ring-1 focus:ring-accent-500 placeholder-muted/50"
             />
+            {createError && (
+              <p role="alert" className="mt-1 text-[11px] text-red-400">
+                {createError}
+              </p>
+            )}
             <div className="flex gap-1 mt-1">
               <button
                 onClick={confirmCreate}
@@ -206,7 +227,7 @@ export default function ChannelList({ voice }: { voice?: UseVoiceReturn }) {
                 {t("common.create")}
               </button>
               <button
-                onClick={() => { setCreatingText(false); setNewName(""); }}
+                onClick={() => { setCreatingText(false); setNewName(""); setCreateError(null); }}
                 className="flex-1 text-[11px] bg-bg-600 hover:bg-bg-500 text-muted rounded px-2 py-0.5 transition-colors"
               >
                 {t("common.cancel")}
