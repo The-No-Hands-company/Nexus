@@ -115,6 +115,11 @@ nexus.db-*
 *.db-shm
 *.db-wal
 
+# Tantivy's live search index is generated from chat messages at runtime. It
+# contains derived user content and changes on every indexed write; keep the
+# working index for search continuity, but never version or publish it.
+/data/uploads/search/
+
 # Generated on first `nexus serve --lite` run and holds the JWT signing secret
 # (see generate_or_load_lite_secret in crates/nexus-server/src/main.rs).
 nexus.toml
