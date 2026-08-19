@@ -640,3 +640,138 @@ pub enum SfuError {
     #[error("Room is full (max {0} participants)")]
     RoomFull(usize),
 }
+
+#[cfg(test)]
+mod forwarding_tests {
+    //! Routing correctness for the SFU's media graph.
+    //!
+    //! These do not prove RTP bytes traverse the wire — that needs a DTLS
+    //! handshake between two str0m instances and belongs in an integration
+    //! test. What they prove is the layer above, which is where an SFU's own
+    //! bugs live: who is wired to hear whom. A selective forwarding unit that
+    //! routes a peer's audio back to itself, or fails to wire a late joiner to
+    //! the people already talking, is broken regardless of how well the media
+    //! layer works underneath.
+    //!
+    //! Before these, `sfu.rs` had no tests at all.
+
+    use super::*;
+
+    /// A peer with a real `Rtc` and a real bound socket, so the code under test
+    /// runs against the types it does in production. Loopback port 0 — the
+    /// kernel picks a free port and nothing is ever sent.
+    async fn peer(id: PeerId, mids: &[(Mid, MediaKind)]) -> ActivePeer {
+        let socket = UdpSocket::bind("127.0.0.1:0")
+            .await
+            .expect("bind a loopback socket");
+        let local_addr = socket.local_addr().expect("read back the bound address");
+        ActivePeer {
+            peer_id: id,
+            _user_id: Uuid::new_v4(),
+            // Mirrors the production construction in the room loop.
+            rtc: Rtc::builder().set_ice_lite(true).build(Instant::now()),
+            socket: Arc::new(socket),
+            local_addr,
+            recv_mids: mids.to_vec(),
+            forward_mids: HashMap::new(),
+            has_video: false,
+        }
+    }
+
+    fn mid(s: &str) -> Mid {
+        Mid::from(s)
+    }
+
+    /// Join `n` peers one at a time, exactly as the room does, and return the
+    /// resulting graph.
+    #[allow(clippy::type_complexity)]
+    async fn join_all(
+        n: usize,
+    ) -> (
+        HashMap<PeerId, ActivePeer>,
+        HashMap<(PeerId, Mid), Vec<PeerId>>,
+        Vec<PeerId>,
+    ) {
+        let mut peers: HashMap<PeerId, ActivePeer> = HashMap::new();
+        let mut table: HashMap<(PeerId, Mid), Vec<PeerId>> = HashMap::new();
+        // Join order, kept explicitly: HashMap iteration order says nothing
+        // about who arrived last, and the late-joiner case depends on it.
+        let mut order: Vec<PeerId> = Vec::new();
+
+        for i in 0..n {
+            let id = Uuid::new_v4();
+            // One audio track each, named per peer so sources stay distinct.
+            let mut joining = peer(id, &[(mid(&i.to_string()), MediaKind::Audio)]).await;
+            setup_forwarding_tracks(&mut peers, &mut joining, &mut table);
+            peers.insert(id, joining);
+            order.push(id);
+        }
+        (peers, table, order)
+    }
+
+    #[tokio::test]
+    async fn a_peer_is_never_routed_its_own_media() {
+        // Echo is the defining failure of an SFU. If this ever passes silently
+        // everyone hears themselves back with a round-trip of delay.
+        let (_peers, table, _order) = join_all(3).await;
+        assert!(!table.is_empty(), "three peers must produce routes");
+        for ((source, _mid), destinations) in &table {
+            assert!(
+                !destinations.contains(source),
+                "peer {source} is routed its own media"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn every_peer_reaches_every_other_peer() {
+        let n = 3;
+        let (peers, table, _order) = join_all(n).await;
+        for id in peers.keys() {
+            let destinations: Vec<_> = table
+                .iter()
+                .filter(|((src, _), _)| src == id)
+                .flat_map(|(_, d)| d.iter().copied())
+                .collect();
+            assert_eq!(
+                destinations.len(),
+                n - 1,
+                "peer {id} should reach the other {} peers, reached {:?}",
+                n - 1,
+                destinations
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn a_late_joiner_is_wired_in_both_directions() {
+        // The asymmetric case, and the easy one to get wrong: it is simple to
+        // subscribe a new peer to existing publishers and forget that the
+        // people already in the room must also start receiving the newcomer.
+        let (peers, table, order) = join_all(3).await;
+        let last = *order.last().expect("a peer exists");
+
+        let outbound = table.iter().any(|((src, _), d)| *src == last && !d.is_empty());
+        assert!(outbound, "the newest peer must be heard by the room");
+
+        let inbound = table.iter().any(|((src, _), d)| *src != last && d.contains(&last));
+        assert!(inbound, "the newest peer must hear the room");
+    }
+
+    #[tokio::test]
+    async fn each_destination_has_a_local_mid_for_every_source_it_receives() {
+        // forward_media drops any media whose (source, mid) has no entry in the
+        // destination's forward_mids. A route in the table without a matching
+        // mid is therefore a silent black hole, not an error.
+        let (peers, table, _order) = join_all(3).await;
+        for ((source, source_mid), destinations) in &table {
+            for dest_id in destinations {
+                let dest = peers.get(dest_id).expect("destination is a known peer");
+                assert!(
+                    dest.forward_mids.contains_key(&(*source, *source_mid)),
+                    "peer {dest_id} is routed ({source}, {source_mid}) but has no mid to write it to"
+                );
+            }
+        }
+    }
+}
