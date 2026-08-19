@@ -49,6 +49,18 @@ pub enum NexusError {
     #[error("Limit reached: {message}")]
     LimitReached { message: String },
 
+    // === Not built yet ===
+    /// The endpoint exists and is routed, but the capability behind it is not
+    /// implemented.
+    ///
+    /// This is not the same as an empty result, and the difference matters. A
+    /// moderation endpoint that answers `[]` tells a caller "we looked and
+    /// found nothing"; if nothing ever looked, that is a false negative
+    /// dressed as a clean bill of health. 501 says plainly that the feature
+    /// does not exist yet, which a client can act on.
+    #[error("{feature} is not implemented on this server")]
+    NotImplemented { feature: String },
+
     // === Infrastructure errors ===
     #[error("Database error: {0}")]
     Database(#[from] sqlx::Error),
@@ -86,6 +98,7 @@ impl NexusError {
                 StatusCode::FORBIDDEN
             }
             Self::RateLimited { .. } => StatusCode::TOO_MANY_REQUESTS,
+            Self::NotImplemented { .. } => StatusCode::NOT_IMPLEMENTED,
             Self::Database(_) | Self::Redis(_) | Self::Internal(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
@@ -104,6 +117,7 @@ impl NexusError {
             Self::AlreadyExists { .. } => "ALREADY_EXISTS",
             Self::Validation { .. } => "VALIDATION_ERROR",
             Self::MissingPermission { .. } => "MISSING_PERMISSION",
+            Self::NotImplemented { .. } => "NOT_IMPLEMENTED",
             Self::Forbidden => "FORBIDDEN",
             Self::RateLimited { .. } => "RATE_LIMITED",
             Self::LimitReached { .. } => "LIMIT_REACHED",
@@ -160,6 +174,34 @@ mod tests {
     use super::*;
 
     // ── status_code mapping ───────────────────────────────────────────────────
+
+    #[test]
+    fn not_implemented_is_501_and_names_the_feature() {
+        let e = NexusError::NotImplemented {
+            feature: "Toxicity scoring".to_string(),
+        };
+        assert_eq!(e.status_code(), StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(e.error_code(), "NOT_IMPLEMENTED");
+        // The message has to say which capability is missing. "Not
+        // implemented" alone leaves a client guessing whether it asked wrongly
+        // or the server cannot answer at all.
+        assert!(e.to_string().contains("Toxicity scoring"));
+    }
+
+    #[test]
+    fn not_implemented_is_distinct_from_not_found() {
+        // 404 means "no such thing here"; 501 means "this server does not do
+        // that yet". A client retrying a 404 against another node is sensible;
+        // retrying a 501 is not, and conflating them hides which is which.
+        let missing = NexusError::NotFound {
+            resource: "Channel".to_string(),
+        };
+        let unbuilt = NexusError::NotImplemented {
+            feature: "Raid detection".to_string(),
+        };
+        assert_ne!(missing.status_code(), unbuilt.status_code());
+        assert_ne!(missing.error_code(), unbuilt.error_code());
+    }
 
     #[test]
     fn invalid_credentials_is_401() {

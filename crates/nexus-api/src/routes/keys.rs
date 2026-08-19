@@ -17,7 +17,7 @@ use axum::{
     routing::{get, post},
 };
 use nexus_common::{
-    crypto::{validate_identity_key, validate_signature, validate_x25519_key},
+    crypto::{validate_x25519_key, verify_signed_pre_key},
     error::{NexusError, NexusResult},
     gateway_event::GatewayEvent,
     models::crypto::{
@@ -97,17 +97,20 @@ async fn register_device(
         86400,
     )
     .await?;
-    // Validate key material before persisting
-    validate_identity_key(&body.identity_key).map_err(|e| NexusError::Validation {
-        message: format!("identity_key: {e}"),
-    })?;
-    validate_x25519_key(&body.signed_pre_key, "signed_pre_key").map_err(|e| {
-        NexusError::Validation {
-            message: format!("signed_pre_key: {e}"),
-        }
-    })?;
-    validate_signature(&body.signed_pre_key_sig).map_err(|e| NexusError::Validation {
-        message: format!("signed_pre_key_sig: {e}"),
+    // Verify the key material before persisting.
+    //
+    // This checks the signature, not just its shape. The signed pre-key
+    // signature is the only thing binding this pre-key to this identity: a
+    // peer starting an X3DH session trusts the bundle we hand it, and cannot
+    // check the binding itself at first contact. Accepting an unverified
+    // signature meant serving pre-keys that the identity key never authorised.
+    verify_signed_pre_key(
+        &body.identity_key,
+        &body.signed_pre_key,
+        &body.signed_pre_key_sig,
+    )
+    .map_err(|e| NexusError::Validation {
+        message: format!("signed pre-key: {e}"),
     })?;
 
     let device_type_str = body
@@ -234,13 +237,29 @@ async fn rotate_signed_pre_key(
         return Err(NexusError::Forbidden);
     }
 
-    validate_x25519_key(&body.signed_pre_key, "signed_pre_key").map_err(|e| {
-        NexusError::Validation {
-            message: format!("signed_pre_key: {e}"),
-        }
-    })?;
-    validate_signature(&body.signed_pre_key_sig).map_err(|e| NexusError::Validation {
-        message: format!("signed_pre_key_sig: {e}"),
+    // A rotation that re-submits the key already in place is not a rotation.
+    // It is the shape of compliance without the substance: the timestamp moves,
+    // any freshness check downstream is satisfied, and the key an attacker may
+    // already hold stays live. Rejecting it means the recorded rotation time
+    // always refers to a key that genuinely changed.
+    if body.signed_pre_key == device.signed_pre_key {
+        return Err(NexusError::Validation {
+            message: "signed_pre_key is unchanged — rotation must supply a new key".into(),
+        });
+    }
+
+    // Verified against the identity key stored at registration, not one sent
+    // with this request — otherwise anyone who could reach this endpoint could
+    // present a fresh identity alongside a matching signature and rotate the
+    // device onto a pre-key they control. Binding to the stored key means only
+    // the holder of the original identity private key can rotate.
+    verify_signed_pre_key(
+        &device.identity_key,
+        &body.signed_pre_key,
+        &body.signed_pre_key_sig,
+    )
+    .map_err(|e| NexusError::Validation {
+        message: format!("signed pre-key: {e}"),
     })?;
 
     keystore::rotate_signed_pre_key(
@@ -281,6 +300,19 @@ async fn upload_one_time_pre_keys(
         return Err(NexusError::Validation {
             message: "Cannot upload more than 1000 one-time pre-keys at once".into(),
         });
+    }
+
+    // One-time pre-keys were stored with no checking at all, so any string
+    // reached a peer's key bundle. They are unsigned by design — X3DH does not
+    // sign them, so the server cannot prove who made one — but it can insist
+    // they are structurally X25519 keys. Serving 32 bytes of nonsense to a peer
+    // fails a session setup in a way that looks like the peer's fault.
+    for k in &body.keys {
+        validate_x25519_key(&k.public_key, "one_time_pre_key").map_err(|e| {
+            NexusError::Validation {
+                message: format!("one_time_pre_key {}: {e}", k.key_id),
+            }
+        })?;
     }
 
     let pairs: Vec<(i32, String)> = body

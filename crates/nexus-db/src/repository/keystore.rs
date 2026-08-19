@@ -32,8 +32,9 @@ pub async fn create_device(
         r#"
         INSERT INTO devices
             (user_id, name, device_type, identity_key,
-             signed_pre_key, signed_pre_key_sig, signed_pre_key_id)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
+             signed_pre_key, signed_pre_key_sig, signed_pre_key_id,
+             signed_pre_key_rotated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
         RETURNING *
         "#,
     )
@@ -83,6 +84,10 @@ pub async fn rotate_signed_pre_key(
         SET signed_pre_key = $1,
             signed_pre_key_sig = $2,
             signed_pre_key_id = $3,
+            -- Its own clock, deliberately. `updated_at` also moves on renames
+            -- and last-seen touches, so it cannot answer "how old is this
+            -- key".
+            signed_pre_key_rotated_at = CURRENT_TIMESTAMP,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = $4
         "#,
@@ -212,6 +217,7 @@ pub async fn get_key_bundle(pool: &sqlx::AnyPool, device_id: Uuid) -> Result<Opt
         signed_pre_key: device.signed_pre_key,
         signed_pre_key_sig: device.signed_pre_key_sig,
         signed_pre_key_id: device.signed_pre_key_id,
+        signed_pre_key_rotated_at: device.signed_pre_key_rotated_at,
         one_time_pre_key: otpk,
     }))
 }
@@ -229,6 +235,7 @@ pub async fn get_all_key_bundles(pool: &sqlx::AnyPool, user_id: Uuid) -> Result<
             signed_pre_key: device.signed_pre_key,
             signed_pre_key_sig: device.signed_pre_key_sig,
             signed_pre_key_id: device.signed_pre_key_id,
+            signed_pre_key_rotated_at: device.signed_pre_key_rotated_at,
             one_time_pre_key: otpk,
         });
     }

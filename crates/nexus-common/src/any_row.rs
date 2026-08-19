@@ -321,6 +321,10 @@ impl<'r> sqlx::FromRow<'r, AnyRow> for Device {
             signed_pre_key: row.try_get("signed_pre_key")?,
             signed_pre_key_sig: row.try_get("signed_pre_key_sig")?,
             signed_pre_key_id: row.try_get("signed_pre_key_id")?,
+            // opt_dt, not dt: rows created before the column existed have no
+            // value, and a device that predates it should read as "rotation
+            // age unknown" rather than fail to load at all.
+            signed_pre_key_rotated_at: opt_dt(row, "signed_pre_key_rotated_at")?,
             device_type: parse_enum(row, "device_type", |s| match s {
                 "desktop" => Some(DeviceType::Desktop),
                 "mobile" => Some(DeviceType::Mobile),

@@ -1,13 +1,42 @@
 //! E2EE crypto utilities — server-side helpers.
 //!
-//! The server deliberately does NOT perform Signal Protocol cryptography.
-//! That happens exclusively on clients. This module contains only:
+//! Session cryptography — the Double Ratchet, message encryption, key
+//! agreement — happens exclusively on clients. The server never holds a
+//! private key and cannot read a message.
+//!
+//! It does, however, verify the one thing that binds a pre-key to an identity.
+//! This module contains:
 //!
 //! - **Safety number computation** — a human-verifiable fingerprint of two
 //!   identity keys that users compare out-of-band to detect MITM attacks.
-//! - **Key material validation** — basic sanity checks on uploaded key blobs
-//!   (correct base64 encoding, expected byte lengths for X25519 / Ed25519).
+//! - **Key material validation** — base64 and length checks on uploaded blobs.
+//! - **Signed pre-key verification** — the Ed25519 signature over the pre-key,
+//!   checked against the identity key. See below for why this is not optional.
 //! - **Utility helpers** shared across the API and repository layers.
+//!
+//! # Why the server verifies the signed pre-key
+//!
+//! In X3DH the signed pre-key is the only element a peer cannot authenticate
+//! for itself at first contact: it trusts that the pre-key it fetched really
+//! belongs to the identity it is talking to, and that trust rests entirely on
+//! the signature. This server previously checked only that the signature
+//! decoded from base64 and was 64 bytes long, so 64 random bytes were accepted
+//! and served on to peers as if authentic.
+//!
+//! Verifying it here does not make the server trusted — a client should still
+//! verify for itself, and safety numbers exist for exactly that reason. It
+//! makes the server *honest*: it refuses to distribute a bundle it can already
+//! prove is unauthorised, instead of passing the problem to every peer.
+//!
+//! # Why dalek rather than a libsignal binding
+//!
+//! Signal does not publish libsignal to crates.io. The `libsignal-*` crates
+//! there are third-party reimplementations or bindings to the deprecated
+//! `libsignal-protocol-c`, and putting unaudited crypto in the one place that
+//! authenticates keys would be worse than the gap it closes. The signature is
+//! plain Ed25519 over the pre-key bytes — the identity key is Ed25519, not
+//! X25519, so XEdDSA is not involved — and `ed25519-dalek` verifies exactly
+//! that, is already vendored, and is widely audited.
 //!
 //! # Safety Number Algorithm
 //! Inspired by Signal's safety number spec:
@@ -18,6 +47,7 @@
 //! 5. Encode the first 30 bytes as 10 groups of 5 decimal digits (60 digits total).
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use sha2::{Digest, Sha512};
 use uuid::Uuid;
 
@@ -37,6 +67,10 @@ pub enum KeyValidationError {
     NotBase64(String),
     #[error("Key has wrong length: expected {expected} bytes, got {actual}")]
     WrongLength { expected: usize, actual: usize },
+    #[error("Identity key is not a valid Ed25519 public key: {0}")]
+    BadIdentityKey(String),
+    #[error("Signature does not verify against the identity key")]
+    SignatureMismatch,
     #[error("Signature is not valid base64: {0}")]
     BadSignature(String),
 }
@@ -93,6 +127,60 @@ pub fn validate_signature(encoded: &str) -> Result<Vec<u8>, KeyValidationError> 
         });
     }
     Ok(bytes)
+}
+
+/// Verify that `signed_pre_key` really was signed by the holder of
+/// `identity_key`.
+///
+/// All three arguments are base64. Returns the decoded signed pre-key on
+/// success, so callers can persist the bytes they just authenticated rather
+/// than decoding a second time and risking a mismatch.
+///
+/// # Errors
+/// - `NotBase64` / `WrongLength` if any input is malformed.
+/// - `BadIdentityKey` if the identity key is not a valid Ed25519 point.
+///   Length alone does not establish this: a 32-byte value can still fail to
+///   decompress to a curve point.
+/// - `SignatureMismatch` if the signature does not verify. This is the case
+///   that matters — it means the pre-key was not authorised by this identity.
+pub fn verify_signed_pre_key(
+    identity_key: &str,
+    signed_pre_key: &str,
+    signature: &str,
+) -> Result<Vec<u8>, KeyValidationError> {
+    let identity_bytes = validate_identity_key(identity_key)?;
+    let pre_key_bytes = validate_x25519_key(signed_pre_key, "signed_pre_key")?;
+    let sig_bytes = validate_signature(signature)?;
+
+    // Lengths are already checked above, so these conversions cannot fail;
+    // expect() would still be a panic path on a public endpoint, so they are
+    // handled as errors.
+    let identity_array: [u8; ED25519_PUBLIC_KEY_LEN] =
+        identity_bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| KeyValidationError::WrongLength {
+                expected: ED25519_PUBLIC_KEY_LEN,
+                actual: identity_bytes.len(),
+            })?;
+    let sig_array: [u8; 64] =
+        sig_bytes
+            .as_slice()
+            .try_into()
+            .map_err(|_| KeyValidationError::WrongLength {
+                expected: 64,
+                actual: sig_bytes.len(),
+            })?;
+
+    let verifying_key = VerifyingKey::from_bytes(&identity_array)
+        .map_err(|_| KeyValidationError::BadIdentityKey("identity_key".to_owned()))?;
+    let signature = Signature::from_bytes(&sig_array);
+
+    verifying_key
+        .verify(&pre_key_bytes, &signature)
+        .map_err(|_| KeyValidationError::SignatureMismatch)?;
+
+    Ok(pre_key_bytes)
 }
 
 // ============================================================
@@ -171,6 +259,99 @@ pub fn from_base64(encoded: &str) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── signed pre-key verification ───────────────────────────────────────────
+    //
+    // Real Ed25519 keypairs, generated per test. A verifier proven only against
+    // hand-written constants is a verifier nobody has watched reject a forgery.
+
+    use ed25519_dalek::{Signer, SigningKey};
+    use rand_core::{OsRng, RngCore};
+
+    /// (identity_key_b64, signed_pre_key_b64, signature_b64)
+    fn signed_bundle() -> (String, String, String) {
+        let mut seed = [0u8; 32];
+        OsRng.fill_bytes(&mut seed);
+        let signing = SigningKey::from_bytes(&seed);
+
+        // A real X25519 public key is 32 bytes; any 32 bytes are structurally
+        // valid here, and what is under test is the signature over them.
+        let mut pre_key = [0u8; 32];
+        OsRng.fill_bytes(&mut pre_key);
+
+        let sig = signing.sign(&pre_key);
+        (
+            to_base64(&signing.verifying_key().to_bytes()),
+            to_base64(&pre_key),
+            to_base64(&sig.to_bytes()),
+        )
+    }
+
+    #[test]
+    fn a_correctly_signed_pre_key_verifies() {
+        let (ik, spk, sig) = signed_bundle();
+        let out = verify_signed_pre_key(&ik, &spk, &sig).expect("valid bundle must verify");
+        assert_eq!(
+            out,
+            from_base64(&spk).unwrap(),
+            "returns the bytes it authenticated"
+        );
+    }
+
+    #[test]
+    fn random_bytes_of_the_right_length_are_rejected() {
+        // The exact hole this closes: the old check accepted any 64 bytes.
+        let (ik, spk, _) = signed_bundle();
+        let forged = to_base64(&[7u8; 64]);
+        assert!(matches!(
+            verify_signed_pre_key(&ik, &spk, &forged),
+            Err(KeyValidationError::SignatureMismatch)
+        ));
+    }
+
+    #[test]
+    fn a_signature_from_a_different_identity_is_rejected() {
+        // The attack that matters: a genuine signature made by the wrong key.
+        // Serving that bundle lets an attacker substitute their own pre-key.
+        let (ik_a, _, _) = signed_bundle();
+        let (_, spk_b, sig_b) = signed_bundle();
+        assert!(matches!(
+            verify_signed_pre_key(&ik_a, &spk_b, &sig_b),
+            Err(KeyValidationError::SignatureMismatch)
+        ));
+    }
+
+    #[test]
+    fn a_tampered_pre_key_is_rejected() {
+        // Signature genuine, but the pre-key it covers was swapped underneath.
+        let (ik, _, sig) = signed_bundle();
+        let mut other = [0u8; 32];
+        OsRng.fill_bytes(&mut other);
+        assert!(matches!(
+            verify_signed_pre_key(&ik, &to_base64(&other), &sig),
+            Err(KeyValidationError::SignatureMismatch)
+        ));
+    }
+
+    #[test]
+    fn a_malformed_identity_key_is_rejected_not_panicked() {
+        // 32 bytes that are not a meaningful Ed25519 public key. Length checks
+        // pass, so this reaches the crypto — and on a public endpoint it must
+        // come back as an error, never a panic.
+        //
+        // The variant is deliberately not pinned. dalek does not reject every
+        // malformed encoding at `from_bytes`; some only fail when a signature
+        // is checked against them, surfacing as SignatureMismatch rather than
+        // BadIdentityKey. Which of the two comes back is dalek's business.
+        // What this asserts is what callers depend on: rejected, and still
+        // running.
+        let (_, spk, sig) = signed_bundle();
+        for bad in [[0xFFu8; 32], [0x00u8; 32], [0x01u8; 32]] {
+            let r = verify_signed_pre_key(&to_base64(&bad), &spk, &sig);
+            assert!(r.is_err(), "malformed identity key must not verify");
+        }
+    }
+
 
     #[test]
     fn safety_number_is_deterministic() {

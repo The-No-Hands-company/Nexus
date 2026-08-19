@@ -43,6 +43,12 @@ pub struct Device {
     /// Ed25519 signature over `signed_pre_key`, base64-encoded
     pub signed_pre_key_sig: String,
     pub signed_pre_key_id: i32,
+    /// When the signed pre-key was last replaced.
+    ///
+    /// Separate from `updated_at`, which also moves on renames and last-seen
+    /// touches and so cannot report the age of the key. Optional because rows
+    /// that predate the column carry no value until backfilled.
+    pub signed_pre_key_rotated_at: Option<DateTime<Utc>>,
     pub device_type: DeviceType,
     pub last_seen_at: Option<DateTime<Utc>>,
     pub verified: bool,
@@ -74,6 +80,13 @@ pub struct KeyBundle {
     pub signed_pre_key: String,
     pub signed_pre_key_sig: String,
     pub signed_pre_key_id: i32,
+    /// When this signed pre-key was last replaced, if known.
+    ///
+    /// Included so an initiator can judge the age of the key it is about to
+    /// use. The server does not refuse to serve a stale bundle — a stale key
+    /// is worth more than no key, and refusing would break messaging outright
+    /// — so the decision belongs to the peer, which needs the fact to make it.
+    pub signed_pre_key_rotated_at: Option<DateTime<Utc>>,
     /// One-time pre-key — may be absent if the server ran out
     pub one_time_pre_key: Option<OtpkPublic>,
 }

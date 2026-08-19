@@ -254,59 +254,60 @@ fn ensure_ai_generation_writes_enabled() -> NexusResult<()> {
     }
 }
 
+/// 501 until something actually scores toxicity.
+///
+/// `create_toxicity_score` exists in the repository and has no caller anywhere
+/// in the workspace, so this table can never be written and the endpoint could
+/// only ever answer `[]`. For a moderation surface that is the worst possible
+/// lie: an empty list reads as "we scanned this server and found nothing
+/// harmful", when nothing scanned anything. A caller acting on that would be
+/// acting on a clean bill of health that was never issued.
+///
+/// Restore the body below when an inference backend lands; the repository
+/// query it used is still there and still correct.
 async fn list_flagged_toxicity(
-    State(state): State<Arc<AppState>>,
-    Extension(ctx): Extension<AuthContext>,
-    Path(server_id): Path<Uuid>,
-    Query(q): Query<LimitQuery>,
+    State(_state): State<Arc<AppState>>,
+    Extension(_ctx): Extension<AuthContext>,
+    Path(_server_id): Path<Uuid>,
+    Query(_q): Query<LimitQuery>,
 ) -> NexusResult<Json<Vec<ToxicityScore>>> {
-    let _m: Option<Member> = members::find_member(&state.db.pool, ctx.user_id, server_id)
-        .await
-        .map_err(|e| NexusError::Internal(e.into()))?;
-    if _m.is_none() {
-        return Err(NexusError::Forbidden);
-    }
-
-    let rows =
-        ai_intelligence::list_flagged_toxicity(&state.db.pool, server_id, q.limit.unwrap_or(100))
-            .await
-            .map_err(|e| NexusError::Internal(e.into()))?;
-    Ok(Json(rows))
+    Err(NexusError::NotImplemented {
+        feature: "Toxicity scoring".to_string(),
+    })
 }
 
+/// 501 until something actually detects raids.
+///
+/// Same shape as toxicity above: `create_raid_detection` has no caller, so an
+/// empty list would mean "no raid is happening" rather than "nobody is
+/// watching". An operator checking this during an actual raid would be
+/// reassured by silence.
 async fn list_raid_detections(
-    State(state): State<Arc<AppState>>,
-    Extension(ctx): Extension<AuthContext>,
-    Path(server_id): Path<Uuid>,
-    Query(q): Query<LimitQuery>,
+    State(_state): State<Arc<AppState>>,
+    Extension(_ctx): Extension<AuthContext>,
+    Path(_server_id): Path<Uuid>,
+    Query(_q): Query<LimitQuery>,
 ) -> NexusResult<Json<Vec<RaidDetection>>> {
-    let _m: Option<Member> = members::find_member(&state.db.pool, ctx.user_id, server_id)
-        .await
-        .map_err(|e| NexusError::Internal(e.into()))?;
-    if _m.is_none() {
-        return Err(NexusError::Forbidden);
-    }
-
-    let rows =
-        ai_intelligence::list_raid_detections(&state.db.pool, server_id, q.limit.unwrap_or(50))
-            .await
-            .map_err(|e| NexusError::Internal(e.into()))?;
-    Ok(Json(rows))
+    Err(NexusError::NotImplemented {
+        feature: "Raid detection".to_string(),
+    })
 }
 
+/// 501 until speech-to-text exists.
+///
+/// `create_voice_transcript` has no caller, so this is an empty list forever.
+/// Less dangerous than the two above — nobody is harmed by believing a call
+/// was not transcribed — but equally untrue, and a client cannot tell "no
+/// transcripts yet" from "transcription is not a thing here".
 async fn list_voice_transcripts(
-    State(state): State<Arc<AppState>>,
-    Extension(ctx): Extension<AuthContext>,
-    Path(channel_id): Path<Uuid>,
-    Query(q): Query<LimitQuery>,
+    State(_state): State<Arc<AppState>>,
+    Extension(_ctx): Extension<AuthContext>,
+    Path(_channel_id): Path<Uuid>,
+    Query(_q): Query<LimitQuery>,
 ) -> NexusResult<Json<Vec<VoiceTranscript>>> {
-    ensure_channel_server_membership(&state, ctx.user_id, channel_id).await?;
-
-    let rows =
-        ai_intelligence::list_voice_transcripts(&state.db.pool, channel_id, q.limit.unwrap_or(100))
-            .await
-            .map_err(|e| NexusError::Internal(e.into()))?;
-    Ok(Json(rows))
+    Err(NexusError::NotImplemented {
+        feature: "Voice transcription".to_string(),
+    })
 }
 
 async fn list_ai_consent(

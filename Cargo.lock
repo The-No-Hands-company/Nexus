@@ -4615,6 +4615,7 @@ dependencies = [
  "chrono",
  "config",
  "dotenvy",
+ "ed25519-dalek",
  "hex",
  "jsonwebtoken",
  "pqcrypto-dilithium",
